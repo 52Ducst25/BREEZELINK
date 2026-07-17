@@ -1,0 +1,618 @@
+/**
+ * Aircon -- project layer on top of the vendored "Titanium Command"
+ * design system (static/ds/, source: design-guiline). Loaded as its own
+ * <link ... ?v=> in base.html, AFTER ds/index.css, so cascade order lets
+ * these rules extend/override DS defaults.
+ *
+ * Rule: never redeclare something the DS already ships (.card, .btn,
+ * .input, .status-pill, .header, .badge, .progress, ...) -- templates use
+ * those DS classes directly. Only true additions live here:
+ *   1. semantic aliases mapping the AC thermal vocabulary onto real DS
+ *      status tokens (see "THERMAL COLOUR MAPPING" below)
+ *   2. the collapsible rail (DS has no sidebar/rail component)
+ *   3. comfort-domain widgets DS never needed: decision hero, pipeline
+ *      read-out, metric tiles, SVG charts, history tables, login layout
+ *
+ * No @import / @font-face from a CDN here -- see ds/base.css for the one
+ * deliberate edit to the vendored DS (dropped its Google Fonts @import)
+ * and why.
+ */
+
+/* ============================================================
+   THERMAL COLOUR MAPPING
+
+   dashboard_view.py computes a `level` string (cold/neutral/warm/hot/
+   unknown) in Python -- CSS cannot compare temperatures. Indoor, outdoor
+   and the AC mode all read off this SAME 4-step scale (never their own
+   hue) per the project's colour rule: colour encodes THERMAL STATE, not
+   which sensor produced the reading.
+
+   The DS ships 4 generic UI-feedback colours (status-success/error/
+   warning/info) meant for form/connectivity feedback, not a domain
+   vocabulary -- so rather than inventing new raw colours (which would
+   violate "use tokens that actually exist"), these aliases just point at
+   the DS's own semantic tokens. Same pattern SafeKitchen used for its
+   --sk-ok/--sk-near/--sk-alarm aliases over the same DS.
+   ============================================================ */
+:root {
+  --ac-cold: var(--status-info);       /* below target/band -> blue reads "cool" */
+  --ac-neutral: var(--status-success); /* on target -> green reads "good" */
+  --ac-warm: var(--status-warning);    /* above target/band -> amber */
+  --ac-hot: var(--status-error);       /* well above -> red */
+  --ac-unknown: var(--text-muted);     /* no data yet */
+}
+
+.ac-level--cold { color: var(--ac-cold); border-color: var(--ac-cold) !important; }
+.ac-level--neutral { color: var(--ac-neutral); border-color: var(--ac-neutral) !important; }
+.ac-level--warm { color: var(--ac-warm); border-color: var(--ac-warm) !important; }
+.ac-level--hot { color: var(--ac-hot); border-color: var(--ac-hot) !important; }
+.ac-level--unknown { color: var(--ac-unknown); }
+
+/* ============================================================
+   RAIL (collapsible left nav) -- DS has no sidebar component, only a
+   fixed top .header. Rail pushes content right via padding-left on
+   body; collapse persists in localStorage (app.js) and is applied
+   before first paint by the inline script in base.html.
+   ============================================================ */
+body.has-rail { --rail-w: 240px; padding-left: var(--rail-w); }
+html.rail-collapsed body.has-rail { --rail-w: 64px; }
+body.has-rail .header { left: var(--rail-w); } /* DS's .header defaults to left:0 */
+
+.ac-rail {
+  position: fixed; inset: 0 auto 0 0; width: var(--rail-w); z-index: 60;
+  display: flex; flex-direction: column;
+  background: var(--bg-secondary);
+  border-right: var(--border-width-sm) solid var(--border-subtle);
+  transition: width var(--duration-normal) var(--ease-default);
+  overflow: hidden;
+}
+.ac-rail__top {
+  display: flex; align-items: center; gap: var(--space-2);
+  height: 64px; padding: 0 var(--space-3);
+  border-bottom: var(--border-width-sm) solid var(--border-subtle);
+}
+.ac-rail__home { display: flex; align-items: center; gap: var(--space-2); flex: 1 1 auto; min-width: 0; color: var(--text-primary); }
+.ac-rail__brand { font: var(--label-base); font-weight: var(--weight-black); letter-spacing: var(--tracking-tight); white-space: nowrap; }
+.ac-accent { color: var(--accent-primary); }
+
+.ac-rail__toggle {
+  flex: 0 0 auto; display: grid; place-items: center; width: 34px; height: 34px;
+  color: var(--text-muted); border: var(--border-width-sm) solid var(--border-subtle);
+  clip-path: var(--shape-chamfer-sm);
+  transition: color var(--duration-fast) var(--ease-default), border-color var(--duration-fast) var(--ease-default);
+}
+.ac-rail__toggle:hover { color: var(--accent-primary); border-color: var(--accent-primary); }
+.ac-rail__toggle:active { transform: scale(0.94); }
+
+/* Square linecap/miter join (not round) to match the DS's own icon
+   language (components/icons.css .icon) rather than the softer rounded
+   caps the earlier bespoke rail used. */
+.ac-rail__ico {
+  width: 20px; height: 20px; flex: 0 0 auto;
+  fill: none; stroke: currentColor; stroke-width: 2;
+  stroke-linecap: square; stroke-linejoin: miter;
+}
+
+.ac-rail__nav { display: flex; flex-direction: column; padding: var(--space-3) var(--space-2); gap: 2px; }
+.ac-rail__item {
+  display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3);
+  white-space: nowrap; color: var(--text-muted);
+  border-left: var(--border-width-md) solid transparent;
+  transition: background var(--duration-fast) var(--ease-default), color var(--duration-fast) var(--ease-default);
+}
+.ac-rail__item:hover { background: var(--bg-subtle); color: var(--text-primary); }
+.ac-rail__item.is-active { color: var(--accent-primary); background: rgba(0, 85, 255, 0.08); border-left-color: var(--accent-primary); }
+.ac-rail__label { overflow: hidden; text-overflow: ellipsis; }
+.ac-rail__foot { margin-top: auto; padding: var(--space-3); border-top: var(--border-width-sm) solid var(--border-subtle); }
+.ac-rail__who { display: block; font-size: var(--text-xs); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Live-feed dot: red until app.js's WebSocket delivers its first message,
+   then green + a gentle pulse (reuses the DS's own @keyframes
+   status-pulse from components/status.css -- no new keyframe defined
+   here). Encodes CONNECTIVITY, not thermal state, so it deliberately does
+   NOT use the --ac-* aliases above. */
+.ac-live { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); }
+.ac-live__dot {
+  width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto;
+  background: var(--status-error);
+  transition: background var(--duration-fast) var(--ease-default);
+}
+.ac-live.is-live .ac-live__dot { background: var(--status-success); animation: status-pulse 2s ease-in-out infinite; }
+
+html.rail-collapsed .ac-rail__label,
+html.rail-collapsed .ac-rail__brand,
+html.rail-collapsed .ac-rail__who { display: none; }
+html.rail-collapsed .ac-rail__item,
+html.rail-collapsed .ac-rail__top,
+html.rail-collapsed .ac-live { justify-content: center; }
+
+/* ============================================================
+   MAIN CONTENT -- .container is the DS's own utility (base.css); this
+   only adds the top offset for the fixed 64px header + bottom breathing
+   room, same constant SafeKitchen's .sk-main used for the same reason.
+   ============================================================ */
+.ac-main { padding-block: calc(64px + var(--space-6)) var(--space-12); }
+
+.ac-section-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-4); }
+.ac-section-title { font: var(--caps-base); text-transform: uppercase; letter-spacing: var(--tracking-widest); color: var(--text-secondary); }
+.ac-count { font: var(--tech-code); color: var(--text-muted); }
+
+.ac-empty { padding: var(--space-12); text-align: center; border: var(--border-width-md) dashed var(--border-default); color: var(--text-secondary); }
+
+/* ============================================================
+   COMFORT DECISION HERO -- the AI's current setpoint/mode + why. DS has
+   no equivalent pattern (closest is the kiosk payment-result-card, too
+   kiosk-specific to reuse); "chamfer-xl" utility applied in the template
+   instead of redeclaring a clip-path here.
+   ============================================================ */
+.ac-hero {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-6); flex-wrap: wrap;
+  padding: var(--space-8); margin-bottom: var(--space-6);
+  background: var(--bg-secondary);
+  border: var(--border-width-lg) solid var(--border-default);
+}
+.ac-hero__setpoint { font: var(--tech-price-lg); line-height: 1; }
+.ac-hero__setpoint-unit { font: var(--heading-3); color: var(--text-muted); margin-left: var(--space-2); }
+.ac-hero__mode {
+  display: inline-block; margin-top: var(--space-3); padding: var(--space-2) var(--space-4);
+  font: var(--caps-base); letter-spacing: var(--tracking-widest);
+  clip-path: var(--shape-chamfer-sm);
+  border: var(--border-width-md) solid var(--border-default);
+}
+.ac-hero__reason { font: var(--body-sm); color: var(--text-muted); max-width: 360px; }
+
+/* ============================================================
+   PIPELINE READ-OUT -- intermediate steps of the comfort algorithm.
+   ============================================================ */
+.ac-pipeline { display: flex; align-items: stretch; gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-8); }
+.ac-pipeline__step { flex: 1 1 140px; padding: var(--space-4); background: var(--bg-subtle); border: var(--border-width-sm) solid var(--border-subtle); }
+.ac-pipeline__label { font: var(--tech-code); text-transform: uppercase; letter-spacing: var(--tracking-widest); color: var(--text-muted); }
+.ac-pipeline__value { display: block; font: var(--tech-price); margin-top: var(--space-1); }
+.ac-pipeline__arrow { display: flex; align-items: center; color: var(--text-muted); font: var(--heading-3); flex: 0 0 auto; }
+
+/* ============================================================
+   METRIC TILES -- indoor/outdoor/latest-reading numbers. Box chrome
+   comes from the DS's own "card card-sm" (applied in the template);
+   only the label/value/sub typography stack is app-specific.
+   ============================================================ */
+.ac-tile__label { font: var(--caps-sm); text-transform: uppercase; letter-spacing: var(--tracking-widest); color: var(--text-secondary); }
+.ac-tile__value { display: block; font: var(--tech-price-lg); font-size: var(--text-4xl); margin-top: var(--space-2); }
+.ac-tile__sub { font: var(--tech-label); color: var(--text-muted); }
+
+/* ============================================================
+   GRIDS -- plain CSS grid, deliberately NOT the DS's ".card-grid" class.
+   ".card-grid > .card" (animations/cards.css) plays an unconditional
+   entrance keyframe on every matching child; app.js's realtime refresh
+   replaces #main's innerHTML on every WebSocket push, which would replay
+   that entrance on every tick. A plain grid class keeps each .card's
+   hover/press feedback (free from the DS) while the one-time page
+   entrance stays solely on ".page-content-stagger", which app.js already
+   strips before swapping in fresh HTML.
+   ============================================================ */
+.ac-tiles { display: grid; gap: var(--space-4); grid-template-columns: repeat(2, 1fr); margin-bottom: var(--space-8); }
+.ac-devices { display: grid; gap: var(--space-5); grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+.ac-charts { display: grid; gap: var(--space-4); grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); margin-bottom: var(--space-8); }
+
+/* ============================================================
+   DEVICE CARDS -- template uses "card card-selectable ac-device"; hover
+   lift / press-scale / focus ring all come free from the DS once
+   "card-selectable" is applied. Only the meta line + offline dimming are
+   app-specific.
+   ============================================================ */
+.ac-device__meta { font: var(--tech-code); color: var(--text-muted); text-transform: uppercase; letter-spacing: var(--tracking-wide); margin-top: var(--space-1); }
+.ac-device--offline { opacity: 0.65; border-style: dashed; }
+
+/* Gentle pulse on the "online" pill's dot -- reuses the DS's own
+   @keyframes status-pulse (components/status.css); the DS applies that
+   keyframe to .status-dot-pulse but never to .status-pill's own ::before
+   dot, so this is a targeted extension, not a redefinition. */
+.status-pill-active::before { animation: status-pulse 2s ease-in-out infinite; }
+
+/* ============================================================
+   SVG CHARTS -- server-rendered line charts (web/charts.py), no
+   Chart.js. Colour is fixed to --accent-primary: the reading being
+   charted is always the one metric the current page is about, so
+   there's no sensor-identity ambiguity to resolve via --ac-* here.
+   ============================================================ */
+.ac-chart { padding: var(--space-4); background: var(--bg-secondary); border: var(--border-width-md) solid var(--border-default); }
+.ac-chart__cap { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: var(--space-3); }
+.ac-chart__name { font: var(--caps-sm); text-transform: uppercase; letter-spacing: var(--tracking-widest); color: var(--text-secondary); }
+.ac-chart__last { font: var(--tech-price); font-size: var(--text-xl); }
+.ac-chart__svg { width: 100%; height: 120px; display: block; }
+.ac-chart__line { fill: none; stroke: var(--accent-primary); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.ac-chart__area { fill: rgba(0, 85, 255, 0.08); stroke: none; }
+.ac-chart__setpoint { stroke: var(--status-warning); stroke-width: 1; stroke-dasharray: 4 3; opacity: 0.8; }
+.ac-chart__foot { display: flex; gap: var(--space-4); margin-top: var(--space-2); font: var(--tech-code); color: var(--text-muted); }
+.ac-chart__empty { padding: var(--space-8) 0; text-align: center; color: var(--text-muted); font: var(--body-sm); }
+
+/* ============================================================
+   HISTORY TABLES -- DS ships no table component.
+   ============================================================ */
+.ac-table-wrap { overflow-x: auto; margin-bottom: var(--space-8); border: var(--border-width-sm) solid var(--border-subtle); }
+.ac-table { width: 100%; border-collapse: collapse; font: var(--body-sm); }
+.ac-table th {
+  text-align: left; padding: var(--space-3) var(--space-4); background: var(--bg-subtle);
+  font: var(--tech-code); text-transform: uppercase; letter-spacing: var(--tracking-wide);
+  color: var(--text-secondary); white-space: nowrap; border-bottom: var(--border-width-md) solid var(--border-default);
+}
+.ac-table td { padding: var(--space-2) var(--space-4); border-bottom: var(--border-width-sm) solid var(--border-subtle); white-space: nowrap; }
+.ac-table tbody tr:last-child td { border-bottom: none; }
+.ac-num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* DS's .text-mono (base.css) only sets font-family; tabular-nums keeps
+   digit columns aligned when a value ticks over (e.g. 21.5 -> 9.5). */
+.text-mono { font-variant-numeric: tabular-nums; }
+
+/* ============================================================
+   FORM ROW -- horizontal field grouping the DS doesn't define (its form
+   system is single-column by design).
+   ============================================================ */
+.form-row { display: flex; gap: var(--space-4); flex-wrap: wrap; }
+.form-row .form-group { flex: 1 1 200px; min-width: 0; }
+
+/* Destructive action -- the DS only ships service colours (wash/dry) plus
+   primary/secondary/ghost; deleting a user needs --status-error. */
+.btn-danger { background: var(--status-error); border-color: var(--color-black); }
+.btn-danger:hover { filter: brightness(0.9); }
+
+/* ============================================================
+   LOGIN
+   ============================================================ */
+.ac-login-wrap { min-height: 100vh; display: grid; place-items: center; padding: var(--space-6); }
+.ac-login { width: 100%; max-width: 380px; }
+.ac-login__brand { font: var(--heading-2); line-height: 1.3; text-transform: uppercase; letter-spacing: var(--tracking-tight); text-align: center; margin-bottom: var(--space-2); }
+.ac-login__tagline { font: var(--tech-code); text-transform: uppercase; letter-spacing: var(--tracking-widest); color: var(--text-muted); text-align: center; margin-bottom: var(--space-8); }
+.ac-login .form-group { margin-bottom: var(--space-4); }
+.ac-login .btn { width: 100%; margin-top: var(--space-2); }
+
+/* ============================================================
+   DETAIL HEAD (device detail page) -- breadcrumb itself uses the DS's
+   real .header-breadcrumb* classes directly in the template.
+   ============================================================ */
+.ac-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-6); }
+.ac-detail-head__main { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+.ac-detail-title { font: var(--heading-3); line-height: 1.3; text-transform: uppercase; }
+
+/* Back button -- the DS ships no back/up control (its .header-breadcrumb is a
+   trail, not a button), so this borrows the rail toggle's chrome to stay in
+   the same visual family rather than inventing a third button style. */
+.ac-back {
+  flex: 0 0 auto; display: grid; place-items: center; width: 36px; height: 36px;
+  color: var(--text-muted); border: var(--border-width-sm) solid var(--border-subtle);
+  clip-path: var(--shape-chamfer-sm);
+  transition: color var(--duration-fast) var(--ease-default),
+              border-color var(--duration-fast) var(--ease-default);
+}
+.ac-back:hover { color: var(--accent-primary); border-color: var(--accent-primary); }
+.ac-back:active { transform: scale(0.94); }
+.ac-back__ico { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: square; stroke-linejoin: miter; }
+
+.ac-kv { font: var(--tech-label); color: var(--text-secondary); }
+.ac-kv b { font-family: var(--font-mono); color: var(--text-primary); }
+
+/* ============================================================
+   VENDOR / CUSTOMER PAGES
+
+   The DS ships .input-sm, .btn-sm, .card-sm, .badge-* already — only the
+   things it has no opinion about live here: the sale form's horizontal field
+   row, the code chips, and a small-select to pair with its own .input-sm
+   (that one variant it genuinely lacks).
+   ============================================================ */
+
+.ac-sell-form { padding: var(--space-5); display: flex; flex-direction: column; gap: var(--space-4); }
+.ac-sell-form__row { display: flex; gap: var(--space-4); align-items: flex-end; flex-wrap: wrap; }
+.ac-field { display: flex; flex-direction: column; gap: var(--space-2); flex: 1 1 200px; min-width: 0; }
+.ac-field--num { flex: 0 0 100px; }
+.ac-field__label {
+  font: var(--tech-code); text-transform: uppercase;
+  letter-spacing: var(--tracking-widest); color: var(--text-muted);
+}
+.ac-form-note { font: var(--body-sm); color: var(--text-muted); }
+
+/* Pairs with the DS's .input-sm so an inline row of inputs and a select line
+   up; the DS styles .select but ships no small variant. */
+.select-sm { padding: var(--space-1) var(--space-2); font-size: var(--text-sm); }
+
+/* Codes are read aloud and typed by hand -> mono + wide tracking so 0/O and
+   1/7 stay distinguishable, tabular so they do not jitter between rows. */
+.ac-code-chip {
+  display: inline-block; padding: 2px 10px;
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  letter-spacing: var(--tracking-wide);
+  background: rgba(0, 85, 255, 0.08);
+  border: var(--border-width-sm) solid var(--border-subtle);
+  clip-path: var(--shape-chamfer-sm);
+}
+.ac-codes { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-3); }
+
+.ac-codes-banner {
+  display: flex; gap: var(--space-4); padding: var(--space-5) var(--space-6);
+  margin-bottom: var(--space-6);
+  border: var(--border-width-lg) solid var(--status-success);
+  background: rgba(0, 204, 102, 0.08);
+}
+.ac-codes-banner__title {
+  font: var(--caps-base); text-transform: uppercase;
+  letter-spacing: var(--tracking-widest); color: var(--status-success);
+}
+.ac-codes-banner__note { font: var(--body-sm); color: var(--text-secondary); margin-top: var(--space-1); }
+
+.ac-row-actions { display: flex; gap: var(--space-2); align-items: center; }
+.ac-addcode { display: flex; gap: var(--space-2); align-items: center; }
+.ac-addcode__n { width: 64px; text-align: center; }
+
+.ac-link { color: var(--accent-primary); }
+.ac-muted { color: var(--text-muted); }
+
+/* Read-only customer info (name / phone / email) — replaces the old edit form,
+   since the data comes from the app now. */
+.ac-info-card {
+  display: flex; flex-wrap: wrap; gap: var(--space-8);
+  padding: var(--space-5) var(--space-6);
+}
+.ac-info-item { display: flex; flex-direction: column; gap: var(--space-1); }
+.ac-info-value { font: var(--label-base); font-weight: var(--weight-semibold); }
+/* Email is the one the vendor copies for SMTP — let it be selected easily and
+   never truncate. */
+.ac-info-email { user-select: all; word-break: break-all; }
+
+/* Table cells hold inline edit forms on the customer page -> let them breathe
+   vertically and stop nowrap from squeezing the inputs to nothing. */
+.ac-table td .input, .ac-table td .select { min-width: 110px; }
+
+/* ============================================================
+   FLEET DASHBOARD — status chart + customer accordion
+   ============================================================ */
+
+.ac-status-chart { padding: var(--space-6); margin-bottom: var(--space-8); }
+.ac-status-chart__head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: var(--space-6); flex-wrap: wrap; margin-bottom: var(--space-4);
+}
+.ac-status-chart__headline {
+  display: block; font: var(--tech-price-lg); line-height: 1;
+  font-variant-numeric: tabular-nums; margin-block: var(--space-2) var(--space-1);
+}
+.ac-status-chart__of { font: var(--heading-3); color: var(--text-muted); }
+
+.ac-status-chart__legend { display: flex; flex-direction: column; gap: var(--space-2); }
+.ac-legend-item {
+  display: flex; align-items: center; gap: var(--space-2);
+  font: var(--body-sm); color: var(--text-secondary);
+}
+.ac-legend-item b { font-variant-numeric: tabular-nums; color: var(--text-primary); }
+
+/* The DS attaches an INFINITE white sweep to every .progress-bar via ::after
+   (components/status.css @keyframes progress-shine) with no opt-out class. On
+   a monitoring page it is motion for its own sake — it pulls the eye to a bar
+   that is not changing, and the guideline's own rule is "don't animate for
+   decoration". The one-shot progress-grow scale-in stays. */
+.ac-status-chart .progress-bar::after { content: none; }
+
+.ac-fleet-list { display: flex; flex-direction: column; gap: var(--space-3); }
+
+/* ---------- Accordion (hand-built: the DS ships none) ---------- */
+
+.ac-group { padding: 0; overflow: hidden; }
+.ac-group--alert { border-color: var(--status-error); border-width: var(--border-width-md); }
+
+.ac-group__head {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-4) var(--space-5); cursor: pointer;
+  list-style: none; /* Firefox */
+  transition: background var(--duration-fast) var(--ease-default);
+}
+.ac-group__head::-webkit-details-marker { display: none; } /* Safari/Chrome */
+.ac-group__head:hover { background: var(--bg-subtle); }
+.ac-group__head:focus-visible { outline: var(--border-width-md) solid var(--accent-primary); outline-offset: -2px; }
+
+/* Chevron points right when closed, down when open. Rotation only — no height
+   animation, because <details> has no interpolatable open/closed height and
+   faking one costs a JS measure on every toggle. */
+.ac-group__chev {
+  flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 2;
+  stroke-linecap: square; stroke-linejoin: miter; color: var(--text-muted);
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+.ac-group[open] .ac-group__chev { transform: rotate(90deg); color: var(--accent-primary); }
+
+.ac-group__name { font: var(--label-base); font-weight: var(--weight-bold); }
+.ac-group__contact { font: var(--tech-code); color: var(--text-muted); }
+.ac-group__counts { margin-left: auto; }
+.ac-group__open { flex: 0 0 auto; }
+
+.ac-group__body {
+  padding: 0 var(--space-5) var(--space-5);
+  border-top: var(--border-width-sm) solid var(--border-subtle);
+}
+/* Namespaced: the DS already defines content-reveal/slide-up/fade-in, and
+   duplicate @keyframes names resolve last-definition-wins across the whole
+   cascade — reusing one would silently hijack it. */
+@keyframes ac-group-reveal {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.ac-group[open] .ac-group__body {
+  animation: ac-group-reveal var(--duration-fast) var(--ease-out);
+  padding-top: var(--space-4);
+}
+
+.ac-group__nodes {
+  display: grid; gap: var(--space-3);
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+}
+
+.ac-node {
+  display: block; padding: var(--space-4); color: inherit;
+  background: var(--bg-subtle);
+  border: var(--border-width-sm) solid var(--border-subtle);
+  clip-path: var(--shape-chamfer-sm);
+  transition: transform var(--duration-fast) var(--ease-out),
+              border-color var(--duration-fast) var(--ease-default);
+}
+.ac-node:hover { transform: translateY(-2px); border-color: var(--accent-primary); }
+.ac-node:active { transform: scale(0.99); }
+.ac-node--offline { opacity: 0.7; border-style: dashed; }
+.ac-node__top { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.ac-node__name { font: var(--label-base); font-weight: var(--weight-semibold); }
+.ac-node__reading {
+  display: flex; align-items: baseline; gap: var(--space-3);
+  margin-top: var(--space-3); padding-top: var(--space-3);
+  border-top: var(--border-width-sm) solid var(--border-subtle);
+  font: var(--tech-price); font-size: var(--text-xl); font-variant-numeric: tabular-nums;
+}
+
+/* Replaces the inline style= that config.html used on every <h3>. */
+.ac-form-group-title { margin-block: var(--space-6) var(--space-4); }
+.card > .ac-form-group-title:first-child { margin-block-start: 0; }
+.ac-field--narrow { max-width: 260px; }
+
+/* ============================================================
+   APP RELEASES (OTA)
+   ============================================================ */
+
+.ac-current-release {
+  display: flex; align-items: center; gap: var(--space-8); flex-wrap: wrap;
+  padding: var(--space-6);
+  border-color: var(--accent-primary);
+  border-width: var(--border-width-md);
+}
+.ac-current-release__meta { display: flex; flex-direction: column; gap: var(--space-1); }
+
+/* Changelog can be a paragraph; let it wrap instead of stretching the table. */
+.ac-table td.ac-cell-wrap {
+  white-space: normal; min-width: 180px; max-width: 420px; word-break: break-word;
+}
+
+.ac-sell-form textarea.input { resize: vertical; font-family: inherit; }
+
+/* ============================================================
+   SEARCH + DANGER ZONE
+   ============================================================ */
+
+.ac-search { display: flex; gap: var(--space-2); align-items: center; margin-left: auto; }
+.ac-search__box { min-width: 240px; }
+
+/* Deliberately loud and set apart: this is the one control on the page that
+   destroys data with no undo. */
+.ac-danger-title { color: var(--status-error); }
+.ac-danger-zone {
+  border-color: var(--status-error);
+  border-width: var(--border-width-md);
+  background: rgba(255, 51, 51, 0.04);
+  display: flex; flex-direction: column; gap: var(--space-4);
+  padding: var(--space-5);
+}
+
+@media (max-width: 639px) {
+  .ac-search { margin-left: 0; width: 100%; }
+  .ac-search__box { min-width: 0; flex: 1 1 auto; }
+}
+
+/* ============================================================
+   AJAX SAVE TOAST — centred green check on a data-ajax form save
+   ============================================================ */
+
+.ac-toast {
+  position: fixed; inset: 0; z-index: 3000;
+  display: grid; place-items: center; pointer-events: none;
+  opacity: 0; transition: opacity var(--duration-normal) var(--ease-default);
+}
+.ac-toast.is-in { opacity: 1; }
+
+.ac-toast__box {
+  display: flex; flex-direction: column; align-items: center; gap: var(--space-3);
+  padding: var(--space-8) var(--space-10);
+  background: var(--bg-secondary);
+  border: var(--border-width-md) solid var(--status-success);
+  clip-path: var(--shape-chamfer-md);
+  box-shadow: var(--shadow-xl);
+  transform: scale(0.9);
+  transition: transform var(--duration-normal) var(--ease-spring);
+}
+.ac-toast.is-in .ac-toast__box { transform: scale(1); }
+.ac-toast--err .ac-toast__box { border-color: var(--status-error); }
+
+.ac-toast__ico {
+  width: 56px; height: 56px; fill: none;
+  stroke: var(--status-success); stroke-width: 4;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+.ac-toast--err .ac-toast__ico { stroke: var(--status-error); }
+/* Draw the ring, then the check — self-contained, namespaced keyframes so they
+   can't collide with the DS's own success-* animations. r=24 circumference
+   ≈151; the check path ≈40. */
+.ac-toast__ico circle {
+  stroke-dasharray: 151; stroke-dashoffset: 151;
+  animation: ac-toast-ring var(--duration-slow) var(--ease-out) forwards;
+}
+.ac-toast__ico path {
+  stroke-dasharray: 40; stroke-dashoffset: 40;
+  animation: ac-toast-mark var(--duration-normal) var(--ease-out) 0.22s forwards;
+}
+@keyframes ac-toast-ring { to { stroke-dashoffset: 0; } }
+@keyframes ac-toast-mark { to { stroke-dashoffset: 0; } }
+
+/* Spinner shown while a slow request (APK upload) is in flight. */
+.ac-toast__spin {
+  width: 44px; height: 44px; border-radius: 50%;
+  border: 4px solid var(--border-subtle);
+  border-top-color: var(--accent-primary);
+  animation: ac-toast-spin 0.7s linear infinite;
+}
+@keyframes ac-toast-spin { to { transform: rotate(360deg); } }
+
+.ac-toast__txt { font: var(--label-base); font-weight: var(--weight-bold); color: var(--text-primary); }
+
+/* In-app Yes/No confirmation — replaces the native confirm() dialog. Same
+   centred, spring-in language as the toast, but interactive (a dimmed
+   backdrop, focusable buttons). */
+.ac-confirm {
+  position: fixed; inset: 0; z-index: 3100;
+  display: grid; place-items: center; padding: var(--space-6);
+  background: rgba(0, 0, 0, 0.5);
+  opacity: 0; transition: opacity var(--duration-fast) var(--ease-default);
+}
+.ac-confirm.is-in { opacity: 1; }
+.ac-confirm__box {
+  display: flex; flex-direction: column; align-items: center; gap: var(--space-4);
+  max-width: 380px; padding: var(--space-8);
+  text-align: center;
+  background: var(--bg-secondary);
+  border: var(--border-width-md) solid var(--status-error);
+  clip-path: var(--shape-chamfer-md);
+  box-shadow: var(--shadow-xl);
+  transform: scale(0.9);
+  transition: transform var(--duration-normal) var(--ease-spring);
+}
+.ac-confirm.is-in .ac-confirm__box { transform: scale(1); }
+.ac-confirm__ico {
+  width: 48px; height: 48px; fill: none;
+  stroke: var(--status-error); stroke-width: 3;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+.ac-confirm__msg { font: var(--body-base); color: var(--text-primary); margin: 0; }
+.ac-confirm__actions { display: flex; gap: var(--space-3); }
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width: 767px) {
+  body.has-rail { --rail-w: 56px; }
+  body.has-rail .ac-rail__label,
+  body.has-rail .ac-rail__brand,
+  body.has-rail .ac-rail__who { display: none; }
+  body.has-rail .ac-rail__item,
+  body.has-rail .ac-rail__top { justify-content: center; }
+}
+
+@media (max-width: 639px) {
+  .ac-tiles { grid-template-columns: 1fr; }
+  .ac-devices { grid-template-columns: 1fr; }
+  .ac-charts { grid-template-columns: 1fr; }
+  .ac-group__nodes { grid-template-columns: 1fr; }
+  /* The header row has five things in it; let them stack rather than crush
+     the customer's name to an ellipsis on a phone. */
+  .ac-group__head { flex-wrap: wrap; }
+  .ac-group__counts { margin-left: 0; }
+}

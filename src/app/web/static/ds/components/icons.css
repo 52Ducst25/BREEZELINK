@@ -1,0 +1,413 @@
+/**
+ * Icons - The Clean Lab
+ * "Titanium Command" Icon System
+ *
+ * Design principles:
+ * - Square linecaps (stroke-linecap: square)
+ * - Miter joins (stroke-linejoin: miter)
+ * - 2px stroke weight
+ * - No fill (outline style)
+ */
+
+/* ========================================
+   BASE ICON
+   ======================================== */
+
+.icon {
+  /* Display */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+
+  /* SVG styling */
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: square;
+  stroke-linejoin: miter;
+  fill: none;
+
+  /* Default size */
+  width: 24px;
+  height: 24px;
+}
+
+/* ========================================
+   ICON SIZES
+   ======================================== */
+
+.icon-xs {
+  width: 12px;
+  height: 12px;
+  stroke-width: 1.5;
+}
+
+.icon-sm {
+  width: 16px;
+  height: 16px;
+  stroke-width: 1.5;
+}
+
+.icon-md {
+  width: 24px;
+  height: 24px;
+  stroke-width: 2;
+}
+
+.icon-lg {
+  width: 32px;
+  height: 32px;
+  stroke-width: 2;
+}
+
+.icon-xl {
+  width: 48px;
+  height: 48px;
+  stroke-width: 2.5;
+}
+
+.icon-2xl {
+  width: 64px;
+  height: 64px;
+  stroke-width: 3;
+}
+
+/* ========================================
+   ICON COLORS
+   ======================================== */
+
+.icon-primary {
+  color: var(--accent-primary);
+}
+
+.icon-secondary {
+  color: var(--text-secondary);
+}
+
+.icon-muted {
+  color: var(--text-muted);
+}
+
+.icon-inverse {
+  color: var(--text-inverse);
+}
+
+.icon-success {
+  color: var(--status-success);
+}
+
+.icon-error {
+  color: var(--status-error);
+}
+
+.icon-warning {
+  color: var(--status-warning);
+}
+
+.icon-info {
+  color: var(--status-info);
+}
+
+.icon-wash {
+  color: var(--accent-wash);
+}
+
+.icon-dry {
+  color: var(--accent-dry);
+}
+
+/* ========================================
+   ICON BUTTON
+   ======================================== */
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: var(--space-2);
+  background: transparent;
+  border: var(--border-width-md) solid transparent;
+  clip-path: var(--shape-chamfer-sm);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.icon-btn:hover {
+  background: var(--color-gray-100);
+  border-color: var(--border-subtle);
+}
+
+.icon-btn:active {
+  transform: scale(0.96);
+}
+
+.icon-btn:focus-visible {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px rgba(0, 85, 255, 0.15);
+}
+
+.icon-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.icon-btn:disabled:hover {
+  background: transparent;
+  border-color: transparent;
+}
+
+/* Icon button sizes */
+.icon-btn-sm {
+  width: 36px;
+  height: 36px;
+  padding: var(--space-1);
+}
+
+.icon-btn-lg {
+  width: 56px;
+  height: 56px;
+  padding: var(--space-3);
+}
+
+/* Icon button variants */
+.icon-btn-primary {
+  background: var(--accent-primary);
+  color: var(--text-inverse);
+  border-color: var(--color-black);
+}
+
+.icon-btn-primary:hover {
+  background: var(--accent-primary-hover);
+}
+
+.icon-btn-secondary {
+  background: var(--bg-secondary);
+  border-color: var(--border-strong);
+}
+
+.icon-btn-secondary:hover {
+  background: var(--color-gray-100);
+  border-color: var(--accent-primary);
+}
+
+/* ========================================
+   ICON WITH TEXT
+   ======================================== */
+
+.icon-text {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.icon-text-reverse {
+  flex-direction: row-reverse;
+}
+
+/* ========================================
+   ICON CONTAINER (Background shape)
+   ======================================== */
+
+.icon-container {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  background: var(--bg-subtle);
+  border: var(--border-width-md) solid var(--border-default);
+  clip-path: var(--shape-chamfer-sm);
+}
+
+.icon-container-sm {
+  width: 32px;
+  height: 32px;
+}
+
+.icon-container-lg {
+  width: 64px;
+  height: 64px;
+  clip-path: var(--shape-chamfer-md);
+}
+
+.icon-container-xl {
+  width: 96px;
+  height: 96px;
+  clip-path: var(--shape-chamfer-lg);
+}
+
+/* Container variants */
+.icon-container-primary {
+  background: var(--accent-primary);
+  color: var(--text-inverse);
+  border-color: var(--accent-primary);
+}
+
+.icon-container-inverse {
+  background: var(--bg-inverse);
+  color: var(--text-inverse);
+  border-color: var(--color-black);
+}
+
+.icon-container-wash {
+  background: var(--accent-wash);
+  color: var(--text-inverse);
+  border-color: var(--accent-wash);
+}
+
+.icon-container-dry {
+  background: var(--accent-dry);
+  color: var(--text-inverse);
+  border-color: var(--accent-dry);
+}
+
+/* ========================================
+   FILLED ICONS (Exception to outline rule)
+   ======================================== */
+
+.icon-filled {
+  fill: currentColor;
+  stroke: none;
+}
+
+/* ========================================
+   ICON ANIMATIONS
+   ======================================== */
+
+.icon-spin {
+  animation: icon-spin 1s linear infinite;
+}
+
+@keyframes icon-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.icon-pulse {
+  animation: icon-pulse 2s ease-in-out infinite;
+}
+
+@keyframes icon-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* ========================================
+   SERVICE ICONS (Washing Machine, Dryer)
+   ======================================== */
+
+.icon-service {
+  width: 64px;
+  height: 64px;
+  stroke-width: 2.5;
+}
+
+.icon-service-wash {
+  color: var(--accent-wash);
+}
+
+.icon-service-dry {
+  color: var(--accent-dry);
+}
+
+/* ========================================
+   ICON BADGE (Icon with notification)
+   ======================================== */
+
+.icon-badge-container {
+  position: relative;
+  display: inline-flex;
+}
+
+.icon-badge-dot {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 12px;
+  height: 12px;
+  background: var(--status-error);
+  border: 2px solid var(--bg-secondary);
+  border-radius: 50%;
+}
+
+.icon-badge-count {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  min-width: 20px;
+  height: 20px;
+  padding: var(--space-1);
+  background: var(--status-error);
+  color: var(--text-inverse);
+  border: 2px solid var(--bg-secondary);
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: var(--weight-bold);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ========================================
+   ICON GRID (Multiple icons layout)
+   ======================================== */
+
+.icon-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: var(--space-4);
+  text-align: center;
+}
+
+.icon-grid-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  cursor: pointer;
+  border: var(--border-width-md) solid transparent;
+  clip-path: var(--shape-chamfer-sm);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.icon-grid-item:hover {
+  background: var(--color-gray-100);
+  border-color: var(--border-subtle);
+}
+
+.icon-grid-label {
+  font: var(--label-sm);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+}
+
+/* ========================================
+   UTILITY CLASSES
+   ======================================== */
+
+/* Make icon inherit parent's text color */
+.icon-inherit {
+  color: inherit;
+}
+
+/* Disable pointer events on icon */
+.icon-static {
+  pointer-events: none;
+}
+
+/* Square stroke emphasis */
+.icon-bold {
+  stroke-width: 3;
+}

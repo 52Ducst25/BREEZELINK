@@ -1,0 +1,255 @@
+/**
+ * Base Styles - The Clean Lab
+ * "Titanium Command" Industrial/Tactical Design System
+ *
+ * Includes:
+ * - Font imports (Google Fonts)
+ * - CSS reset
+ * - Base element styles
+ * - Utility classes
+ */
+
+/* ========================================
+   FONT IMPORTS - REMOVED (vendoring deviation)
+   ======================================== */
+
+/* The upstream file @imports Inter/JetBrains Mono from fonts.googleapis.com
+   here. BreezeLink's admin can run with no outbound internet (LAN device
+   segment, see docker/docker-compose.vps.yml) and the project's own
+   no-CDN rule forbids adding a Google Fonts fetch to a monitoring page's
+   first paint. SafeKitchen made the same call vendoring this same DS
+   (static/ds/QUICK-START.md there notes "chỉ gỡ @import Google Fonts").
+   --font-display / --font-mono (tokens/foundation/typography.css) already
+   list full system-font fallback chains, so dropping the @import only
+   changes which font renders, never breaks the token contract. This is the
+   one deliberate edit to an otherwise byte-for-byte vendored file. */
+
+/* ========================================
+   DESIGN TOKENS
+   ======================================== */
+
+@import './tokens/index.css';
+
+/* ========================================
+   CSS RESET (Minimal, Modern)
+   ======================================== */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  min-height: 100vh;
+  line-height: var(--leading-normal);
+}
+
+img,
+picture,
+video,
+canvas,
+svg {
+  display: block;
+  max-width: 100%;
+}
+
+input,
+button,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  background: none;
+}
+
+/* Remove default list styles */
+ul,
+ol {
+  list-style: none;
+}
+
+/* ========================================
+   BASE ELEMENT STYLES
+   ======================================== */
+
+body {
+  font-family: var(--font-display);
+  color: var(--text-primary);
+  background-color: var(--bg-primary);
+}
+
+/* Headings */
+h1 {
+  font: var(--heading-1);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-tight);
+}
+
+h2 {
+  font: var(--heading-2);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-tight);
+}
+
+h3 {
+  font: var(--heading-3);
+}
+
+h4 {
+  font: var(--heading-4);
+}
+
+/* Body text */
+p {
+  font: var(--body-base);
+}
+
+/* Links */
+a {
+  color: var(--accent-primary);
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+a:hover {
+  color: var(--accent-primary-hover);
+}
+
+/* Code */
+code,
+pre {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+/* ========================================
+   UTILITY CLASSES - Chamfer Shapes
+   ======================================== */
+
+.chamfer-sm {
+  clip-path: var(--shape-chamfer-sm);
+}
+
+.chamfer-md {
+  clip-path: var(--shape-chamfer-md);
+}
+
+.chamfer-lg {
+  clip-path: var(--shape-chamfer-lg);
+}
+
+.chamfer-xl {
+  clip-path: var(--shape-chamfer-xl);
+}
+
+/* ========================================
+   UTILITY CLASSES - Tech Grid Background
+   ======================================== */
+
+.tech-grid {
+  background-image:
+    linear-gradient(var(--border-subtle) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border-subtle) 1px, transparent 1px);
+  background-size: 20px 20px;
+  background-position: -1px -1px;
+}
+
+/* Finer grid for detailed sections */
+.tech-grid-fine {
+  background-image:
+    linear-gradient(var(--border-subtle) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border-subtle) 1px, transparent 1px);
+  background-size: 10px 10px;
+  background-position: -1px -1px;
+}
+
+/* ========================================
+   UTILITY CLASSES - Tactical/HUD Elements
+   ======================================== */
+
+/* Scan-line effect overlay */
+.scan-lines {
+  position: relative;
+}
+
+.scan-lines::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0.03) 0px,
+    transparent 1px,
+    transparent 2px,
+    rgba(0, 0, 0, 0.03) 3px
+  );
+  pointer-events: none;
+}
+
+/* Hazard stripe pattern (borders/warnings) */
+.hazard-stripes {
+  background: repeating-linear-gradient(
+    45deg,
+    var(--status-warning),
+    var(--status-warning) 10px,
+    var(--color-black) 10px,
+    var(--color-black) 20px
+  );
+}
+
+/* Glows for interactive states */
+.glow-blue {
+  box-shadow: var(--glow-blue);
+}
+
+.glow-orange {
+  box-shadow: var(--glow-orange);
+}
+
+/* ========================================
+   UTILITY CLASSES - Typography
+   ======================================== */
+
+.text-caps {
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-widest);
+}
+
+.text-mono {
+  font-family: var(--font-mono);
+}
+
+/* ========================================
+   UTILITY CLASSES - Layout
+   ======================================== */
+
+.container {
+  width: 100%;
+  max-width: 1280px;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: var(--space-4);
+  padding-right: var(--space-4);
+}
+
+.container-wide {
+  width: 100%;
+  max-width: 1600px;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: var(--space-6);
+  padding-right: var(--space-6);
+}

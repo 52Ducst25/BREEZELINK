@@ -1,0 +1,332 @@
+/**
+ * Page Transitions - The Clean Lab
+ * "Titanium Command" Industrial/Tactical Design System
+ *
+ * Page/screen transitions for navigation flows
+ */
+
+/* ========================================
+   FADE TRANSITIONS
+   ======================================== */
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.page-enter {
+  animation: fade-in var(--duration-normal) var(--ease-out);
+}
+
+.page-exit {
+  animation: fade-out var(--duration-normal) var(--ease-in);
+}
+
+/* ========================================
+   SLIDE TRANSITIONS
+   ======================================== */
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slide-down {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+}
+
+.page-enter-slide {
+  animation: slide-up var(--duration-normal) var(--ease-out);
+}
+
+.page-exit-slide {
+  animation: slide-down var(--duration-normal) var(--ease-in);
+}
+
+/* ========================================
+   SLIDE FROM RIGHT (Forward Navigation)
+   ======================================== */
+
+@keyframes slide-from-right {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slide-to-left {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-100%);
+  }
+}
+
+.page-enter-forward {
+  animation: slide-from-right var(--duration-normal) var(--ease-out);
+}
+
+.page-exit-forward {
+  animation: slide-to-left var(--duration-normal) var(--ease-in);
+}
+
+/* ========================================
+   SLIDE FROM LEFT (Back Navigation)
+   ======================================== */
+
+@keyframes slide-from-left {
+  from {
+    opacity: 0;
+    transform: translateX(-100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slide-to-right {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+}
+
+.page-enter-back {
+  animation: slide-from-left var(--duration-normal) var(--ease-out);
+}
+
+.page-exit-back {
+  animation: slide-to-right var(--duration-normal) var(--ease-in);
+}
+
+/* ========================================
+   KIOSK SCREEN SWITCH
+   ======================================== */
+
+@keyframes screen-switch {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.kiosk-screen-transition {
+  animation: screen-switch var(--duration-slow) var(--ease-default);
+}
+
+/* ========================================
+   MODAL TRANSITIONS
+   ======================================== */
+
+@keyframes modal-overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes modal-overlay-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes modal-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes modal-scale-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+}
+
+.modal-overlay-enter {
+  animation: modal-overlay-in var(--duration-normal) var(--ease-out);
+}
+
+.modal-overlay-exit {
+  animation: modal-overlay-out var(--duration-normal) var(--ease-in);
+}
+
+.modal-content-enter {
+  animation: modal-scale-in var(--duration-normal) var(--ease-out);
+}
+
+.modal-content-exit {
+  animation: modal-scale-out var(--duration-normal) var(--ease-in);
+}
+
+/* ========================================
+   ZOOM TRANSITIONS
+   ======================================== */
+
+@keyframes zoom-in {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes zoom-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.1);
+  }
+}
+
+.page-enter-zoom {
+  animation: zoom-in var(--duration-normal) var(--ease-out);
+}
+
+.page-exit-zoom {
+  animation: zoom-out var(--duration-normal) var(--ease-in);
+}
+
+/* ========================================
+   CROSSFADE
+   ======================================== */
+
+.page-crossfade {
+  position: relative;
+}
+
+.page-crossfade-exit {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  animation: fade-out var(--duration-slow) var(--ease-default);
+}
+
+.page-crossfade-enter {
+  animation: fade-in var(--duration-slow) var(--ease-default);
+}
+
+/* ========================================
+   STAGGERED CONTENT REVEAL
+   ======================================== */
+
+@keyframes content-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.page-content-stagger > * {
+  animation: content-reveal var(--duration-normal) var(--ease-out) both;
+}
+
+.page-content-stagger > *:nth-child(1) { animation-delay: 0ms; }
+.page-content-stagger > *:nth-child(2) { animation-delay: 50ms; }
+.page-content-stagger > *:nth-child(3) { animation-delay: 100ms; }
+.page-content-stagger > *:nth-child(4) { animation-delay: 150ms; }
+.page-content-stagger > *:nth-child(5) { animation-delay: 200ms; }
+.page-content-stagger > *:nth-child(6) { animation-delay: 250ms; }
+
+/* ========================================
+   REDUCED MOTION
+   ======================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  .page-enter,
+  .page-exit,
+  .page-enter-slide,
+  .page-exit-slide,
+  .page-enter-forward,
+  .page-exit-forward,
+  .page-enter-back,
+  .page-exit-back,
+  .page-enter-zoom,
+  .page-exit-zoom,
+  .kiosk-screen-transition,
+  .modal-overlay-enter,
+  .modal-overlay-exit,
+  .modal-content-enter,
+  .modal-content-exit,
+  .page-crossfade-enter,
+  .page-crossfade-exit {
+    animation-duration: var(--duration-instant);
+  }
+
+  .page-content-stagger > * {
+    animation: none;
+  }
+}

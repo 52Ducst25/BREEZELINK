@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block title %}Khách hàng — Aircon{% endblock %}
+{% block content %}
+
+{% if err %}<div class="status-banner status-banner-error" role="alert">{{ err }}</div>{% endif %}
+
+{# Codes appear once, right after the sale is recorded. They stay listed on the
+   customer's detail page, so this banner is a convenience, not the only copy. #}
+{% if new_codes %}
+<div class="ac-codes-banner chamfer-md">
+  <div>
+    <div class="ac-codes-banner__title">Đã tạo mã kích hoạt</div>
+    <p class="ac-codes-banner__note">Đưa mã này cho khách. Khách nhập mã trong app để tạo tài khoản. Mỗi mã dùng được một lần.</p>
+    <div class="ac-codes">
+      {% for c in new_codes %}<b class="ac-code-chip text-mono">{{ c }}</b>{% endfor %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{# ---------- BÁN HÀNG ---------- #}
+<div class="ac-section-head">
+  <h2 class="ac-section-title">Bán hàng — tạo sản phẩm mới</h2>
+</div>
+
+{# No customer name/phone here on purpose: a product is just a code plus its
+   nodes. The buyer's name and phone come from the app when they redeem the
+   code, and the customer list fills itself in (auth_service.register). #}
+<form class="card ac-sell-form" method="post" action="/web/customers">
+  <div class="ac-sell-form__row">
+    <label class="ac-field ac-field--num">
+      <span class="ac-field__label">Số node bán kèm</span>
+      <input class="input" name="num_nodes" type="number" value="2" min="0" max="20">
+    </label>
+    <button class="btn btn-primary" type="submit">Tạo sản phẩm + sinh mã</button>
+  </div>
+  <p class="ac-form-note">
+    Hệ thống sinh <b>một mã kích hoạt</b> gắn với sản phẩm này. Đưa mã cho khách —
+    khách nhập tên, SĐT và mã trong app, tên khách sẽ <b>tự hiện</b> ở danh sách bên dưới.
+    Node đầu tiên là <b>ngoài trời</b> (thuật toán cần đúng một điểm đo ngoài trời), còn lại là trong nhà;
+    thêm/bớt node sau trong trang khách hàng. Cần thêm mã cho điện thoại thứ hai thì cấp trong trang khách.
+  </p>
+</form>
+
+{# ---------- DANH SÁCH ---------- #}
+<div class="ac-section-head" style="margin-top: var(--space-8);">
+  <h2 class="ac-section-title">Khách hàng</h2>
+  {# GET, not POST: a search is a place you can bookmark, share and reload —
+     and it keeps the term in the URL, which is what app.js re-fetches when a
+     new customer registers, so an open search stays applied on refresh. #}
+  <form class="ac-search" method="get" action="/web/customers">
+    <input class="input input-sm ac-search__box" type="search" name="q" value="{{ q or '' }}"
+           placeholder="Tìm theo SĐT, tên, email…" aria-label="Tìm khách hàng">
+    <button class="btn btn-secondary btn-sm" type="submit">Tìm</button>
+    {% if q %}<a class="btn btn-ghost btn-sm" href="/web/customers">Xoá lọc</a>{% endif %}
+  </form>
+  {% if rows %}<span class="ac-count">{{ rows|length }}</span>{% endif %}
+</div>
+
+{% if not rows %}
+  {% if q %}
+    <p class="ac-empty chamfer-md">
+      Không có khách hàng nào khớp “{{ q }}”. <a class="ac-link" href="/web/customers">Xem tất cả</a>
+    </p>
+  {% else %}
+    <p class="ac-empty chamfer-md">Chưa có khách hàng nào. Dùng form trên để tạo khách đầu tiên.</p>
+  {% endif %}
+{% else %}
+<div class="ac-table-wrap chamfer-sm">
+  <table class="ac-table">
+    <thead>
+      <tr>
+        <th>Khách hàng</th>
+        <th>Liên hệ</th>
+        <th>Tài khoản</th>
+        <th>Node</th>
+        <th>Mã chưa dùng</th>
+        <th>Trạng thái</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td><a class="ac-link" href="/web/customers/{{ r.org.id }}"><b>{{ r.org.name }}</b></a></td>
+        <td>{{ r.org.contact or '—' }}</td>
+        <td>
+          {% if r.owner %}
+            <span class="ac-info-email"><!--email_off-->{{ r.owner.email }}<!--/email_off--></span>
+            {% if r.owner.phone %}<div class="ac-device__meta">{{ r.owner.phone }}</div>{% endif %}
+          {% else %}
+            <span class="ac-muted">Chưa đăng ký</span>
+          {% endif %}
+        </td>
+        <td class="ac-num">
+          {# online/total, not just a count: "3 node" hides that none of them
+             have ever reported in. #}
+          <b>{{ r.node_count }}</b>
+          {% if r.node_count %}<span class="ac-muted"> · {{ r.online_count }} trực tuyến</span>{% endif %}
+        </td>
+        <td class="ac-num"><b>{{ r.code_unused }}</b><span class="ac-muted"> / {{ r.code_total }}</span></td>
+        <td>
+          {% if not r.registered %}
+            <span class="status-pill status-pill-idle">Chưa kích hoạt</span>
+          {% elif r.online_count %}
+            <span class="status-pill status-pill-active">Đang chạy</span>
+          {% else %}
+            <span class="status-pill status-pill-idle">Ngoại tuyến</span>
+          {% endif %}
+        </td>
+        <td>
+          <a class="btn btn-ghost btn-sm" href="/web/customers/{{ r.org.id }}">Chi tiết</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

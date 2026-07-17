@@ -1,0 +1,443 @@
+/**
+ * HMI Kiosk Platform Styles - The Clean Lab
+ * "Titanium Command" Industrial/Tactical Design System
+ *
+ * Target: 21.5" 1080p touchscreen (1920x1080)
+ * Viewing distance: 50-100cm
+ * Touch target: 82px minimum (21px spacing)
+ * Base font: 20px for distance readability
+ *
+ * Kiosk-specific features:
+ * - Enlarged touch targets
+ * - Increased typography
+ * - Hardware zone layouts
+ * - High contrast modes
+ */
+
+/* ========================================
+   KIOSK DISPLAY SPECS
+   ======================================== */
+
+:root {
+  --kiosk-width: 1920px;
+  --kiosk-height: 1080px;
+  --kiosk-dpi: 102; /* approx */
+}
+
+/* ========================================
+   KIOSK TOKEN OVERRIDES
+   Apply with .platform-kiosk class on root element
+   ======================================== */
+
+.platform-kiosk {
+  /* Touch targets - 82px minimum per HMI standards */
+  --touch-target-min: 82px;
+  --touch-target-spacing: 21px;
+
+  /* Typography - enlarged for distance viewing (50-100cm) */
+  --text-base: 20px;
+  --text-sm: 18px;
+  --text-lg: 24px;
+  --text-xl: 28px;
+  --text-2xl: 32px;
+  --text-3xl: 40px;
+  --text-4xl: 48px;
+
+  /* Spacing - increased for touch ergonomics */
+  --space-base: 24px;
+
+  /* Borders - stronger for visibility */
+  --border-width-md: 3px;
+  --border-width-lg: 4px;
+
+  /* Container - utilize full kiosk width */
+  --container-max: 1800px;
+}
+
+/* ========================================
+   KIOSK LAYOUT GRID
+   Full-screen app layout with hardware zone
+   ======================================== */
+
+.kiosk-layout {
+  display: grid;
+  grid-template-rows: 80px 1fr 200px;
+  height: 100vh;
+  width: 100vw;
+  background: var(--bg-primary);
+}
+
+/* Header bar - branding, time, status */
+.kiosk-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--space-8);
+  background: var(--bg-secondary);
+  border-bottom: var(--border-width-lg) solid var(--border-strong);
+}
+
+/* Main content area - interactive elements */
+.kiosk-content {
+  overflow-y: auto;
+  padding: var(--space-8);
+}
+
+/* Hardware zone - NFC, card reader, bill acceptor, printer */
+.kiosk-hardware-zone {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  background: var(--color-gray-100);
+  border-top: var(--border-width-lg) solid var(--border-strong);
+  padding: var(--space-6);
+}
+
+.kiosk-hardware-indicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+}
+
+.kiosk-hardware-icon {
+  width: 80px;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-secondary);
+  border: var(--border-width-md) solid var(--border-default);
+  clip-path: var(--shape-chamfer-lg);
+}
+
+/* ========================================
+   KIOSK BUTTONS - 82px MINIMUM
+   ======================================== */
+
+.btn-kiosk {
+  min-height: 82px;
+  min-width: 160px;
+  padding: var(--space-5) var(--space-8);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-bold);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  margin: calc(var(--touch-target-spacing) / 2);
+  border: var(--border-width-md) solid var(--border-default);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  clip-path: var(--shape-chamfer-md);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-kiosk:active {
+  transform: scale(0.98);
+  background: var(--color-gray-100);
+}
+
+.btn-kiosk-primary {
+  background: var(--accent-primary);
+  color: var(--color-white);
+  border-color: var(--accent-primary);
+}
+
+.btn-kiosk-primary:active {
+  background: var(--color-blue-600);
+}
+
+.btn-kiosk-wash {
+  background: var(--accent-wash);
+  color: var(--color-white);
+  border-color: var(--accent-wash);
+}
+
+.btn-kiosk-dry {
+  background: var(--accent-dry);
+  color: var(--color-white);
+  border-color: var(--accent-dry);
+}
+
+/* Large hero buttons - service selection */
+.btn-kiosk-hero {
+  min-height: 200px;
+  min-width: 300px;
+  font-size: var(--text-3xl);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+}
+
+/* ========================================
+   KIOSK CARDS - ENLARGED
+   ======================================== */
+
+.card-kiosk {
+  padding: var(--space-8);
+  min-height: 140px;
+  background: var(--bg-secondary);
+  border: var(--border-width-md) solid var(--border-default);
+  clip-path: var(--shape-chamfer-lg);
+}
+
+.card-kiosk-selectable {
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.card-kiosk-selectable:active {
+  transform: scale(0.98);
+  border-color: var(--accent-primary);
+  background: var(--color-gray-50);
+}
+
+.card-kiosk-selected {
+  border-color: var(--accent-primary);
+  border-width: var(--border-width-lg);
+  background: var(--color-blue-50, #f0f7ff);
+}
+
+/* ========================================
+   KIOSK TYPOGRAPHY - DISTANCE READABILITY
+   ======================================== */
+
+.kiosk-heading-1 {
+  font-size: 48px;
+  font-weight: var(--weight-black);
+  line-height: var(--leading-tight);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-tight);
+}
+
+.kiosk-heading-2 {
+  font-size: 40px;
+  font-weight: var(--weight-extrabold);
+  line-height: var(--leading-snug);
+  text-transform: uppercase;
+}
+
+.kiosk-heading-3 {
+  font-size: 32px;
+  font-weight: var(--weight-bold);
+  line-height: var(--leading-snug);
+}
+
+.kiosk-body {
+  font-size: 24px;
+  line-height: var(--leading-relaxed);
+}
+
+.kiosk-body-small {
+  font-size: 20px;
+  line-height: var(--leading-normal);
+}
+
+.kiosk-price {
+  font-size: 40px;
+  font-family: var(--font-mono);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-tight);
+}
+
+.kiosk-label {
+  font-size: 18px;
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-widest);
+  color: var(--text-muted);
+}
+
+/* ========================================
+   KIOSK INPUT - ENLARGED
+   ======================================== */
+
+.input-kiosk {
+  min-height: 72px;
+  font-size: var(--text-lg);
+  padding: var(--space-4) var(--space-6);
+  border: var(--border-width-md) solid var(--border-default);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  clip-path: var(--shape-chamfer-sm);
+}
+
+.input-kiosk:focus {
+  outline: 4px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+/* ========================================
+   KIOSK GRID LAYOUTS
+   ======================================== */
+
+.kiosk-grid {
+  display: grid;
+  gap: var(--space-6);
+  padding: var(--space-8);
+}
+
+/* Single column - step-by-step flow */
+.kiosk-grid-1 {
+  grid-template-columns: 1fr;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+/* 2 columns - machine selection, payment options */
+.kiosk-grid-2 {
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-8);
+}
+
+/* 3 columns - service packages, add-ons */
+.kiosk-grid-3 {
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-6);
+}
+
+/* ========================================
+   HIGH CONTRAST MODE
+   For bright ambient light conditions
+   ======================================== */
+
+.kiosk-high-contrast {
+  --text-primary: #000000;
+  --text-secondary: #111111;
+  --bg-primary: #ffffff;
+  --bg-secondary: #f8fafc;
+  --border-strong: #000000;
+  --accent-primary: #0044cc;
+  /* 7:1 contrast ratio minimum */
+}
+
+.kiosk-high-contrast .btn-kiosk {
+  border-width: var(--border-width-lg);
+}
+
+.kiosk-high-contrast .card-kiosk {
+  border-width: var(--border-width-lg);
+}
+
+/* ========================================
+   KIOSK STATUS INDICATORS
+   ======================================== */
+
+.kiosk-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-6);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  border: var(--border-width-md) solid;
+  clip-path: var(--shape-chamfer-sm);
+}
+
+.kiosk-status-success {
+  background: var(--status-success-bg);
+  border-color: var(--status-success);
+  color: var(--status-success-text);
+}
+
+.kiosk-status-warning {
+  background: var(--status-warning-bg);
+  border-color: var(--status-warning);
+  color: var(--status-warning-text);
+}
+
+.kiosk-status-error {
+  background: var(--status-error-bg);
+  border-color: var(--status-error);
+  color: var(--status-error-text);
+}
+
+/* ========================================
+   KIOSK PROGRESS INDICATORS
+   ======================================== */
+
+.kiosk-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-6) 0;
+}
+
+.kiosk-progress-step {
+  flex: 1;
+  height: 8px;
+  background: var(--color-gray-200);
+  position: relative;
+}
+
+.kiosk-progress-step.active {
+  background: var(--accent-primary);
+}
+
+.kiosk-progress-step.completed {
+  background: var(--status-success);
+}
+
+/* Step numbers */
+.kiosk-progress-step::before {
+  content: attr(data-step);
+  position: absolute;
+  top: -40px;
+  left: 0;
+  font-size: var(--text-xl);
+  font-weight: var(--weight-bold);
+  color: var(--text-muted);
+}
+
+.kiosk-progress-step.active::before,
+.kiosk-progress-step.completed::before {
+  color: var(--accent-primary);
+}
+
+/* ========================================
+   KIOSK UTILITY CLASSES
+   ======================================== */
+
+.kiosk-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.kiosk-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+}
+
+/* Timeout indicator for idle state */
+.kiosk-timeout {
+  position: fixed;
+  top: var(--space-4);
+  right: var(--space-4);
+  padding: var(--space-3) var(--space-6);
+  background: var(--status-warning-bg);
+  border: var(--border-width-md) solid var(--status-warning);
+  color: var(--status-warning-text);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
+  clip-path: var(--shape-chamfer-sm);
+  animation: pulse 1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}

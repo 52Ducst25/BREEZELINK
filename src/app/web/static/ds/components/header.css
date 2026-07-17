@@ -1,0 +1,341 @@
+/**
+ * Header - The Clean Lab
+ * "Titanium Command" Navigation System
+ *
+ * Features: Logo, Brand "LAUNDRY**OS**", Module code pattern
+ */
+
+/* ========================================
+   MAIN HEADER
+   ======================================== */
+
+.header {
+  /* Layout */
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--space-6);
+  z-index: 100;
+
+  /* Visual */
+  background: var(--bg-secondary);
+  border-bottom: var(--border-width-md) solid var(--border-strong);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Kiosk variant - larger touch targets */
+.header-kiosk {
+  height: 96px;
+  padding: 0 var(--space-8);
+}
+
+/* ========================================
+   LOGO SECTION
+   ======================================== */
+
+.header-logo {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  text-decoration: none;
+}
+
+/* Logo mark - chamfered square icon */
+.header-logo-mark {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-black);
+  color: var(--text-inverse);
+  clip-path: var(--shape-chamfer-sm);
+  font: var(--heading-3);
+  font-weight: var(--weight-black);
+  transition: background 0.15s ease;
+}
+
+.header-logo:hover .header-logo-mark {
+  background: var(--accent-primary);
+}
+
+.header-kiosk .header-logo-mark {
+  width: 60px;
+  height: 60px;
+  font: var(--heading-2);
+}
+
+/* ========================================
+   BRAND NAME "LAUNDRY**OS**"
+   ======================================== */
+
+.header-brand {
+  font: var(--heading-3);
+  font-weight: var(--weight-black);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-primary);
+}
+
+.header-brand-accent {
+  color: var(--text-muted);
+  font-weight: var(--weight-bold);
+}
+
+.header-kiosk .header-brand {
+  font: var(--heading-1);
+}
+
+/* ========================================
+   MODULE/SECTION IDENTIFIER
+   ======================================== */
+
+.header-module {
+  font: var(--tech-label);
+  color: var(--text-code);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-widest);
+  padding: var(--space-1) var(--space-3);
+  background: var(--bg-subtle);
+  border: var(--border-width-sm) solid var(--border-subtle);
+  clip-path: var(--shape-chamfer-sm);
+}
+
+.header-kiosk .header-module {
+  font: var(--tech-label-lg);
+  padding: var(--space-2) var(--space-4);
+}
+
+/* ========================================
+   NAVIGATION
+   ======================================== */
+
+.header-nav {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.header-nav-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  min-height: 44px;
+  font: var(--label-base);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  color: var(--text-primary);
+  text-decoration: none;
+  border: var(--border-width-md) solid transparent;
+  clip-path: var(--shape-chamfer-sm);
+  transition: background 0.15s ease, border-color 0.15s ease;
+  cursor: pointer;
+}
+
+.header-nav-item:hover {
+  background: var(--color-gray-100);
+  border-color: var(--border-subtle);
+}
+
+.header-nav-item[aria-current="page"],
+.header-nav-item.is-active {
+  background: var(--bg-inverse);
+  color: var(--text-inverse);
+  border-color: var(--accent-primary);
+}
+
+/* ========================================
+   HEADER ACTIONS (Right side)
+   ======================================== */
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* ========================================
+   STATUS DISPLAY (Time, Date, etc)
+   ======================================== */
+
+.header-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  font: var(--tech-label);
+  color: var(--text-code);
+  padding: var(--space-2) var(--space-4);
+  background: var(--bg-subtle);
+  border: var(--border-width-sm) solid var(--border-subtle);
+  clip-path: var(--shape-chamfer-sm);
+}
+
+.header-status-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.header-status-label {
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-widest);
+}
+
+.header-status-value {
+  font-weight: var(--weight-bold);
+}
+
+/* ========================================
+   USER INFO
+   ======================================== */
+
+.header-user {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  cursor: pointer;
+  border: var(--border-width-md) solid transparent;
+  clip-path: var(--shape-chamfer-sm);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.header-user:hover {
+  background: var(--color-gray-100);
+  border-color: var(--border-subtle);
+}
+
+.header-user-avatar {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-primary);
+  color: var(--text-inverse);
+  clip-path: var(--shape-chamfer-sm);
+  font: var(--label-sm);
+  font-weight: var(--weight-bold);
+}
+
+.header-user-name {
+  font: var(--label-base);
+  color: var(--text-primary);
+}
+
+.header-kiosk .header-user-avatar {
+  width: 48px;
+  height: 48px;
+  font: var(--label-lg);
+}
+
+/* ========================================
+   BREADCRUMB
+   ======================================== */
+
+.header-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font: var(--tech-label);
+  color: var(--text-code);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-widest);
+}
+
+.header-breadcrumb-item {
+  color: var(--text-muted);
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+.header-breadcrumb-item:hover {
+  color: var(--accent-primary);
+}
+
+.header-breadcrumb-separator {
+  color: var(--border-default);
+}
+
+.header-breadcrumb-item[aria-current="page"] {
+  color: var(--text-primary);
+  font-weight: var(--weight-bold);
+}
+
+/* ========================================
+   MOBILE MENU TOGGLE
+   ======================================== */
+
+.header-menu-toggle {
+  display: none;
+  width: 44px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: var(--border-width-md) solid var(--border-default);
+  clip-path: var(--shape-chamfer-sm);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.header-menu-toggle:hover {
+  background: var(--color-gray-100);
+}
+
+.header-menu-toggle:active {
+  transform: scale(0.96);
+}
+
+/* ========================================
+   RESPONSIVE
+   ======================================== */
+
+@media (max-width: 768px) {
+  .header {
+    padding: 0 var(--space-4);
+  }
+
+  .header-nav {
+    display: none;
+  }
+
+  .header-menu-toggle {
+    display: flex;
+  }
+
+  .header-brand {
+    font: var(--heading-4);
+  }
+
+  .header-logo-mark {
+    width: 36px;
+    height: 36px;
+  }
+
+  .header-status {
+    display: none;
+  }
+}
+
+/* Mobile menu open state */
+@media (max-width: 768px) {
+  .header-nav[data-open="true"] {
+    display: flex;
+    flex-direction: column;
+    position: absolute;
+    top: 64px;
+    left: 0;
+    right: 0;
+    background: var(--bg-secondary);
+    border-bottom: var(--border-width-md) solid var(--border-strong);
+    padding: var(--space-4);
+    gap: var(--space-2);
+  }
+}

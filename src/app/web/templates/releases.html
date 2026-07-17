@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block title %}Phiên bản app — Aircon{% endblock %}
+{% block content %}
+
+{% if err %}<div class="status-banner status-banner-error" role="alert">{{ err }}</div>{% endif %}
+
+{# ---------- BẢN ĐANG PHÁT HÀNH ---------- #}
+<div class="ac-section-head">
+  <h2 class="ac-section-title">Bản đang phát hành</h2>
+</div>
+
+{% if not current %}
+  <p class="ac-empty chamfer-md">Chưa phát hành bản nào. Tải APK lên bằng form bên dưới.</p>
+{% else %}
+<div class="card ac-current-release chamfer-md">
+  <div>
+    <div class="ac-tile__label">Phiên bản</div>
+    <span class="ac-hero__setpoint text-mono">{{ current.version_name }}</span>
+    <span class="ac-device__meta">build {{ current.version_code }}</span>
+  </div>
+  <div class="ac-current-release__meta">
+    <span class="ac-kv">Dung lượng <b>{{ (current.apk_size / 1048576)|round(1) }} MB</b></span>
+    <span class="ac-kv">Phát hành <b>{{ current.created_at|datetime }}</b></span>
+    {% if current.min_supported_code > 1 %}
+      <span class="ac-kv">Bắt buộc cập nhật nếu build &lt; <b>{{ current.min_supported_code }}</b></span>
+    {% endif %}
+  </div>
+  {% if current.changelog %}
+    <p class="ac-form-note">{{ current.changelog }}</p>
+  {% endif %}
+</div>
+{% endif %}
+
+{# ---------- TẢI BẢN MỚI ---------- #}
+<div class="ac-section-head" style="margin-top: var(--space-8);">
+  <h2 class="ac-section-title">Phát hành bản mới</h2>
+</div>
+
+{# enctype is REQUIRED — without it the browser sends only the filename as
+   text and the server receives no bytes at all. #}
+<form class="card ac-sell-form" method="post" action="/web/releases" enctype="multipart/form-data"
+      data-ajax="refresh" data-ajax-msg="Đã phát hành bản mới" data-ajax-pending="Đang tải lên APK…">
+  <div class="ac-sell-form__row">
+    <label class="ac-field">
+      <span class="ac-field__label">Tệp APK</span>
+      <input class="input" type="file" name="apk" accept=".apk,application/vnd.android.package-archive" required>
+    </label>
+    <label class="ac-field ac-field--num">
+      <span class="ac-field__label">Version code</span>
+      <input class="input" type="number" name="version_code" min="1" required
+             value="{{ (current.version_code + 1) if current else 1 }}">
+    </label>
+    <label class="ac-field ac-field--num">
+      <span class="ac-field__label">Tên phiên bản</span>
+      <input class="input" type="text" name="version_name" placeholder="1.0.1" required>
+    </label>
+  </div>
+  <div class="ac-sell-form__row">
+    <label class="ac-field">
+      <span class="ac-field__label">Có gì mới (hiện trong app)</span>
+      <textarea class="input" name="changelog" rows="2" placeholder="Sửa lỗi kết nối, thêm biểu đồ…"></textarea>
+    </label>
+    <label class="ac-field ac-field--num">
+      <span class="ac-field__label">Build tối thiểu</span>
+      <input class="input" type="number" name="min_supported_code" min="1" value="1">
+    </label>
+    <button class="btn btn-primary" type="submit">Phát hành</button>
+  </div>
+  <p class="ac-form-note">
+    <b>Version code</b> là số nguyên tăng dần — đây mới là thứ app dùng để so sánh mới/cũ,
+    không phải tên phiên bản (chuỗi "2.10.0" so sánh nhỏ hơn "2.9.0"). Phải khớp với
+    <code class="text-mono">version:</code> trong <code class="text-mono">pubspec.yaml</code> lúc build.
+    <b>Build tối thiểu</b> để 1 nghĩa là không ép ai cập nhật; đặt cao hơn sẽ buộc các bản cũ hơn phải cập nhật mới dùng được.
+  </p>
+</form>
+
+{# ---------- LỊCH SỬ ---------- #}
+<div class="ac-section-head" style="margin-top: var(--space-8);">
+  <h2 class="ac-section-title">Lịch sử phát hành</h2>
+  {% if releases %}<span class="ac-count">{{ releases|length }}</span>{% endif %}
+</div>
+
+{% if not releases %}
+  <p class="ac-empty chamfer-md">Chưa có bản nào.</p>
+{% else %}
+<div class="ac-table-wrap chamfer-sm">
+  <table class="ac-table">
+    <thead>
+      <tr><th>Phiên bản</th><th>Build</th><th>Dung lượng</th><th>Có gì mới</th><th>Ngày</th><th>Trạng thái</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for r in releases %}
+      <tr>
+        <td><b>{{ r.version_name }}</b></td>
+        <td class="ac-num">{{ r.version_code }}</td>
+        <td class="ac-num">{{ (r.apk_size / 1048576)|round(1) }} MB</td>
+        <td class="ac-cell-wrap">{{ r.changelog or '—' }}</td>
+        <td class="ac-num">{{ r.created_at|datetime }}</td>
+        <td>
+          {% if r.is_current %}
+            <span class="status-pill status-pill-active">Đang phát hành</span>
+          {% else %}
+            <span class="status-pill status-pill-idle">Lưu trữ</span>
+          {% endif %}
+        </td>
+        <td>
+          <div class="ac-row-actions">
+            <a class="btn btn-ghost btn-sm" href="/app/download/{{ r.apk_filename }}">Tải</a>
+            {% if not r.is_current %}
+            <form method="post" action="/web/releases/{{ r.id }}/current"
+                  data-ajax="refresh" data-ajax-msg="Đã đổi bản phát hành">
+              <button class="btn btn-secondary btn-sm" type="submit">Phát hành bản này</button>
+            </form>
+            {# Deleting the current build would leave the manifest advertising a
+               404, so the route refuses it and the button is hidden here. #}
+            <form method="post" action="/web/releases/{{ r.id }}/delete"
+                  data-ajax="refresh" data-ajax-msg="Đã xoá bản"
+                  data-ajax-confirm="Xoá bản {{ r.version_name }}? Tệp APK sẽ bị xoá khỏi máy chủ.">
+              <button class="btn btn-danger btn-sm" type="submit">Xoá</button>
+            </form>
+            {% endif %}
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

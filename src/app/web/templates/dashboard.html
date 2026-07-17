@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% block title %}Tổng quan — Aircon{% endblock %}
+{% block content %}
+
+{# Vendor landing page: every node sold, grouped under its customer, A→Z.
+   The per-household comfort view (setpoint, mode, why) lives in the customer's
+   app — see web/fleet_view for why the two are different questions. #}
+
+{# ---------- BIỂU ĐỒ TRẠNG THÁI ----------
+   Markup written against the SHIPPED css (components/status.css): outer
+   `.progress` is the track, inner `.progress-bar` is the fill, width set
+   inline. The DS docs describe `.progress-bar > .progress-bar-fill` with a
+   `--progress-value` custom property — none of those three exist in any
+   stylesheet, and using them renders an invisible element with no error.
+   Colour variants go on the OUTER element. #}
+<section class="ac-status-chart card chamfer-md" aria-label="Tình trạng kết nối toàn hệ thống">
+  <div class="ac-status-chart__head">
+    <div>
+      <div class="ac-tile__label">Tình trạng kết nối</div>
+      <span class="ac-status-chart__headline text-mono
+                   {% if summary.nodes and summary.online == summary.nodes %}ac-level--neutral
+                   {% elif summary.online %}ac-level--warm
+                   {% else %}ac-level--hot{% endif %}">
+        {{ summary.online }}<span class="ac-status-chart__of">/{{ summary.nodes }}</span>
+      </span>
+      <span class="ac-device__meta">node đang trực tuyến</span>
+    </div>
+
+    <div class="ac-status-chart__legend">
+      <span class="ac-legend-item">
+        <span class="status-dot status-dot-active"></span>
+        Trực tuyến <b class="text-mono">{{ summary.online }}</b>
+      </span>
+      <span class="ac-legend-item">
+        <span class="status-dot status-dot-idle"></span>
+        Ngoại tuyến <b class="text-mono">{{ summary.offline }}</b>
+      </span>
+      <span class="ac-legend-item">
+        <span class="status-dot status-dot-info"></span>
+        Khách hàng <b class="text-mono">{{ summary.customers }}</b>
+      </span>
+    </div>
+  </div>
+
+  {% if summary.nodes %}
+    {# progress-error when nothing is online: the track then reads as a full
+       red bar of "offline" rather than an empty box. A 0%-wide fill renders as
+       literally nothing, which is why the number above carries the meaning and
+       the bar only supports it. #}
+    <div class="progress progress-lg {% if summary.online %}progress-success{% else %}progress-error{% endif %}"
+         role="img" aria-label="{{ summary.online }} trên {{ summary.nodes }} node trực tuyến">
+      <div class="progress-bar" style="width: {{ summary.online_pct if summary.online else 100 }}%"></div>
+    </div>
+    <p class="ac-form-note">
+      {% if summary.online == 0 %}
+        Chưa node nào từng kết nối — bình thường nếu phần cứng chưa lắp đặt.
+      {% else %}
+        {{ summary.online_pct }}% node đang gửi số liệu.
+      {% endif %}
+    </p>
+  {% else %}
+    <p class="ac-form-note">Chưa có node nào được bán.</p>
+  {% endif %}
+</section>
+
+{# ---------- DANH SÁCH KHÁCH (A→Z), NODE GẬP/MỞ ---------- #}
+<div class="ac-section-head">
+  <h2 class="ac-section-title">Khách hàng &amp; node đã bán</h2>
+  {% if groups %}<span class="ac-count">{{ groups|length }}</span>{% endif %}
+</div>
+
+{% if not groups %}
+  <p class="ac-empty chamfer-md">
+    Chưa bán máy nào. Vào <a class="ac-link" href="/web/customers">Khách hàng</a> để tạo khách đầu tiên.
+  </p>
+{% else %}
+<div class="ac-fleet-list">
+  {% for g in groups %}
+  {# <details>, not a JS accordion: app.js replaces #main's innerHTML on every
+     WebSocket push, which would strip any hand-attached listener and slam every
+     panel shut mid-read. The browser owns this state natively, and it keeps
+     working with JS off. `open` on all-offline groups so the thing that needs
+     attention is not the thing hidden behind a click. #}
+  <details class="ac-group card chamfer-sm {% if g.all_offline and g.nodes %}ac-group--alert{% endif %}"
+           {% if g.all_offline and g.nodes %}open{% endif %}>
+    <summary class="ac-group__head">
+      <svg viewBox="0 0 24 24" width="16" height="16" class="ac-group__chev" aria-hidden="true">
+        <path d="M9 6l6 6-6 6"/>
+      </svg>
+
+      <span class="ac-group__name">{{ g.org.name }}</span>
+
+      {% if g.org.contact %}<span class="ac-group__contact">{{ g.org.contact }}</span>{% endif %}
+
+      <span class="ac-group__counts">
+        {% if not g.nodes %}
+          <span class="status-pill status-pill-idle">Chưa có node</span>
+        {% elif g.all_offline %}
+          <span class="status-pill status-pill-idle">{{ g.nodes|length }} node · tất cả ngoại tuyến</span>
+        {% else %}
+          <span class="status-pill status-pill-active">{{ g.online_count }}/{{ g.nodes|length }} trực tuyến</span>
+        {% endif %}
+      </span>
+
+      {# Deliberately NOT wrapping the whole row: a link inside <summary> would
+         fight the toggle. This one control jumps to the customer; the rest of
+         the row expands. #}
+      <a class="btn btn-ghost btn-sm ac-group__open" href="/web/customers/{{ g.org.id }}"
+         title="Mở trang khách hàng {{ g.org.name }}">Xem khách hàng →</a>
+    </summary>
+
+    <div class="ac-group__body">
+      {% if not g.nodes %}
+        <p class="ac-form-note">Khách này chưa được cấp node nào.</p>
+      {% else %}
+      <div class="ac-group__nodes">
+        {% for n in g.nodes %}
+        <a class="ac-node {% if not n.online %}ac-node--offline{% endif %}"
+           href="/web/customers/{{ g.org.id }}/devices/{{ n.device.id }}">
+          <div class="ac-node__top">
+            <span class="ac-node__name">{{ n.device.name }}</span>
+            {% if n.online %}
+              <span class="status-pill status-pill-active">Trực tuyến</span>
+            {% else %}
+              <span class="status-pill status-pill-idle">Ngoại tuyến</span>
+            {% endif %}
+          </div>
+          <div class="ac-device__meta">
+            {{ 'Nút ngoài trời' if n.device.node_type.value == 'outdoor' else 'Nút trong nhà' }}
+            {% if n.device.location %} · {{ n.device.location }}{% endif %}
+          </div>
+          {% if n.reading %}
+            <div class="ac-node__reading">
+              <span class="text-mono ac-level--{{ n.level }}">{{ '%.1f'|format(n.reading.t) }}°C</span>
+              <span class="ac-kv">Độ ẩm <b>{{ '%.0f'|format(n.reading.h) }}%</b></span>
+            </div>
+          {% else %}
+            <div class="ac-node__reading"><span class="ac-muted">Chưa có số đo</span></div>
+          {% endif %}
+          <div class="ac-device__meta">Lần cuối: {{ n.device.last_seen_at|datetime }}</div>
+        </a>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+  </details>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

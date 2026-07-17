@@ -1,0 +1,111 @@
+/**
+ * Button Animations - The Clean Lab
+ * "Titanium Command" Industrial/Tactical Design System
+ *
+ * Press effects, hover states, and loading animations
+ * for tactile button feedback
+ */
+
+/* ========================================
+   BASE BUTTON TRANSITIONS
+   ======================================== */
+
+.btn {
+  transition:
+    transform var(--duration-instant) var(--ease-out),
+    background var(--duration-fast) var(--ease-default),
+    border-color var(--duration-fast) var(--ease-default),
+    box-shadow var(--duration-fast) var(--ease-default);
+}
+
+/* ========================================
+   PRESS EFFECT
+   ======================================== */
+
+/* Active press - scale down for tactile feedback */
+.btn:active {
+  transform: scale(0.96);
+}
+
+/* ========================================
+   HOVER EFFECTS (Desktop/Web Only)
+   ======================================== */
+
+@media (hover: hover) {
+  /* Subtle lift on hover */
+  .btn:hover {
+    transform: translateY(-2px);
+  }
+
+  /* Combined hover + active press */
+  .btn:hover:active {
+    transform: scale(0.96) translateY(0);
+  }
+}
+
+/* ========================================
+   LOADING STATE
+   ======================================== */
+
+.btn-loading {
+  position: relative;
+  color: transparent;
+  pointer-events: none;
+}
+
+/* Spinner animation */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.btn-loading::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 20px;
+  height: 20px;
+  margin: -10px 0 0 -10px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin var(--duration-slow) linear infinite;
+}
+
+/* ========================================
+   DISABLED STATE
+   ======================================== */
+
+.btn:disabled,
+.btn[aria-disabled="true"] {
+  transition: none;
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.btn:disabled:active,
+.btn[aria-disabled="true"]:active {
+  transform: none;
+}
+
+/* ========================================
+   REDUCED MOTION
+   ======================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  .btn {
+    transition: none;
+  }
+
+  /* Preserve essential press feedback */
+  .btn:active {
+    transform: scale(0.98);
+  }
+
+  .btn-loading::after {
+    animation: none;
+    opacity: 0.6;
+  }
+}

@@ -1,0 +1,473 @@
+/**
+ * Forms - The Clean Lab
+ * "Titanium Command" Form System
+ *
+ * Components: input, textarea, select, checkbox, radio
+ * States: default, focus, error, disabled
+ */
+
+/* ========================================
+   TEXT INPUT
+   ======================================== */
+
+.input {
+  /* Layout */
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  min-height: 48px;
+
+  /* Visual */
+  background: var(--bg-secondary);
+  border: var(--border-width-md) solid var(--border-default);
+  clip-path: var(--shape-chamfer-sm);
+
+  /* Typography */
+  font: var(--body-base);
+  color: var(--text-primary);
+
+  /* Interaction */
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.input::placeholder {
+  color: var(--text-muted);
+}
+
+.input:hover {
+  border-color: var(--border-strong);
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px rgba(0, 85, 255, 0.15);
+}
+
+.input:disabled {
+  background: var(--color-gray-100);
+  color: var(--text-muted);
+  cursor: not-allowed;
+  border-color: var(--border-subtle);
+}
+
+/* Error state */
+.input-error,
+.input[aria-invalid="true"] {
+  border-color: var(--status-error);
+}
+
+.input-error:focus,
+.input[aria-invalid="true"]:focus {
+  box-shadow: 0 0 0 3px rgba(255, 51, 51, 0.15);
+}
+
+/* ========================================
+   INPUT SIZES
+   ======================================== */
+
+.input-sm {
+  padding: var(--space-2) var(--space-3);
+  min-height: 36px;
+  font-size: var(--text-sm);
+}
+
+.input-lg {
+  padding: var(--space-4) var(--space-5);
+  min-height: 56px;
+  font-size: var(--text-lg);
+}
+
+/* ========================================
+   TEXTAREA
+   ======================================== */
+
+.textarea {
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  min-height: 120px;
+  resize: vertical;
+  background: var(--bg-secondary);
+  border: var(--border-width-md) solid var(--border-default);
+  clip-path: var(--shape-chamfer-sm);
+  font: var(--body-base);
+  color: var(--text-primary);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.textarea::placeholder {
+  color: var(--text-muted);
+}
+
+.textarea:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px rgba(0, 85, 255, 0.15);
+}
+
+.textarea:disabled {
+  background: var(--color-gray-100);
+  color: var(--text-muted);
+  cursor: not-allowed;
+  resize: none;
+}
+
+/* ========================================
+   SELECT DROPDOWN
+   ======================================== */
+
+.select {
+  appearance: none;
+  width: 100%;
+  padding: var(--space-3) var(--space-10) var(--space-3) var(--space-4);
+  min-height: 48px;
+  background: var(--bg-secondary);
+  border: var(--border-width-md) solid var(--border-default);
+  clip-path: var(--shape-chamfer-sm);
+  font: var(--body-base);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+
+  /* Chevron icon */
+  background-image: url("data:image/svg+xml,%3Csvg width='16' height='16' viewBox='0 0 16 16' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M4 6L8 10L12 6' stroke='%23111111' stroke-width='2' stroke-linecap='square'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right var(--space-4) center;
+}
+
+.select:hover {
+  border-color: var(--border-strong);
+}
+
+.select:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px rgba(0, 85, 255, 0.15);
+}
+
+.select:disabled {
+  background-color: var(--color-gray-100);
+  color: var(--text-muted);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* ========================================
+   CHECKBOX
+   ======================================== */
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  cursor: pointer;
+  user-select: none;
+}
+
+.checkbox-input {
+  appearance: none;
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  background: var(--bg-secondary);
+  border: var(--border-width-md) solid var(--border-default);
+  clip-path: var(--shape-chamfer-sm);
+  cursor: pointer;
+  position: relative;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.checkbox-input:hover {
+  border-color: var(--border-strong);
+}
+
+.checkbox-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(0, 85, 255, 0.15);
+}
+
+.checkbox-input:checked {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+
+.checkbox-input:checked::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%) rotate(45deg);
+  width: 5px;
+  height: 10px;
+  border: solid var(--text-inverse);
+  border-width: 0 2px 2px 0;
+}
+
+.checkbox-input:disabled {
+  background: var(--color-gray-100);
+  border-color: var(--border-subtle);
+  cursor: not-allowed;
+}
+
+.checkbox-label {
+  font: var(--body-base);
+  color: var(--text-primary);
+}
+
+.checkbox-input:disabled ~ .checkbox-label {
+  color: var(--text-muted);
+}
+
+/* ========================================
+   RADIO BUTTON
+   ======================================== */
+
+.radio {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  cursor: pointer;
+  user-select: none;
+}
+
+.radio-input {
+  appearance: none;
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  background: var(--bg-secondary);
+  border: var(--border-width-md) solid var(--border-default);
+  border-radius: 50%; /* Exception: radio uses circles */
+  cursor: pointer;
+  position: relative;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.radio-input:hover {
+  border-color: var(--border-strong);
+}
+
+.radio-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(0, 85, 255, 0.15);
+}
+
+.radio-input:checked {
+  border-color: var(--accent-primary);
+}
+
+.radio-input:checked::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 10px;
+  height: 10px;
+  background: var(--accent-primary);
+  border-radius: 50%;
+}
+
+.radio-input:disabled {
+  background: var(--color-gray-100);
+  border-color: var(--border-subtle);
+  cursor: not-allowed;
+}
+
+.radio-label {
+  font: var(--body-base);
+  color: var(--text-primary);
+}
+
+.radio-input:disabled ~ .radio-label {
+  color: var(--text-muted);
+}
+
+/* ========================================
+   FORM GROUP
+   ======================================== */
+
+.form-group {
+  margin-bottom: var(--space-5);
+}
+
+.form-label {
+  display: block;
+  font: var(--label-base);
+  color: var(--text-primary);
+  margin-bottom: var(--space-2);
+}
+
+.form-label-required::after {
+  content: '*';
+  color: var(--status-error);
+  margin-left: var(--space-1);
+}
+
+.form-help {
+  display: block;
+  font: var(--body-sm);
+  color: var(--text-muted);
+  margin-top: var(--space-2);
+}
+
+.form-error {
+  display: block;
+  font: var(--body-sm);
+  color: var(--status-error);
+  margin-top: var(--space-2);
+}
+
+/* ========================================
+   INPUT GROUP (with icons/buttons)
+   ======================================== */
+
+.input-group {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+}
+
+.input-group .input {
+  flex: 1;
+}
+
+.input-group-prepend,
+.input-group-append {
+  display: flex;
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-subtle);
+  border: var(--border-width-md) solid var(--border-default);
+  font: var(--body-base);
+  color: var(--text-muted);
+}
+
+.input-group-prepend {
+  border-right: none;
+  clip-path: polygon(
+    8px 0,
+    100% 0,
+    100% 100%,
+    0 100%,
+    0 8px
+  );
+}
+
+.input-group-append {
+  border-left: none;
+  clip-path: polygon(
+    0 0,
+    100% 0,
+    100% calc(100% - 8px),
+    calc(100% - 8px) 100%,
+    0 100%
+  );
+}
+
+.input-group .input {
+  clip-path: none;
+  border-left: none;
+  border-right: none;
+}
+
+/* ========================================
+   FIELDSET
+   ======================================== */
+
+.fieldset {
+  border: var(--border-width-md) solid var(--border-default);
+  clip-path: var(--shape-chamfer-md);
+  padding: var(--space-6);
+  margin-bottom: var(--space-6);
+}
+
+.fieldset-legend {
+  font: var(--heading-4);
+  padding: 0 var(--space-3);
+  color: var(--text-primary);
+}
+
+/* ========================================
+   RADIO/CHECKBOX GROUP
+   ======================================== */
+
+.radio-group,
+.checkbox-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.radio-group-inline,
+.checkbox-group-inline {
+  flex-direction: row;
+  gap: var(--space-4);
+}
+
+/* ========================================
+   SWITCH TOGGLE
+   ======================================== */
+
+.switch {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  cursor: pointer;
+  user-select: none;
+}
+
+.switch-input {
+  appearance: none;
+  width: 48px;
+  height: 24px;
+  background: var(--color-gray-300);
+  border: var(--border-width-md) solid var(--border-default);
+  clip-path: var(--shape-chamfer-sm);
+  cursor: pointer;
+  position: relative;
+  transition: background 0.2s ease;
+}
+
+.switch-input::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: var(--bg-secondary);
+  clip-path: polygon(
+    4px 0,
+    100% 0,
+    100% calc(100% - 4px),
+    calc(100% - 4px) 100%,
+    0 100%,
+    0 4px
+  );
+  transition: transform 0.2s ease;
+}
+
+.switch-input:checked {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+
+.switch-input:checked::before {
+  transform: translateX(24px);
+}
+
+.switch-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(0, 85, 255, 0.15);
+}
+
+.switch-input:disabled {
+  background: var(--color-gray-200);
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.switch-label {
+  font: var(--body-base);
+  color: var(--text-primary);
+}

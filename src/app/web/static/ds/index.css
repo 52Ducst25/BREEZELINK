@@ -1,0 +1,305 @@
+/**
+ * The Clean Lab Design System - Main Entry Point
+ * "Titanium Command" Industrial/Tactical Design System
+ * Version: 1.0.0
+ *
+ * This file imports all design system styles in the correct order.
+ * Import this file in your application to get the complete design system.
+ *
+ * Usage:
+ *   <link rel="stylesheet" href="./src/styles/index.css">
+ *
+ * Or in your CSS:
+ *   @import './src/styles/index.css';
+ *
+ * Documentation: docs/design-guidelines/README.md
+ */
+
+/* ========================================
+   BASE STYLES
+   Reset, normalize, and base element styles
+   ======================================== */
+
+@import './base.css';
+
+/* ========================================
+   DESIGN TOKENS
+   Foundation, semantic, and component tokens
+   Single source of truth for all design values
+   ======================================== */
+
+@import './tokens/index.css';
+
+/* ========================================
+   COMPONENTS
+   Button, Card, Form, Header, Status, etc.
+   Reusable UI building blocks
+   ======================================== */
+
+@import './components/index.css';
+
+/* ========================================
+   PLATFORMS
+   Web, Mobile, Kiosk platform-specific styles
+   Adaptive styles for different environments
+   ======================================== */
+
+@import './platforms/index.css';
+
+/* ========================================
+   ANIMATIONS
+   Motion tokens and component animations
+   Interaction feedback and transitions
+   ======================================== */
+
+@import './animations/index.css';
+
+/* ========================================
+   ACCESSIBILITY
+   Reduced motion, high contrast, focus styles
+   ======================================== */
+
+/* Respect user motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  /* Preserve essential feedback */
+  .btn:active {
+    transform: scale(0.98);
+    transition: transform 0ms;
+  }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  :root {
+    --border-width-md: 3px;
+    --border-width-lg: 4px;
+  }
+
+  .btn,
+  .card,
+  .input {
+    border-width: var(--border-width-md);
+  }
+}
+
+/* Force colors in Windows High Contrast Mode */
+@media (forced-colors: active) {
+  .btn {
+    border: 2px solid currentColor;
+  }
+
+  .card {
+    border: 2px solid currentColor;
+  }
+}
+
+/* ========================================
+   PRINT STYLES
+   Optimized styles for printing
+   ======================================== */
+
+@media print {
+  /* Remove interactive elements */
+  .btn,
+  .header-nav,
+  .kiosk-hardware-zone {
+    display: none;
+  }
+
+  /* Optimize for print */
+  body {
+    background: white;
+    color: black;
+  }
+
+  .card {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Show URLs for links */
+  a[href]::after {
+    content: " (" attr(href) ")";
+    font-size: 0.8em;
+    color: #666;
+  }
+}
+
+/* ========================================
+   UTILITY CLASSES
+   Helper classes for common use cases
+   ======================================== */
+
+/* Screen reader only (accessible but invisible) */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* Skip to main content link (accessibility) */
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: 0;
+  background: var(--accent-primary);
+  color: var(--text-inverse);
+  padding: var(--space-3) var(--space-4);
+  z-index: 100;
+  clip-path: var(--shape-chamfer-sm);
+}
+
+.skip-link:focus {
+  top: 0;
+}
+
+/* Visually hidden but accessible */
+.visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+/* Display utilities */
+.hidden {
+  display: none !important;
+}
+
+.block {
+  display: block !important;
+}
+
+.inline-block {
+  display: inline-block !important;
+}
+
+.flex {
+  display: flex !important;
+}
+
+.inline-flex {
+  display: inline-flex !important;
+}
+
+.grid {
+  display: grid !important;
+}
+
+/* Text alignment */
+.text-left {
+  text-align: left !important;
+}
+
+.text-center {
+  text-align: center !important;
+}
+
+.text-right {
+  text-align: right !important;
+}
+
+/* Text transform */
+.uppercase {
+  text-transform: uppercase !important;
+}
+
+.lowercase {
+  text-transform: lowercase !important;
+}
+
+.capitalize {
+  text-transform: capitalize !important;
+}
+
+/* Font weights */
+.font-normal {
+  font-weight: var(--weight-regular) !important;
+}
+
+.font-medium {
+  font-weight: var(--weight-medium) !important;
+}
+
+.font-semibold {
+  font-weight: var(--weight-semibold) !important;
+}
+
+.font-bold {
+  font-weight: var(--weight-bold) !important;
+}
+
+.font-extrabold {
+  font-weight: var(--weight-extrabold) !important;
+}
+
+.font-black {
+  font-weight: var(--weight-black) !important;
+}
+
+/* Responsive utilities */
+@media (max-width: 639px) {
+  .hidden-mobile {
+    display: none !important;
+  }
+}
+
+@media (min-width: 640px) {
+  .hidden-desktop {
+    display: none !important;
+  }
+}
+
+/* ========================================
+   DEBUG MODE
+   Enable via class on <html> or <body>
+   Visualizes spacing, grid, and structure
+   ======================================== */
+
+.debug-mode * {
+  outline: 1px solid rgba(255, 0, 0, 0.3) !important;
+}
+
+.debug-mode *:hover {
+  outline: 2px solid rgba(255, 0, 0, 0.8) !important;
+}
+
+/* ========================================
+   DESIGN SYSTEM READY
+   All styles loaded successfully
+   ======================================== */
+
+/* This comment confirms successful import of all design system files */
+/* If you see this in dev tools, the design system is fully loaded */
+
+/*
+ * The Clean Lab Design System v1.0.0
+ * "Titanium Command" - Industrial/Tactical UI
+ *
+ * Documentation: docs/design-guidelines/README.md
+ * Quick Start: docs/design-guidelines/07-quick-start.md
+ * Components: docs/design-guidelines/03-components.md
+ * Tokens: docs/design-guidelines/02-design-tokens.md
+ *
+ * © 2025 The Clean Lab
+ */

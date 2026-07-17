@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}{{ device.name }} — Aircon{% endblock %}
+
+{% macro chart(name, s) %}
+  {# SVG built server-side (web/charts.py) — preserveAspectRatio="none" lets
+     it stretch to the card width; vector-effect keeps the stroke crisp at
+     any scale. No Chart.js, no build step. #}
+  <figure class="ac-chart chamfer-md">
+    <figcaption class="ac-chart__cap">
+      <span class="ac-chart__name">{{ name }}</span>
+      {% if s %}<span class="ac-chart__last">{{ s.last }} {{ s.unit }}</span>{% endif %}
+    </figcaption>
+    {% if s %}
+    <svg class="ac-chart__svg" viewBox="0 0 {{ s.vw }} {{ s.vh }}" preserveAspectRatio="none" role="img"
+         aria-label="{{ name }}: {{ s.min }}–{{ s.max }} {{ s.unit }}">
+      <polygon class="ac-chart__area" points="{{ s.area }}" />
+      {% if s.setpoint_y is not none %}
+      <line class="ac-chart__setpoint" x1="0" y1="{{ s.setpoint_y }}" x2="{{ s.vw }}" y2="{{ s.setpoint_y }}"
+            vector-effect="non-scaling-stroke" />
+      {% endif %}
+      <polyline class="ac-chart__line" points="{{ s.line }}" vector-effect="non-scaling-stroke" />
+    </svg>
+    <div class="ac-chart__foot">
+      <span>Nhỏ nhất {{ s.min }}</span>
+      <span>Lớn nhất {{ s.max }}</span>
+      {% if s.setpoint is not none %}<span>Nhiệt độ đặt {{ s.setpoint }} {{ s.unit }}</span>{% endif %}
+    </div>
+    {% else %}
+    <p class="ac-chart__empty">Chưa đủ dữ liệu để vẽ biểu đồ</p>
+    {% endif %}
+  </figure>
+{% endmacro %}
+
+{% block content %}
+{# back_url/back_label are set by whichever route rendered this: "Thiết bị" for
+   a household member, the customer's name for vendor staff who arrived from
+   the customer page. #}
+<nav class="header-breadcrumb">
+  <a href="{{ back_url }}" class="header-breadcrumb-item">{{ back_label }}</a>
+  <span class="header-breadcrumb-separator">/</span>
+  <span class="header-breadcrumb-item" aria-current="page">{{ device.name }}</span>
+</nav>
+
+<div class="ac-detail-head">
+  <div class="ac-detail-head__main">
+    {# Back affordance sits next to the title, not only in the breadcrumb above:
+       the crumb renders as small caps and reads as a label rather than a
+       control, so people land here and have no obvious way back. #}
+    <a class="ac-back" href="{{ back_url }}" title="Quay lại {{ back_label }}"
+       aria-label="Quay lại {{ back_label }}">
+      <svg viewBox="0 0 24 24" width="20" height="20" class="ac-back__ico" aria-hidden="true">
+        <path d="M15 18l-6-6 6-6"/>
+      </svg>
+    </a>
+    <div>
+      <h1 class="ac-detail-title">{{ device.name }}</h1>
+      <div class="ac-device__meta">
+        {{ 'Nút ngoài trời' if device.node_type.value == 'outdoor' else 'Nút trong nhà' }}
+        {% if device.location %} · {{ device.location }}{% endif %}
+      </div>
+    </div>
+  </div>
+  {% if device.status.value == 'online' %}
+    <span class="status-pill status-pill-active">Trực tuyến</span>
+  {% else %}
+    <span class="status-pill status-pill-idle">Ngoại tuyến</span>
+  {% endif %}
+</div>
+
+{% if not latest %}
+  <p class="ac-empty chamfer-md">Chưa nhận được số liệu cảm biến nào từ thiết bị này.</p>
+{% else %}
+  <div class="ac-tiles">
+    <div class="card card-sm ac-tile">
+      <div class="ac-tile__label">Nhiệt độ mới nhất</div>
+      <span class="ac-tile__value text-mono">{{ '%.1f'|format(latest.temp) }}°C</span>
+      <span class="ac-tile__sub">{{ latest.ts|datetime }}</span>
+    </div>
+    <div class="card card-sm ac-tile">
+      <div class="ac-tile__label">Độ ẩm mới nhất</div>
+      <span class="ac-tile__value text-mono">{{ '%.0f'|format(latest.humidity) }}%</span>
+      <span class="ac-tile__sub">RSSI {{ latest.rssi }} dBm{% if latest.batt is not none %} · Pin {{ '%.2f'|format(latest.batt) }}V{% endif %}</span>
+    </div>
+  </div>
+{% endif %}
+
+<div class="ac-section-head">
+  <h2 class="ac-section-title">Biểu đồ</h2>
+  <span class="ac-count">{{ sample_count }} mẫu</span>
+</div>
+<div class="ac-charts">
+  {{ chart('Nhiệt độ', temp_series) }}
+  {{ chart('Độ ẩm', hum_series) }}
+</div>
+
+<div class="ac-section-head">
+  <h2 class="ac-section-title">Lịch sử số đo</h2>
+</div>
+{% if not history %}
+  <p class="ac-empty chamfer-md">Chưa có lịch sử số đo.</p>
+{% else %}
+<div class="ac-table-wrap chamfer-sm">
+  <table class="ac-table">
+    <thead>
+      <tr><th>Thời gian</th><th>Nhiệt độ</th><th>Độ ẩm</th><th>RSSI</th><th>Pin</th></tr>
+    </thead>
+    <tbody>
+      {% for r in history %}
+      <tr>
+        <td class="ac-num">{{ r.ts|datetime }}</td>
+        <td class="ac-num">{{ '%.1f'|format(r.temp) }}°C</td>
+        <td class="ac-num">{{ '%.0f'|format(r.humidity) }}%</td>
+        <td class="ac-num">{{ r.rssi }} dBm</td>
+        <td class="ac-num">{% if r.batt is not none %}{{ '%.2f'|format(r.batt) }}V{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

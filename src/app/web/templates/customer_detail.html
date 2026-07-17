@@ -1,0 +1,317 @@
+{% extends "base.html" %}
+{% block title %}{{ org.name }} — Aircon{% endblock %}
+{% block content %}
+{% set node_labels = {'outdoor': 'Ngoài trời', 'indoor': 'Trong nhà'} %}
+
+<nav class="header-breadcrumb">
+  <a href="/web/customers" class="header-breadcrumb-item">Khách hàng</a>
+  <span class="header-breadcrumb-separator">/</span>
+  <span class="header-breadcrumb-item" aria-current="page">{{ org.name }}</span>
+</nav>
+
+<div class="ac-detail-head">
+  <div class="ac-detail-head__main">
+    <a class="ac-back" href="/web/customers" title="Quay lại danh sách khách hàng"
+       aria-label="Quay lại danh sách khách hàng">
+      <svg viewBox="0 0 24 24" width="20" height="20" class="ac-back__ico" aria-hidden="true">
+        <path d="M15 18l-6-6 6-6"/>
+      </svg>
+    </a>
+    <div>
+      <h1 class="ac-detail-title">{{ org.name }}</h1>
+      <div class="ac-device__meta">{{ org.contact or 'Chưa có liên hệ' }}</div>
+    </div>
+  </div>
+</div>
+
+{% if err %}<div class="status-banner status-banner-error" role="alert">{{ err }}</div>{% endif %}
+
+{# ---------- THÔNG TIN KHÁCH HÀNG + TÀI KHOẢN (gộp, ở đầu trang) ----------
+   One section, not two: the old read-only info card and the "Tài khoản đã kích
+   hoạt" table showed the same customer (name/phone/email) twice. This is the
+   single source — every account activated for this customer, with email, app
+   version, role and sign-up date. Everything comes from what the customer
+   typed in the app (auth_service.register); nothing is entered here.
+
+   Email is wrapped in <!--email_off--> so Cloudflare's Scrape-Shield does NOT
+   rewrite it into "[email protected]" — the vendor needs the real Gmail for
+   SMTP notifications later. #}
+<div class="ac-section-head">
+  <h2 class="ac-section-title">Thông tin khách hàng</h2>
+  {% if members %}<span class="ac-count">{{ members|length }}</span>{% endif %}
+</div>
+{% if not members %}
+<p class="ac-empty chamfer-md">
+  Sản phẩm chưa được kích hoạt. Thông tin khách (tên, SĐT, email) sẽ tự hiện khi khách nhập mã trên app.
+</p>
+{% else %}
+<div class="ac-table-wrap chamfer-sm">
+  <table class="ac-table">
+    <thead><tr><th>Email (Gmail)</th><th>Họ tên</th><th>SĐT</th><th>Phiên bản app</th><th>Vai trò</th><th>Ngày tạo</th></tr></thead>
+    <tbody>
+      {% for m in members %}
+      <tr>
+        <td class="ac-info-email"><!--email_off-->{{ m.email }}<!--/email_off--></td>
+        <td>{{ m.full_name or '—' }}</td>
+        <td class="ac-num">{{ m.phone or '—' }}</td>
+        <td class="ac-num">
+          {# Stamped from the X-App-Version header at register + each login.
+             "—" means they have never signed in from a build that reports one. #}
+          {% if m.app_version %}
+            <span class="badge badge-secondary text-mono">{{ m.app_version }}</span>
+          {% else %}
+            <span class="ac-muted">—</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if m.role.value == 'owner' %}
+            <span class="badge badge-primary">Chủ hộ</span>
+          {% else %}
+            <span class="badge badge-secondary">Thành viên</span>
+          {% endif %}
+        </td>
+        <td class="ac-num">{{ m.created_at|datetime }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{# ---------- NODE ---------- #}
+<div class="ac-section-head" style="margin-top: var(--space-8);">
+  <h2 class="ac-section-title">Node trong nhà khách</h2>
+  {% if devices %}<span class="ac-count">{{ devices|length }}</span>{% endif %}
+</div>
+
+{% if not devices %}
+  <p class="ac-empty chamfer-md">Khách này chưa có node nào. Thêm bằng form bên dưới.</p>
+{% else %}
+<div class="ac-table-wrap chamfer-sm">
+  <table class="ac-table">
+    <thead>
+      <tr><th>Tên</th><th>Loại</th><th>Vị trí</th><th>Số đo</th><th>Trạng thái</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for d in devices %}
+      {# Each row is its own edit form: inline editing keeps "sửa tên node" a
+         one-click job instead of a trip to a separate page for a single field. #}
+      <tr>
+        <form method="post" action="/web/customers/{{ org.id }}/devices/{{ d.id }}/edit" id="edit-{{ d.id }}" data-ajax="save"></form>
+        <td><input class="input input-sm" form="edit-{{ d.id }}" name="name" value="{{ d.name }}" required></td>
+        <td>
+          <select class="select select-sm" form="edit-{{ d.id }}" name="node_type">
+            <option value="outdoor" {% if d.node_type.value == 'outdoor' %}selected{% endif %}>Ngoài trời</option>
+            <option value="indoor" {% if d.node_type.value == 'indoor' %}selected{% endif %}>Trong nhà</option>
+          </select>
+        </td>
+        <td><input class="input input-sm" form="edit-{{ d.id }}" name="location" value="{{ d.location or '' }}" placeholder="Phòng khách"></td>
+        <td>
+          {# Same detail page a household member sees for their own node —
+             readings, charts, history — scoped to THIS customer's org. #}
+          <a class="btn btn-ghost btn-sm" href="/web/customers/{{ org.id }}/devices/{{ d.id }}">Xem số đo</a>
+        </td>
+        <td>
+          {% if d.status.value == 'online' %}
+            <span class="status-pill status-pill-active">Trực tuyến</span>
+          {% else %}
+            <span class="status-pill status-pill-idle">Ngoại tuyến</span>
+          {% endif %}
+        </td>
+        <td>
+          <div class="ac-row-actions">
+            <button class="btn btn-secondary btn-sm" type="submit" form="edit-{{ d.id }}">Lưu</button>
+            {# Deleting takes the node's telemetry with it (FK CASCADE), so this
+               one asks first. #}
+            <form method="post" action="/web/customers/{{ org.id }}/devices/{{ d.id }}/delete"
+                  data-ajax="refresh" data-ajax-msg="Đã xoá node"
+                  data-ajax-confirm="Xoá node {{ d.name }}? Toàn bộ số đo của node này sẽ mất.">
+              <button class="btn btn-danger btn-sm" type="submit">Xoá</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<form class="card ac-sell-form" method="post" action="/web/customers/{{ org.id }}/devices"
+      data-ajax="refresh" data-ajax-msg="Đã thêm node" style="margin-top: var(--space-4);">
+  <div class="ac-sell-form__row">
+    <label class="ac-field">
+      <span class="ac-field__label">Tên node mới</span>
+      <input class="input" name="name" required placeholder="Phòng ngủ">
+    </label>
+    <label class="ac-field">
+      <span class="ac-field__label">Loại</span>
+      <select class="select" name="node_type">
+        <option value="indoor">Trong nhà</option>
+        <option value="outdoor">Ngoài trời</option>
+      </select>
+    </label>
+    <label class="ac-field">
+      <span class="ac-field__label">Vị trí</span>
+      <input class="input" name="location" placeholder="Tầng 2">
+    </label>
+    <button class="btn btn-primary" type="submit">Thêm node</button>
+  </div>
+</form>
+
+{# ---------- MÃ KÍCH HOẠT ---------- #}
+<div class="ac-section-head" style="margin-top: var(--space-8);">
+  <h2 class="ac-section-title">Mã kích hoạt</h2>
+  <form method="post" action="/web/customers/{{ org.id }}/codes" class="ac-addcode"
+        data-ajax="refresh" data-ajax-msg="Đã cấp mã mới">
+    <input class="input input-sm ac-addcode__n" name="count" type="number" value="1" min="1" max="20"
+           aria-label="Số mã">
+    <button class="btn btn-primary btn-sm" type="submit">Cấp thêm mã</button>
+  </form>
+</div>
+
+{% if not codes %}
+  <p class="ac-empty chamfer-md">Chưa có mã nào.</p>
+{% else %}
+<div class="ac-table-wrap chamfer-sm">
+  <table class="ac-table">
+    <thead>
+      <tr><th>Mã</th><th>Trạng thái</th><th>Người dùng</th><th>Ngày tạo</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for c in codes %}
+      <tr>
+        <td><b class="ac-code-chip text-mono">{{ c.code }}</b></td>
+        <td>
+          {% if c.used_by_user_id %}
+            <span class="status-pill status-pill-idle">Đã dùng</span>
+          {% else %}
+            <span class="status-pill status-pill-active">Chưa dùng</span>
+          {% endif %}
+        </td>
+        <td class="ac-num">{{ (c.used_at|datetime) if c.used_at else '—' }}</td>
+        <td class="ac-num">{{ c.created_at|datetime }}</td>
+        <td>
+          {# Only unused codes are removable — a used one is the record of an
+             activation (invite_service.delete_code refuses it anyway). #}
+          {% if not c.used_by_user_id %}
+          <form method="post" action="/web/customers/{{ org.id }}/codes/{{ c.id }}/delete"
+                data-ajax="refresh" data-ajax-msg="Đã xoá mã"
+                data-ajax-confirm="Xoá mã {{ c.code }}? Mã này sẽ không dùng được nữa.">
+            <button class="btn btn-danger btn-sm" type="submit">Xoá</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{# ---------- CẤU HÌNH THUẬT TOÁN ----------
+   Was a standalone /web/config that tuned the staff member's own org. It only
+   means anything per household, so it lives with the household. #}
+<div class="ac-section-head" style="margin-top: var(--space-8);">
+  <h2 class="ac-section-title">Cấu hình thuật toán</h2>
+  <span class="ac-count">Cập nhật {{ cfg.updated_at|datetime }}</span>
+</div>
+
+<form class="card" method="post" action="/web/customers/{{ org.id }}/config"
+      data-ajax="save" data-ajax-msg="Đã lưu cấu hình">
+  <h3 class="ac-form-group-title">Làm mượt &amp; chống dao động</h3>
+  <div class="form-row">
+    <div class="form-group">
+      <label class="form-label" for="ema_alpha">Trọng số EMA (T trung bình ngoài trời)</label>
+      <input class="input" id="ema_alpha" type="number" name="ema_alpha" step="0.01" min="0.01" max="1" value="{{ cfg.ema_alpha }}" required>
+      <span class="form-help">Càng gần 1 càng bám sát nhiệt độ ngoài trời tức thời; càng gần 0 càng mượt.</span>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="deadband">Vùng trễ (°C)</label>
+      <input class="input" id="deadband" type="number" name="deadband" step="0.1" min="0" value="{{ cfg.deadband }}" required>
+      <span class="form-help">Sai lệch quanh nhiệt độ đặt trước khi đổi chế độ, tránh nhảy COOL/FAN liên tục.</span>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="dwell_sec">Thời gian giữ chế độ tối thiểu (giây)</label>
+      <input class="input" id="dwell_sec" type="number" name="dwell_sec" step="1" min="0" value="{{ cfg.dwell_sec }}" required>
+      <span class="form-help">Bảo vệ block máy nén khỏi bật/tắt liên tục.</span>
+    </div>
+  </div>
+
+  <h3 class="ac-form-group-title">Độ ẩm</h3>
+  <div class="form-row">
+    <div class="form-group">
+      <label class="form-label" for="dry_rh">Ngưỡng %RH kích hoạt HÚT ẨM</label>
+      <input class="input" id="dry_rh" type="number" name="dry_rh" step="0.1" min="0" max="100" value="{{ cfg.dry_rh }}" required>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="humid_slope">Hệ số bù trừ độ ẩm (°C / %RH)</label>
+      <input class="input" id="humid_slope" type="number" name="humid_slope" step="0.01" min="0" value="{{ cfg.humid_slope }}" required>
+      <span class="form-help">Số độ trừ khỏi nhiệt độ mục tiêu cho mỗi %RH vượt 60%.</span>
+    </div>
+  </div>
+
+  <h3 class="ac-form-group-title">Giới hạn an toàn</h3>
+  <div class="form-row">
+    <div class="form-group">
+      <label class="form-label" for="clamp_min">Nhiệt độ mục tiêu thấp nhất (°C)</label>
+      <input class="input" id="clamp_min" type="number" name="clamp_min" step="0.1" value="{{ cfg.clamp_min }}" required>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="clamp_max">Nhiệt độ mục tiêu cao nhất (°C)</label>
+      <input class="input" id="clamp_max" type="number" name="clamp_max" step="0.1" value="{{ cfg.clamp_max }}" required>
+    </div>
+  </div>
+
+  <h3 class="ac-form-group-title">Lịch đêm</h3>
+  <div class="form-row">
+    <div class="form-group">
+      <label class="form-label" for="night_start">Giờ bắt đầu (0-23)</label>
+      <input class="input" id="night_start" type="number" name="night_start" step="1" min="0" max="23" value="{{ cfg.night_start }}" required>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="night_end">Giờ kết thúc (0-23)</label>
+      <input class="input" id="night_end" type="number" name="night_end" step="1" min="0" max="23" value="{{ cfg.night_end }}" required>
+      <span class="form-help">Có thể vượt qua nửa đêm, ví dụ 23 → 6.</span>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="night_offset">Cộng thêm vào mục tiêu ban đêm (°C)</label>
+      <input class="input" id="night_offset" type="number" name="night_offset" step="0.1" value="{{ cfg.night_offset }}" required>
+    </div>
+  </div>
+
+  <h3 class="ac-form-group-title">Ghi đè thủ công</h3>
+  <div class="form-group ac-field--narrow">
+    <label class="form-label" for="override_hours">Tự động hết hạn sau (giờ)</label>
+    <input class="input" id="override_hours" type="number" name="override_hours" step="1" min="1" value="{{ cfg.override_hours }}" required>
+    <span class="form-help">Sau khi người dùng chỉnh tay, hệ thống tự quay lại chế độ tự động sau khoảng thời gian này.</span>
+  </div>
+
+  <div class="card-footer">
+    <button class="btn btn-primary" type="submit">Lưu cấu hình</button>
+  </div>
+</form>
+
+{# ---------- XOÁ KHÁCH HÀNG ----------
+   Last thing on the page, visually separated, and gated on typing the name:
+   this cascades to every node, số đo, tài khoản and mã of the customer, with
+   no undo (see customer_routes.delete_customer_submit). #}
+<div class="ac-section-head" style="margin-top: var(--space-12);">
+  <h2 class="ac-section-title ac-danger-title">Xoá khách hàng</h2>
+</div>
+
+<form class="card ac-danger-zone" method="post" action="/web/customers/{{ org.id }}/delete">
+  <p class="ac-form-note">
+    Xoá <b>{{ org.name }}</b> sẽ xoá vĩnh viễn: <b>{{ devices|length }}</b> node và toàn bộ số đo,
+    <b>{{ members|length }}</b> tài khoản, <b>{{ codes|length }}</b> mã kích hoạt, và cấu hình của khách này.
+    <b>Không thể hoàn tác.</b>
+  </p>
+  <div class="ac-sell-form__row">
+    <label class="ac-field">
+      <span class="ac-field__label">Gõ đúng tên khách để xác nhận</span>
+      <input class="input" name="confirm_name" autocomplete="off" placeholder="{{ org.name }}" required>
+    </label>
+    <button class="btn btn-danger" type="submit">Xoá vĩnh viễn</button>
+  </div>
+</form>
+{% endblock %}

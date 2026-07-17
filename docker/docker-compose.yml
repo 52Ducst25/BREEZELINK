@@ -1,0 +1,117 @@
+# AirConditioner — LOCAL dev stack (no tunnel, no TLS).
+#
+#   docker compose -f docker/docker-compose.yml up -d --build
+#   docker compose -f docker/docker-compose.yml exec api alembic upgrade head
+#
+# Ports are shifted off the defaults because this dev box also runs the SafeKitchen
+# stack (8000/5432/6379/1883) — collide with it and compose fails to bind.
+name: aircon-dev
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aircon
+      POSTGRES_PASSWORD: aircon
+      POSTGRES_DB: aircon
+    ports:
+      - "127.0.0.1:5435:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aircon"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6381:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Dev broker: plaintext, anonymous. Prod uses EMQX with per-device auth.
+  mosquitto:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:1886:1883"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      DB_URL: postgresql+asyncpg://aircon:aircon@postgres:5432/aircon
+      REDIS_URL: redis://redis:6379/0
+      MQTT_HOST: mosquitto
+      MQTT_PORT: 1883
+      MQTT_TLS: "false"
+    ports:
+      - "127.0.0.1:8201:8000"
+    # Source is mounted and --reload is on, so edits land without a rebuild.
+    # The VPS compose deliberately does NOT mount source: prod runs baked code.
+    volumes:
+      - ../src:/code/src
+      - ../alembic.ini:/code/alembic.ini
+      # Uploaded APKs — same named volume the VPS compose uses, so publishing
+      # locally behaves identically. Must be in THIS list, not a second
+      # `volumes:` key: duplicate keys are legal YAML and the last one wins,
+      # which would silently drop the source mounts above and kill --reload.
+      - apk_data:/data/apk
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+
+  worker:
+    # The image's HEALTHCHECK curls /api/v1/health, which only the api serves.
+    # The worker runs app.workers.manager and no HTTP server, so that probe can
+    # never pass and the container sits "unhealthy" forever — noise that would
+    # hide a real failure. It is not a health signal for this service.
+    healthcheck:
+      disable: true
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      DB_URL: postgresql+asyncpg://aircon:aircon@postgres:5432/aircon
+      REDIS_URL: redis://redis:6379/0
+      MQTT_HOST: mosquitto
+      MQTT_PORT: 1883
+      MQTT_TLS: "false"
+    volumes:
+      - ../src:/code/src
+      - ../alembic.ini:/code/alembic.ini
+    command: ["python", "-m", "app.workers.manager", "--role", "consumer"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+
+volumes:
+  pgdata:
+  apk_data:

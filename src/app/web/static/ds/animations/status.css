@@ -1,0 +1,262 @@
+/**
+ * Status Animations - The Clean Lab
+ * "Titanium Command" Industrial/Tactical Design System
+ *
+ * Pulse indicators, success checkmarks, error shake, and status feedback
+ */
+
+/* ========================================
+   PULSE ANIMATION
+   ======================================== */
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.05);
+  }
+}
+
+.status-dot-active {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+/* Rapid pulse for urgent states */
+@keyframes pulse-fast {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(1.08);
+  }
+}
+
+.status-urgent {
+  animation: pulse-fast 1s ease-in-out infinite;
+}
+
+/* ========================================
+   SUCCESS CHECKMARK
+   ======================================== */
+
+@keyframes check-draw {
+  0% {
+    stroke-dashoffset: 50;
+  }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+.success-check {
+  stroke: var(--status-success);
+  stroke-dasharray: 50;
+  stroke-dashoffset: 50;
+  animation: check-draw var(--duration-slow) var(--ease-out) forwards;
+}
+
+/* Success icon scale-in */
+@keyframes success-scale {
+  0% {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  50% {
+    transform: scale(1.1);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.success-icon {
+  animation: success-scale var(--duration-normal) var(--ease-bounce);
+}
+
+/* ========================================
+   ERROR SHAKE
+   ======================================== */
+
+@keyframes shake {
+  0%, 100% {
+    transform: translateX(0);
+  }
+  20%, 60% {
+    transform: translateX(-8px);
+  }
+  40%, 80% {
+    transform: translateX(8px);
+  }
+}
+
+.error-shake {
+  animation: shake var(--duration-slow) var(--ease-default);
+}
+
+/* ========================================
+   WARNING PULSE
+   ======================================== */
+
+@keyframes warning-pulse {
+  0%, 100% {
+    opacity: 1;
+    background-color: var(--status-warning);
+  }
+  50% {
+    opacity: 0.7;
+    background-color: var(--color-amber-600, #ff9500);
+  }
+}
+
+.warning-pulse {
+  animation: warning-pulse 1.5s ease-in-out infinite;
+}
+
+/* ========================================
+   LOADING DOTS
+   ======================================== */
+
+@keyframes dot-bounce {
+  0%, 80%, 100% {
+    transform: translateY(0);
+    opacity: 0.7;
+  }
+  40% {
+    transform: translateY(-8px);
+    opacity: 1;
+  }
+}
+
+.loading-dots span {
+  animation: dot-bounce 1.4s ease-in-out infinite;
+}
+
+.loading-dots span:nth-child(1) {
+  animation-delay: 0s;
+}
+
+.loading-dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.loading-dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+/* ========================================
+   SPIN ANIMATION
+   ======================================== */
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.status-spinner {
+  animation: spin var(--duration-slow) linear infinite;
+}
+
+/* ========================================
+   FADE IN/OUT
+   ======================================== */
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.fade-in {
+  animation: fade-in var(--duration-normal) var(--ease-default);
+}
+
+.fade-out {
+  animation: fade-out var(--duration-normal) var(--ease-default);
+}
+
+/* ========================================
+   PROGRESS INDICATOR
+   ======================================== */
+
+@keyframes progress-grow {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+.progress-bar {
+  transform-origin: left center;
+  animation: progress-grow var(--duration-slow) var(--ease-out) forwards;
+}
+
+/* ========================================
+   HEARTBEAT
+   ======================================== */
+
+@keyframes heartbeat {
+  0%, 100% {
+    transform: scale(1);
+  }
+  10%, 30% {
+    transform: scale(1.1);
+  }
+  20%, 40% {
+    transform: scale(1);
+  }
+}
+
+.status-heartbeat {
+  animation: heartbeat 2s ease-in-out infinite;
+}
+
+/* ========================================
+   REDUCED MOTION
+   ======================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  .status-dot-active,
+  .status-urgent,
+  .warning-pulse,
+  .loading-dots span,
+  .status-spinner,
+  .status-heartbeat {
+    animation: none;
+  }
+
+  /* Keep essential feedback */
+  .success-icon {
+    animation: none;
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  .success-check {
+    stroke-dashoffset: 0;
+  }
+
+  .error-shake {
+    animation: shake var(--duration-fast) var(--ease-default);
+  }
+}

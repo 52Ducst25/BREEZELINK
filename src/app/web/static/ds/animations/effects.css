@@ -1,0 +1,213 @@
+/**
+ * Visual Effects - The Clean Lab
+ * "Titanium Command" Industrial/Tactical Design System
+ *
+ * Scanline sweeps, grid pulses, shimmer effects, and processing indicators
+ * for industrial/tactical aesthetic
+ */
+
+/* ========================================
+   SCANLINE EFFECT
+   ======================================== */
+
+@keyframes scanline {
+  0% {
+    top: -10%;
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  90% {
+    opacity: 1;
+  }
+  100% {
+    top: 110%;
+    opacity: 0;
+  }
+}
+
+.scan-effect {
+  position: relative;
+  overflow: hidden;
+}
+
+.scan-effect::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--accent-primary),
+    transparent
+  );
+  box-shadow: 0 0 8px var(--accent-primary);
+  animation: scanline 2s var(--ease-default) infinite;
+  pointer-events: none;
+}
+
+/* ========================================
+   TECH GRID PULSE
+   ======================================== */
+
+@keyframes grid-pulse {
+  0%, 100% {
+    opacity: 0.05;
+  }
+  50% {
+    opacity: 0.1;
+  }
+}
+
+.tech-grid-animated {
+  background-size: 40px 40px;
+  background-image:
+    linear-gradient(to right, rgba(0, 0, 0, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.05) 1px, transparent 1px);
+  animation: grid-pulse 4s ease-in-out infinite;
+}
+
+/* ========================================
+   SHIMMER EFFECT (Skeleton Loading)
+   ======================================== */
+
+@keyframes shimmer {
+  0% {
+    background-position: -100% 0;
+  }
+  100% {
+    background-position: 100% 0;
+  }
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-gray-200) 25%,
+    var(--color-gray-100) 50%,
+    var(--color-gray-200) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+/* ========================================
+   PROCESSING BAR
+   ======================================== */
+
+@keyframes processing {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.processing-bar {
+  height: 4px;
+  background: linear-gradient(
+    90deg,
+    var(--color-gray-200) 0%,
+    var(--accent-primary) 50%,
+    var(--color-gray-200) 100%
+  );
+  background-size: 200% 100%;
+  animation: processing 1.5s linear infinite;
+}
+
+/* ========================================
+   GRADIENT SHIMMER
+   ======================================== */
+
+@keyframes gradient-shimmer {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.gradient-shimmer {
+  background-size: 200% 200%;
+  animation: gradient-shimmer 3s ease infinite;
+}
+
+/* ========================================
+   GLOW PULSE
+   ======================================== */
+
+@keyframes glow-pulse {
+  0%, 100% {
+    box-shadow: 0 0 10px var(--accent-primary);
+  }
+  50% {
+    box-shadow: 0 0 20px var(--accent-primary), 0 0 30px var(--accent-primary);
+  }
+}
+
+.glow-pulse {
+  animation: glow-pulse 2s ease-in-out infinite;
+}
+
+/* ========================================
+   BORDER SCAN
+   ======================================== */
+
+@keyframes border-scan {
+  0% {
+    background-position: 0 0, 100% 0, 100% 100%, 0 100%;
+  }
+  25% {
+    background-position: 100% 0, 100% 100%, 100% 100%, 0 100%;
+  }
+  50% {
+    background-position: 100% 0, 100% 100%, 0 100%, 0 100%;
+  }
+  75% {
+    background-position: 100% 0, 100% 100%, 0 100%, 0 0;
+  }
+  100% {
+    background-position: 0 0, 100% 0, 100% 100%, 0 100%;
+  }
+}
+
+.border-scan {
+  position: relative;
+  background:
+    linear-gradient(90deg, var(--accent-primary) 50%, transparent 50%) top left,
+    linear-gradient(180deg, var(--accent-primary) 50%, transparent 50%) top right,
+    linear-gradient(270deg, var(--accent-primary) 50%, transparent 50%) bottom right,
+    linear-gradient(0deg, var(--accent-primary) 50%, transparent 50%) bottom left;
+  background-size: 8px 2px, 2px 8px, 8px 2px, 2px 8px;
+  background-repeat: no-repeat;
+  animation: border-scan 2s linear infinite;
+}
+
+/* ========================================
+   REDUCED MOTION
+   ======================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  .scan-effect::after,
+  .tech-grid-animated,
+  .skeleton,
+  .processing-bar,
+  .gradient-shimmer,
+  .glow-pulse,
+  .border-scan {
+    animation: none;
+  }
+
+  /* Keep shimmer visible but static */
+  .skeleton {
+    background-position: 0 0;
+  }
+}

@@ -1,0 +1,429 @@
+/**
+ * Status Indicators - The Clean Lab
+ * "Titanium Command" Status System
+ *
+ * Components: status dots, status pills, progress indicators
+ * States: active, idle, warning, error, success
+ */
+
+/* ========================================
+   STATUS DOT
+   Exception: Uses circular shape (border-radius: 50%)
+   ======================================== */
+
+.status-dot {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--color-gray-400);
+}
+
+/* Status variants */
+.status-dot-active {
+  background: var(--status-success);
+}
+
+.status-dot-idle {
+  background: var(--color-gray-400);
+}
+
+.status-dot-warning {
+  background: var(--status-warning);
+}
+
+.status-dot-error {
+  background: var(--status-error);
+}
+
+.status-dot-info {
+  background: var(--status-info);
+}
+
+/* Pulsing animation for active states */
+.status-dot-pulse {
+  animation: status-pulse 2s infinite;
+}
+
+@keyframes status-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.1);
+  }
+}
+
+/* Size variants */
+.status-dot-sm {
+  width: 8px;
+  height: 8px;
+}
+
+.status-dot-lg {
+  width: 16px;
+  height: 16px;
+}
+
+.status-dot-xl {
+  width: 20px;
+  height: 20px;
+}
+
+/* ========================================
+   STATUS PILL
+   ======================================== */
+
+.status-pill {
+  /* Layout */
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  min-height: 28px;
+
+  /* Visual */
+  background: var(--bg-subtle);
+  border: var(--border-width-sm) solid var(--border-default);
+  clip-path: var(--shape-chamfer-sm);
+
+  /* Typography */
+  font: var(--tech-code);
+  font-weight: var(--weight-bold);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-widest);
+  color: var(--text-primary);
+
+  /* Interaction */
+  user-select: none;
+}
+
+/* With status dot */
+.status-pill::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-gray-400);
+}
+
+/* Status variants */
+.status-pill-active {
+  border-color: var(--status-success);
+  background: rgba(0, 204, 102, 0.1);
+  color: var(--status-success);
+}
+
+.status-pill-active::before {
+  background: var(--status-success);
+}
+
+.status-pill-idle {
+  border-color: var(--border-default);
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+}
+
+.status-pill-idle::before {
+  background: var(--color-gray-400);
+}
+
+.status-pill-warning {
+  border-color: var(--status-warning);
+  background: rgba(255, 170, 0, 0.1);
+  color: var(--status-warning);
+}
+
+.status-pill-warning::before {
+  background: var(--status-warning);
+}
+
+.status-pill-error {
+  border-color: var(--status-error);
+  background: rgba(255, 51, 51, 0.1);
+  color: var(--status-error);
+}
+
+.status-pill-error::before {
+  background: var(--status-error);
+}
+
+.status-pill-info {
+  border-color: var(--status-info);
+  background: rgba(0, 85, 255, 0.1);
+  color: var(--status-info);
+}
+
+.status-pill-info::before {
+  background: var(--status-info);
+}
+
+/* ========================================
+   STATUS BANNER
+   ======================================== */
+
+.status-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-subtle);
+  border: var(--border-width-md) solid var(--border-default);
+  border-left: 4px solid var(--border-default);
+  clip-path: var(--shape-chamfer-sm);
+  font: var(--body-base);
+}
+
+.status-banner-icon {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.status-banner-content {
+  flex: 1;
+}
+
+.status-banner-title {
+  font: var(--label-base);
+  margin-bottom: var(--space-1);
+}
+
+.status-banner-message {
+  font: var(--body-sm);
+  color: var(--text-secondary);
+}
+
+/* Banner variants */
+.status-banner-success {
+  background: rgba(0, 204, 102, 0.1);
+  border-color: var(--status-success);
+  border-left-color: var(--status-success);
+  color: var(--status-success);
+}
+
+.status-banner-error {
+  background: rgba(255, 51, 51, 0.1);
+  border-color: var(--status-error);
+  border-left-color: var(--status-error);
+  color: var(--status-error);
+}
+
+.status-banner-warning {
+  background: rgba(255, 170, 0, 0.1);
+  border-color: var(--status-warning);
+  border-left-color: var(--status-warning);
+  color: var(--status-warning);
+}
+
+.status-banner-info {
+  background: rgba(0, 85, 255, 0.1);
+  border-color: var(--status-info);
+  border-left-color: var(--status-info);
+  color: var(--status-info);
+}
+
+/* ========================================
+   MACHINE STATUS DISPLAY
+   ======================================== */
+
+.machine-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  background: var(--bg-secondary);
+  border: var(--border-width-md) solid var(--border-default);
+  clip-path: var(--shape-chamfer-sm);
+  font: var(--tech-label);
+  text-transform: uppercase;
+}
+
+.machine-status-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--color-gray-400);
+}
+
+.machine-status-available .machine-status-dot {
+  background: var(--status-success);
+  animation: status-pulse 2s infinite;
+}
+
+.machine-status-in-use .machine-status-dot {
+  background: var(--status-info);
+}
+
+.machine-status-maintenance .machine-status-dot {
+  background: var(--status-warning);
+}
+
+.machine-status-offline .machine-status-dot {
+  background: var(--status-error);
+}
+
+/* ========================================
+   PROGRESS INDICATOR
+   ======================================== */
+
+.progress {
+  width: 100%;
+  height: 8px;
+  background: var(--color-gray-200);
+  border: var(--border-width-sm) solid var(--border-default);
+  clip-path: var(--shape-chamfer-sm);
+  overflow: hidden;
+  position: relative;
+}
+
+.progress-bar {
+  height: 100%;
+  background: var(--accent-primary);
+  transition: width 0.3s ease;
+  position: relative;
+}
+
+.progress-bar::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.3),
+    transparent
+  );
+  animation: progress-shine 2s infinite;
+}
+
+@keyframes progress-shine {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* Progress variants */
+.progress-success .progress-bar {
+  background: var(--status-success);
+}
+
+.progress-warning .progress-bar {
+  background: var(--status-warning);
+}
+
+.progress-error .progress-bar {
+  background: var(--status-error);
+}
+
+/* Size variants */
+.progress-sm {
+  height: 4px;
+}
+
+.progress-lg {
+  height: 12px;
+}
+
+/* ========================================
+   TIME REMAINING DISPLAY
+   ======================================== */
+
+.time-remaining {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  background: var(--bg-inverse);
+  color: var(--text-inverse);
+  border: var(--border-width-md) solid var(--color-black);
+  clip-path: var(--shape-chamfer-sm);
+  font: var(--tech-label-lg);
+  text-transform: uppercase;
+}
+
+.time-remaining-value {
+  font-weight: var(--weight-bold);
+  color: var(--accent-primary);
+}
+
+/* ========================================
+   ACTIVITY INDICATOR (Loading spinner)
+   ======================================== */
+
+.activity-indicator {
+  display: inline-block;
+  width: 24px;
+  height: 24px;
+  border: 3px solid var(--border-subtle);
+  border-top-color: var(--accent-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.activity-indicator-sm {
+  width: 16px;
+  height: 16px;
+  border-width: 2px;
+}
+
+.activity-indicator-lg {
+  width: 32px;
+  height: 32px;
+  border-width: 4px;
+}
+
+.activity-indicator-xl {
+  width: 48px;
+  height: 48px;
+  border-width: 5px;
+}
+
+/* ========================================
+   TEMPERATURE INDICATOR
+   ======================================== */
+
+.temp-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-secondary);
+  border: var(--border-width-md) solid var(--border-default);
+  clip-path: var(--shape-chamfer-sm);
+  font: var(--tech-label);
+}
+
+.temp-indicator-value {
+  font: var(--tech-price);
+  font-size: var(--text-lg);
+}
+
+.temp-indicator-hot {
+  border-color: var(--status-error);
+  color: var(--status-error);
+}
+
+.temp-indicator-warm {
+  border-color: var(--status-warning);
+  color: var(--status-warning);
+}
+
+.temp-indicator-cold {
+  border-color: var(--status-info);
+  color: var(--status-info);
+}

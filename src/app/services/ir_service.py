@@ -1,0 +1,56 @@
+"""IR-code listing, coverage check, and LEARN-trigger publish (Phase 5).
+
+Coverage (design §5 risk): auto-control needs a learned code for COOL at
+every clamp-range temp (24-28) plus one each for DRY/FAN/OFF. Missing any
+means that setpoint/mode can't actually be sent to the AC.
+"""
+
+import json
+import uuid
+
+import aiomqtt
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.enums import AcMode
+from app.models.ir_code import IrCode
+from app.utils import mqtt_naming
+
+_REQUIRED_COOL_TEMPS = (24, 25, 26, 27, 28)
+_REQUIRED_FIXED_MODES = (AcMode.DRY, AcMode.FAN, AcMode.OFF)
+
+
+async def list_codes(session: AsyncSession, org_id: uuid.UUID) -> list[IrCode]:
+    """All captured codes for one org, grouped for display by mode/temp."""
+    stmt = (
+        select(IrCode)
+        .where(IrCode.org_id == org_id)
+        .order_by(IrCode.mode, IrCode.temp)
+    )
+    return list((await session.execute(stmt)).scalars().all())
+
+
+async def check_coverage(session: AsyncSession, org_id: uuid.UUID) -> list[str]:
+    """Human-readable list of still-missing required buttons, e.g. ``["COOL 24", "DRY"]``."""
+    stmt = select(IrCode.mode, IrCode.temp).where(IrCode.org_id == org_id)
+    rows = (await session.execute(stmt)).all()
+    captured = {(mode, temp) for mode, temp in rows}
+    captured_modes = {mode for mode, _ in rows}
+
+    missing = [
+        f"COOL {temp}" for temp in _REQUIRED_COOL_TEMPS if (AcMode.COOL, temp) not in captured
+    ]
+    missing += [mode.value for mode in _REQUIRED_FIXED_MODES if mode not in captured_modes]
+    return missing
+
+
+async def trigger_learn(client: aiomqtt.Client, org_id: str, mode: AcMode, temp: int | None) -> None:
+    """Publish ``bl/{org}/indoor/cmd {learn: "MODE TEMP"}`` (design §4.2).
+
+    The indoor node enters LEARN mode and captures the next raw IR signal it
+    receives from the real remote, then reports it back over the ``learn``
+    topic (handled by Phase 4's ``learn_handler``).
+    """
+    learn_value = f"{mode.value} {temp}" if temp is not None else mode.value
+    topic = mqtt_naming.topic(org_id, "indoor", "cmd")
+    await client.publish(topic, json.dumps({"learn": learn_value}), qos=1, retain=False)

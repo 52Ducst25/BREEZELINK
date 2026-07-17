@@ -1,0 +1,25 @@
+/**
+ * Animations Index - The Clean Lab
+ * "Titanium Command" Industrial/Tactical Design System
+ *
+ * Central import for all animation modules
+ */
+
+/* Motion tokens - must be imported first */
+@import './motion-tokens.css';
+
+/* Component animations */
+@import './buttons.css';
+@import './cards.css';
+
+/* Visual effects */
+@import './effects.css';
+
+/* Status indicators */
+@import './status.css';
+
+/* Device interactions */
+@import './devices.css';
+
+/* Page transitions */
+@import './pages.css';

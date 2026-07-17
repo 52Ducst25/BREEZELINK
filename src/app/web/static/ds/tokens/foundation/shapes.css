@@ -1,0 +1,85 @@
+/**
+ * Foundation Shapes - The Clean Lab
+ * "Titanium Command" - NO ROUNDED CORNERS
+ *
+ * Chamfered (45-degree cut) corners exclusively.
+ * Clip-path polygons for industrial/tactical aesthetic.
+ */
+
+:root {
+  /* ========================================
+     CHAMFER SIZES
+     ======================================== */
+
+  --chamfer-sm: 8px;
+  --chamfer-md: 12px;
+  --chamfer-lg: 20px;
+  --chamfer-xl: 30px;
+
+  /* ========================================
+     CLIP-PATH POLYGONS
+     Top-left & bottom-right corners chamfered
+     ======================================== */
+
+  /* Small chamfer (buttons, tags, small cards) */
+  --shape-chamfer-sm: polygon(
+    8px 0,                    /* Top-left cut start */
+    100% 0,                   /* Top-right */
+    100% calc(100% - 8px),    /* Bottom-right cut start */
+    calc(100% - 8px) 100%,    /* Bottom-right cut end */
+    0 100%,                   /* Bottom-left */
+    0 8px                     /* Top-left cut end */
+  );
+
+  /* Medium chamfer (cards, panels) */
+  --shape-chamfer-md: polygon(
+    12px 0,
+    100% 0,
+    100% calc(100% - 12px),
+    calc(100% - 12px) 100%,
+    0 100%,
+    0 12px
+  );
+
+  /* Large chamfer (hero cards, modals) */
+  --shape-chamfer-lg: polygon(
+    20px 0,
+    100% 0,
+    100% calc(100% - 20px),
+    calc(100% - 20px) 100%,
+    0 100%,
+    0 20px
+  );
+
+  /* Extra-large chamfer (major sections, kiosk screens) */
+  --shape-chamfer-xl: polygon(
+    30px 0,
+    100% 0,
+    100% calc(100% - 30px),
+    calc(100% - 30px) 100%,
+    0 100%,
+    0 30px
+  );
+
+  /* ========================================
+     BORDER WIDTHS
+     ======================================== */
+
+  --border-width-sm: 1px;
+  --border-width-md: 2px;
+  --border-width-lg: 3px;
+  --border-width-xl: 4px;
+
+  /* ========================================
+     SHADOW TOKENS
+     ======================================== */
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.07);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
+  --shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.15);
+
+  /* Tactical/HUD style glows */
+  --glow-blue: 0 0 20px rgba(0, 85, 255, 0.3);
+  --glow-orange: 0 0 20px rgba(255, 72, 0, 0.3);
+}

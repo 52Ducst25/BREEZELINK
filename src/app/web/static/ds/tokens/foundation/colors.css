@@ -1,0 +1,43 @@
+/**
+ * Foundation Colors - The Clean Lab
+ * "Titanium Command" Industrial/Tactical Design System
+ *
+ * Raw color values - Do not use directly in components.
+ * Reference these via semantic tokens in semantic/colors.css
+ */
+
+:root {
+  /* ========================================
+     NEUTRALS - Grayscale Palette
+     ======================================== */
+
+  --color-white: #ffffff;
+  --color-gray-50: #f8fafc;
+  --color-gray-100: #f0f2f5;
+  --color-gray-200: #e2e8f0;
+  --color-gray-300: #cbd5e1;
+  --color-gray-400: #94a3b8;
+  --color-gray-500: #64748b;
+  --color-gray-900: #0f172a;
+  --color-black: #111111;
+
+  /* ========================================
+     BRAND COLORS
+     ======================================== */
+
+  /* Tech Blue - Primary accent (Wash service) */
+  --color-blue-500: #0055ff;
+  --color-blue-600: #0044cc;
+
+  /* Dry Orange - Secondary accent (Dry service) */
+  --color-orange-500: #ff4800;
+  --color-orange-600: #e04000;
+
+  /* ========================================
+     STATUS COLORS
+     ======================================== */
+
+  --color-green-500: #00cc66;   /* Success */
+  --color-red-500: #ff3333;     /* Error/Alert */
+  --color-amber-500: #ffaa00;   /* Warning */
+}

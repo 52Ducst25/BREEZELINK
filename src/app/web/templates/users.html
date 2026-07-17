@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Quản trị viên — Aircon{% endblock %}
+{% block content %}
+
+{# Staff only. Customers never appear here: they create their own account by
+   redeeming a code, and their accounts are listed under their customer page. #}
+
+<div class="ac-section-head">
+  <h2 class="ac-section-title">Quản trị viên</h2>
+  <span class="ac-count">{{ users|length }}</span>
+</div>
+
+{% if err %}<div class="status-banner status-banner-error" role="alert">{{ err }}</div>{% endif %}
+
+<p class="ac-form-note" style="margin-bottom: var(--space-4);">
+  Tài khoản ở đây đăng nhập được vào trang quản trị này. Tài khoản khách hàng
+  <b>không</b> nằm ở đây — khách tự tạo bằng mã kích hoạt, và hiện trong trang của từng khách.
+</p>
+
+<div class="ac-table-wrap chamfer-sm">
+  <table class="ac-table">
+    <thead>
+      <tr><th>Email</th><th>Họ tên</th><th>Trạng thái</th><th>Ngày tạo</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for u in users %}
+      <tr>
+        <td>
+          <!--email_off-->{{ u.email }}<!--/email_off-->
+          {% if u.id == user.id %}<span class="badge badge-secondary">Bạn</span>{% endif %}
+        </td>
+        <td>{{ u.full_name or '—' }}</td>
+        <td>
+          {% if u.is_active %}<span class="status-pill status-pill-active">Hoạt động</span>
+          {% else %}<span class="status-pill status-pill-idle">Đã khoá</span>{% endif %}
+        </td>
+        <td class="ac-num">{{ u.created_at|datetime }}</td>
+        <td>
+          <div class="ac-row-actions">
+            <a class="btn btn-ghost btn-sm" href="/web/users/{{ u.id }}/edit">Sửa</a>
+            {# No self-delete: removing your own account mid-session locks you
+               out of the page you are standing on. #}
+            {% if u.id != user.id %}
+            <form method="post" action="/web/users/{{ u.id }}/delete"
+                  data-ajax="refresh" data-ajax-msg="Đã xoá quản trị viên"
+                  data-ajax-confirm="Xoá quản trị viên {{ u.email }}?">
+              <button class="btn btn-danger btn-sm" type="submit">Xoá</button>
+            </form>
+            {% endif %}
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="ac-section-head" style="margin-top: var(--space-8);">
+  <h2 class="ac-section-title">Thêm quản trị viên</h2>
+</div>
+<form class="card ac-sell-form" method="post" action="/web/users"
+      data-ajax="refresh" data-ajax-msg="Đã thêm quản trị viên">
+  <div class="ac-sell-form__row">
+    <label class="ac-field">
+      <span class="ac-field__label">Email</span>
+      <input class="input" type="email" name="email" required autocomplete="off">
+    </label>
+    <label class="ac-field">
+      <span class="ac-field__label">Họ tên</span>
+      <input class="input" type="text" name="full_name" autocomplete="off">
+    </label>
+    <label class="ac-field">
+      <span class="ac-field__label">Mật khẩu</span>
+      <input class="input" type="password" name="password" minlength="8" required autocomplete="new-password">
+    </label>
+    <button class="btn btn-primary" type="submit">Thêm quản trị viên</button>
+  </div>
+  <p class="ac-form-note">Tài khoản tạo ở đây có toàn quyền quản trị: xem mọi khách hàng, cấp mã, sửa node.</p>
+</form>
+{% endblock %}

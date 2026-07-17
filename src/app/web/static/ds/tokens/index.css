@@ -1,0 +1,28 @@
+/**
+ * Design Tokens Entry Point - The Clean Lab
+ * "Titanium Command" Industrial/Tactical Design System
+ *
+ * Import order:
+ * 1. Foundation tokens (raw values)
+ * 2. Semantic tokens (purpose-mapped)
+ *
+ * Usage: Import this file once in your main CSS/app entry point
+ */
+
+/* ========================================
+   FOUNDATION LAYER
+   Raw color values, typography scales, spacing, shapes
+   ======================================== */
+
+@import './foundation/colors.css';
+@import './foundation/typography.css';
+@import './foundation/spacing.css';
+@import './foundation/shapes.css';
+
+/* ========================================
+   SEMANTIC LAYER
+   Purpose-mapped tokens referencing foundation
+   ======================================== */
+
+@import './semantic/colors.css';
+@import './semantic/typography.css';

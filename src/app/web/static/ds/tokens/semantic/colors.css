@@ -1,0 +1,66 @@
+/**
+ * Semantic Colors - The Clean Lab
+ *
+ * Purpose-mapped colors referencing foundation tokens.
+ * Use these in components (not foundation colors directly).
+ */
+
+:root {
+  /* ========================================
+     BACKGROUNDS
+     ======================================== */
+
+  --bg-primary: var(--color-gray-100);      /* Main page background */
+  --bg-secondary: var(--color-white);       /* Card/panel background */
+  --bg-elevated: var(--color-white);        /* Floating cards, modals */
+  --bg-inverse: var(--color-black);         /* Dark sections */
+  --bg-subtle: var(--color-gray-50);        /* Alternative light bg */
+
+  /* ========================================
+     TEXT
+     ======================================== */
+
+  --text-primary: var(--color-black);       /* Main content */
+  --text-secondary: var(--color-gray-900);  /* Supporting text */
+  --text-muted: var(--color-gray-400);      /* Disabled, placeholders */
+  --text-inverse: var(--color-white);       /* Text on dark bg */
+  --text-code: var(--color-gray-500);       /* Technical info */
+
+  /* ========================================
+     BORDERS
+     ======================================== */
+
+  --border-subtle: var(--color-gray-200);   /* Light dividers */
+  --border-default: var(--color-gray-300);  /* Standard borders */
+  --border-strong: var(--color-black);      /* Emphasized borders */
+
+  /* ========================================
+     INTERACTIVE / ACCENTS
+     ======================================== */
+
+  /* Primary accent - Tech Blue (Wash service) */
+  --accent-primary: var(--color-blue-500);
+  --accent-primary-hover: var(--color-blue-600);
+
+  /* Service-specific accents */
+  --accent-wash: var(--color-blue-500);      /* Wash/clean service */
+  --accent-dry: var(--color-orange-500);     /* Dry service */
+  --accent-dry-hover: var(--color-orange-600);
+
+  /* ========================================
+     STATUS / FEEDBACK
+     ======================================== */
+
+  --status-success: var(--color-green-500);  /* Success states */
+  --status-error: var(--color-red-500);      /* Errors, alerts */
+  --status-warning: var(--color-amber-500);  /* Warnings */
+  --status-info: var(--color-blue-500);      /* Info messages */
+
+  /* ========================================
+     OVERLAYS
+     ======================================== */
+
+  --overlay-light: rgba(255, 255, 255, 0.95);
+  --overlay-dark: rgba(17, 17, 17, 0.85);
+  --overlay-scrim: rgba(0, 0, 0, 0.5);       /* Modal backdrop */
+}

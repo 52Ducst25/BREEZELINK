@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Sửa {{ target.email }} — Aircon{% endblock %}
+{% block content %}
+<nav class="header-breadcrumb">
+  <a href="/web/users" class="header-breadcrumb-item">Người dùng</a>
+  <span class="header-breadcrumb-separator">/</span>
+  <span class="header-breadcrumb-item" aria-current="page">{{ target.email }}</span>
+</nav>
+
+<div class="ac-detail-head">
+  <div class="ac-detail-head__main">
+    <a class="ac-back" href="/web/users" title="Quay lại danh sách người dùng"
+       aria-label="Quay lại danh sách người dùng">
+      <svg viewBox="0 0 24 24" width="20" height="20" class="ac-back__ico" aria-hidden="true">
+        <path d="M15 18l-6-6 6-6"/>
+      </svg>
+    </a>
+    <h1 class="ac-detail-title">{{ target.email }}</h1>
+  </div>
+</div>
+
+<form class="card" style="max-width: 480px;" method="post" action="/web/users/{{ target.id }}/edit">
+  <div class="form-group">
+    <label class="form-label">Email</label>
+    <input class="input" type="email" value="{{ target.email }}" disabled>
+    <span class="form-help">Email không thể thay đổi sau khi tạo.</span>
+  </div>
+
+  <div class="form-group">
+    <label class="form-label" for="full_name">Họ tên</label>
+    <input class="input" id="full_name" type="text" name="full_name" value="{{ target.full_name or '' }}">
+  </div>
+
+  <div class="form-group">
+    <label class="form-label" for="phone">Điện thoại</label>
+    <input class="input" id="phone" type="text" name="phone" value="{{ target.phone or '' }}">
+  </div>
+
+  {# No "Vai trò" select: role means authority inside a household, and this
+     page only edits vendor staff. It gates nothing here (require_sysadmin
+     reads is_sysadmin), so the dropdown could only set a value that does
+     nothing — see admin_routes.edit_user_submit. #}
+
+  <div class="form-group">
+    <label class="checkbox">
+      <input class="checkbox-input" type="checkbox" name="is_active" value="1" {% if target.is_active %}checked{% endif %}>
+      <span>Tài khoản đang hoạt động</span>
+    </label>
+  </div>
+
+  <div class="form-group">
+    <label class="form-label" for="password">Mật khẩu mới</label>
+    <input class="input" id="password" type="password" name="password" minlength="8" placeholder="Để trống nếu không đổi">
+  </div>
+
+  <div class="card-footer">
+    <a class="btn btn-ghost btn-sm" href="/web/users">Huỷ</a>
+    <button class="btn btn-primary" type="submit">Lưu thay đổi</button>
+  </div>
+</form>
+{% endblock %}

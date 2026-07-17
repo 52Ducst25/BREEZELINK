@@ -1,0 +1,28 @@
+/**
+ * Platform Adaptations Entry Point - The Clean Lab
+ * "Titanium Command" Industrial/Tactical Design System
+ *
+ * Import platform-specific styles:
+ * - web.css: Responsive breakpoints, hover states, keyboard navigation
+ * - kiosk.css: HMI kiosk with 82px touch targets and hardware zones
+ *
+ * Usage:
+ * Import this file after base tokens for platform enhancements.
+ * Add platform class to root element:
+ * - <body class="platform-web"> for web
+ * - <body class="platform-kiosk"> for kiosk
+ */
+
+/* ========================================
+   WEB PLATFORM
+   Hover states, keyboard nav, responsive
+   ======================================== */
+
+@import './web.css';
+
+/* ========================================
+   HMI KIOSK PLATFORM
+   Large targets, distance viewing
+   ======================================== */
+
+@import './kiosk.css';

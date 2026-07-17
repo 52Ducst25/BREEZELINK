@@ -1,0 +1,260 @@
+/**
+ * Web Platform Styles - The Clean Lab
+ * "Titanium Command" Industrial/Tactical Design System
+ *
+ * Web-specific enhancements:
+ * - Responsive breakpoints
+ * - Hover states (pointer: fine only)
+ * - Keyboard focus navigation
+ * - Container layouts
+ */
+
+/* ========================================
+   BREAKPOINTS
+   Mobile-first approach
+   ======================================== */
+
+:root {
+  --breakpoint-sm: 640px;   /* Mobile landscape */
+  --breakpoint-md: 768px;   /* Tablet portrait */
+  --breakpoint-lg: 1024px;  /* Tablet landscape / small desktop */
+  --breakpoint-xl: 1280px;  /* Desktop */
+  --breakpoint-2xl: 1536px; /* Large desktop */
+}
+
+/* ========================================
+   WEB PLATFORM TOKENS
+   ======================================== */
+
+.platform-web {
+  --touch-target-min: 44px;
+  --text-base: 16px;
+  --container-max: 1280px;
+}
+
+/* ========================================
+   HOVER STATES (Web Only)
+   Only activate on devices with fine pointer (mouse)
+   ======================================== */
+
+@media (hover: hover) and (pointer: fine) {
+  /* Button hover states */
+  .btn-primary:hover {
+    background: var(--accent-primary-hover);
+    transform: translateY(-1px);
+    transition: all 0.2s ease;
+  }
+
+  .btn-secondary:hover {
+    background: var(--color-gray-200);
+    border-color: var(--border-strong);
+    transition: all 0.2s ease;
+  }
+
+  .btn-accent-wash:hover {
+    background: var(--color-blue-600);
+    box-shadow: var(--glow-blue);
+    transition: all 0.2s ease;
+  }
+
+  .btn-accent-dry:hover {
+    background: var(--color-orange-600);
+    box-shadow: var(--glow-orange);
+    transition: all 0.2s ease;
+  }
+
+  /* Card hover states */
+  .card:hover {
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-md);
+    transition: all 0.2s ease;
+  }
+
+  .card-interactive:hover {
+    border-color: var(--accent-primary);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lg);
+    transition: all 0.25s ease;
+  }
+
+  /* Navigation item hover */
+  .nav-item:hover {
+    background: var(--color-gray-100);
+    color: var(--accent-primary);
+    transition: all 0.15s ease;
+  }
+
+  /* Link hover */
+  a:hover {
+    color: var(--accent-primary-hover);
+    text-decoration: underline;
+    transition: color 0.2s ease;
+  }
+
+  /* Input hover */
+  .input:hover {
+    border-color: var(--border-strong);
+    transition: border-color 0.2s ease;
+  }
+
+  /* Status indicator hover */
+  .status-indicator:hover {
+    transform: scale(1.1);
+    transition: transform 0.2s ease;
+  }
+}
+
+/* ========================================
+   KEYBOARD NAVIGATION
+   Focus-visible for keyboard users
+   ======================================== */
+
+/* Focus ring for keyboard navigation */
+.btn:focus-visible,
+.card:focus-visible,
+.nav-item:focus-visible,
+.input:focus-visible {
+  outline: 3px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+/* Skip focus ring for mouse users */
+.btn:focus:not(:focus-visible),
+.card:focus:not(:focus-visible),
+.nav-item:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* ========================================
+   RESPONSIVE CONTAINERS
+   ======================================== */
+
+.container-web {
+  width: 100%;
+  max-width: var(--container-max);
+  margin: 0 auto;
+  padding: 0 var(--space-4);
+}
+
+@media (min-width: 768px) {
+  .container-web {
+    padding: 0 var(--space-6);
+  }
+}
+
+@media (min-width: 1024px) {
+  .container-web {
+    padding: 0 var(--space-8);
+  }
+}
+
+.container-web-wide {
+  width: 100%;
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 0 var(--space-6);
+}
+
+@media (min-width: 1280px) {
+  .container-web-wide {
+    padding: 0 var(--space-10);
+  }
+}
+
+/* ========================================
+   FLUID TYPOGRAPHY
+   Scales between breakpoints
+   ======================================== */
+
+:root {
+  --text-fluid-base: clamp(16px, 1.5vw, 20px);
+  --text-fluid-lg: clamp(18px, 2vw, 24px);
+  --text-fluid-xl: clamp(20px, 2.5vw, 28px);
+  --text-fluid-2xl: clamp(24px, 3vw, 36px);
+  --text-fluid-3xl: clamp(30px, 4vw, 48px);
+}
+
+.text-fluid {
+  font-size: var(--text-fluid-base);
+}
+
+.text-fluid-lg {
+  font-size: var(--text-fluid-lg);
+}
+
+.text-fluid-xl {
+  font-size: var(--text-fluid-xl);
+}
+
+/* ========================================
+   RESPONSIVE GRID LAYOUTS
+   ======================================== */
+
+.grid-responsive {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 640px) {
+  .grid-responsive {
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--space-6);
+  }
+}
+
+@media (min-width: 1024px) {
+  .grid-responsive {
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--space-8);
+  }
+}
+
+/* ========================================
+   RESPONSIVE BUTTON SIZES
+   ======================================== */
+
+.btn-responsive {
+  min-height: 44px;
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-sm);
+}
+
+@media (min-width: 768px) {
+  .btn-responsive {
+    min-height: 48px;
+    padding: var(--space-3) var(--space-6);
+    font-size: var(--text-base);
+  }
+}
+
+@media (min-width: 1024px) {
+  .btn-responsive {
+    min-height: 52px;
+    font-size: var(--text-lg);
+  }
+}
+
+/* ========================================
+   UTILITY: HIDE/SHOW AT BREAKPOINTS
+   ======================================== */
+
+.hide-mobile {
+  display: none;
+}
+
+@media (min-width: 768px) {
+  .hide-mobile {
+    display: block;
+  }
+}
+
+.hide-desktop {
+  display: block;
+}
+
+@media (min-width: 768px) {
+  .hide-desktop {
+    display: none;
+  }
+}

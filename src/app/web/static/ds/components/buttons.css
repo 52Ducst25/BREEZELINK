@@ -1,0 +1,241 @@
+/**
+ * Buttons - The Clean Lab
+ * "Titanium Command" Button System
+ *
+ * Variants: primary, secondary, ghost, icon-only
+ * Sizes: sm, md (default), lg, kiosk
+ * States: default, hover, active, disabled
+ */
+
+/* ========================================
+   BASE BUTTON
+   ======================================== */
+
+.btn {
+  /* Layout */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-6);
+  min-height: 48px;
+  min-width: 120px;
+
+  /* Visual */
+  background: var(--accent-primary);
+  color: var(--text-inverse);
+  border: var(--border-width-md) solid var(--color-black);
+  clip-path: var(--shape-chamfer-sm);
+  box-shadow: var(--shadow-md);
+
+  /* Typography */
+  font: var(--body-base);
+  font-weight: var(--weight-bold);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  text-decoration: none;
+
+  /* Interaction */
+  cursor: pointer;
+  transition: transform 0.1s ease, background 0.15s ease;
+  user-select: none;
+}
+
+.btn:hover {
+  background: var(--accent-primary-hover);
+}
+
+.btn:active {
+  transform: scale(0.96);
+}
+
+.btn:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-md), 0 0 0 3px rgba(0, 85, 255, 0.3);
+}
+
+.btn:disabled {
+  background: var(--color-gray-300);
+  color: var(--text-muted);
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* ========================================
+   PRIMARY BUTTON (Default)
+   ======================================== */
+
+.btn-primary {
+  background: var(--accent-primary);
+  color: var(--text-inverse);
+  border-color: var(--color-black);
+}
+
+.btn-primary:hover {
+  background: var(--accent-primary-hover);
+}
+
+/* ========================================
+   SECONDARY BUTTON
+   ======================================== */
+
+.btn-secondary {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: var(--border-width-md) solid var(--border-strong);
+  box-shadow: var(--shadow-sm);
+}
+
+.btn-secondary:hover {
+  background: var(--color-gray-100);
+  border-color: var(--accent-primary);
+}
+
+.btn-secondary:active {
+  transform: scale(0.96);
+}
+
+.btn-secondary:disabled {
+  background: var(--color-gray-100);
+  color: var(--text-muted);
+  border-color: var(--border-subtle);
+}
+
+/* ========================================
+   GHOST BUTTON
+   ======================================== */
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-primary);
+  border: var(--border-width-md) solid transparent;
+  box-shadow: none;
+  min-width: auto;
+}
+
+.btn-ghost:hover {
+  background: var(--color-gray-100);
+  border-color: var(--border-subtle);
+}
+
+.btn-ghost:active {
+  transform: scale(0.96);
+}
+
+.btn-ghost:disabled {
+  background: transparent;
+  color: var(--text-muted);
+}
+
+/* ========================================
+   ICON-ONLY BUTTON
+   ======================================== */
+
+.btn-icon {
+  min-width: 48px;
+  padding: var(--space-3);
+  gap: 0;
+}
+
+.btn-icon.btn-sm {
+  min-width: 36px;
+}
+
+.btn-icon.btn-lg {
+  min-width: 56px;
+}
+
+.btn-icon.btn-kiosk {
+  min-width: 82px;
+}
+
+/* ========================================
+   SIZE VARIANTS
+   ======================================== */
+
+/* Small */
+.btn-sm {
+  padding: var(--space-2) var(--space-4);
+  min-height: 36px;
+  min-width: 100px;
+  font-size: var(--text-sm);
+}
+
+/* Large */
+.btn-lg {
+  padding: var(--space-4) var(--space-8);
+  min-height: 56px;
+  min-width: 140px;
+  font-size: var(--text-lg);
+}
+
+/* Kiosk size - 82px touch target for industrial/POS */
+.btn-kiosk {
+  padding: var(--space-5) var(--space-10);
+  min-height: 82px;
+  min-width: 180px;
+  font-size: var(--text-xl);
+  clip-path: var(--shape-chamfer-lg);
+}
+
+/* ========================================
+   WASH/DRY SERVICE VARIANTS
+   ======================================== */
+
+.btn-wash {
+  background: var(--accent-wash);
+  color: var(--text-inverse);
+}
+
+.btn-wash:hover {
+  background: var(--accent-primary-hover);
+}
+
+.btn-dry {
+  background: var(--accent-dry);
+  color: var(--text-inverse);
+}
+
+.btn-dry:hover {
+  background: var(--accent-dry-hover);
+}
+
+/* ========================================
+   FULL WIDTH VARIANT
+   ======================================== */
+
+.btn-block {
+  width: 100%;
+  justify-content: center;
+}
+
+/* ========================================
+   LOADING STATE
+   ======================================== */
+
+.btn[aria-busy="true"],
+.btn.is-loading {
+  cursor: wait;
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.btn[aria-busy="true"]::after,
+.btn.is-loading::after {
+  content: '';
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  margin-left: var(--space-2);
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: btn-spin 0.6s linear infinite;
+}
+
+@keyframes btn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

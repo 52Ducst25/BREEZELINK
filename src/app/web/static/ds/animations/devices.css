@@ -1,0 +1,294 @@
+/**
+ * Device Animations - The Clean Lab
+ * "Titanium Command" Industrial/Tactical Design System
+ *
+ * Physical device feedback: NFC readers, card slots, bill acceptors
+ * Animations for hardware interaction states
+ */
+
+/* ========================================
+   NFC READER - WAVE EFFECT
+   ======================================== */
+
+@keyframes nfc-wave {
+  0% {
+    transform: scale(0.8);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1.5);
+    opacity: 0;
+  }
+}
+
+.nfc-reader {
+  position: relative;
+}
+
+/* Expanding concentric waves */
+.nfc-reader::before,
+.nfc-reader::after {
+  content: '';
+  position: absolute;
+  border: 2px solid var(--accent-primary);
+  border-radius: 50%;
+  width: 60px;
+  height: 60px;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.nfc-reader.is-active::before {
+  animation: nfc-wave 1.5s ease-out infinite;
+}
+
+.nfc-reader.is-active::after {
+  animation: nfc-wave 1.5s ease-out 0.75s infinite;
+}
+
+/* NFC icon pulse when ready */
+@keyframes nfc-ready {
+  0%, 100% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.nfc-reader.is-ready .nfc-icon {
+  animation: nfc-ready 2s ease-in-out infinite;
+}
+
+/* ========================================
+   CARD SLOT - INSERT/EJECT
+   ======================================== */
+
+@keyframes card-insert {
+  0% {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes card-eject {
+  0% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  30% {
+    transform: translateY(-20%);
+  }
+  100% {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+}
+
+.card-slot-icon.inserting {
+  animation: card-insert var(--duration-normal) var(--ease-out);
+}
+
+.card-slot-icon.ejecting {
+  animation: card-eject var(--duration-slow) var(--ease-in);
+}
+
+/* Card slot ready state */
+.card-slot.is-ready {
+  border-color: var(--status-success);
+  transition: border-color var(--duration-fast);
+}
+
+.card-slot.is-reading {
+  border-color: var(--accent-primary);
+}
+
+.card-slot.is-error {
+  border-color: var(--status-error);
+}
+
+/* ========================================
+   BILL ACCEPTOR - INSERTION PROGRESS
+   ======================================== */
+
+.bill-acceptor {
+  --bill-progress: 0%;
+  position: relative;
+  transition: border-color var(--duration-fast);
+}
+
+/* Bill visual element */
+.bill-acceptor .bill-visual {
+  transform: translateY(calc(-100% + var(--bill-progress)));
+  transition: transform var(--duration-normal) var(--ease-default);
+}
+
+/* State-based colors */
+.bill-acceptor.is-ready {
+  border-color: var(--status-success);
+}
+
+.bill-acceptor.is-processing {
+  border-color: var(--status-warning);
+}
+
+.bill-acceptor.is-error {
+  border-color: var(--status-error);
+  animation: shake var(--duration-slow);
+}
+
+/* Bill acceptor slot animation */
+@keyframes bill-slot-ready {
+  0%, 100% {
+    box-shadow: inset 0 0 0 var(--status-success);
+  }
+  50% {
+    box-shadow: inset 0 0 10px var(--status-success);
+  }
+}
+
+.bill-acceptor.is-ready::after {
+  animation: bill-slot-ready 2s ease-in-out infinite;
+}
+
+/* ========================================
+   PAYMENT TERMINAL - PROCESSING
+   ======================================== */
+
+@keyframes terminal-processing {
+  0%, 100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.payment-terminal.is-processing {
+  animation: terminal-processing 1.5s ease-in-out infinite;
+}
+
+/* Terminal display scanline */
+.payment-terminal-display {
+  position: relative;
+  overflow: hidden;
+}
+
+.payment-terminal.is-active .payment-terminal-display::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--accent-primary),
+    transparent
+  );
+  animation: scanline 2s linear infinite;
+}
+
+/* ========================================
+   DISPENSER - OPENING/CLOSING
+   ======================================== */
+
+@keyframes dispenser-open {
+  0% {
+    transform: scaleY(0);
+    transform-origin: top;
+  }
+  100% {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes dispenser-close {
+  0% {
+    transform: scaleY(1);
+    transform-origin: top;
+  }
+  100% {
+    transform: scaleY(0);
+  }
+}
+
+.dispenser-door.opening {
+  animation: dispenser-open var(--duration-slow) var(--ease-out);
+}
+
+.dispenser-door.closing {
+  animation: dispenser-close var(--duration-slow) var(--ease-in);
+}
+
+/* ========================================
+   BARCODE SCANNER - SCANNING
+   ======================================== */
+
+@keyframes scanner-beam {
+  0%, 100% {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+  10%, 90% {
+    opacity: 1;
+  }
+  50% {
+    transform: translateX(100%);
+  }
+}
+
+.barcode-scanner.is-scanning::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--status-error);
+  box-shadow: 0 0 8px var(--status-error);
+  animation: scanner-beam 2s ease-in-out infinite;
+}
+
+/* ========================================
+   REDUCED MOTION
+   ======================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  .nfc-reader::before,
+  .nfc-reader::after,
+  .nfc-reader.is-ready .nfc-icon,
+  .payment-terminal.is-processing,
+  .payment-terminal-display::after,
+  .bill-acceptor.is-ready::after,
+  .barcode-scanner.is-scanning::after {
+    animation: none;
+  }
+
+  /* Keep essential state changes */
+  .card-slot,
+  .bill-acceptor,
+  .payment-terminal {
+    transition: border-color var(--duration-fast);
+  }
+
+  /* Simplify insert/eject animations */
+  .card-slot-icon.inserting {
+    animation: fade-in var(--duration-fast);
+  }
+
+  .card-slot-icon.ejecting {
+    animation: fade-out var(--duration-fast);
+  }
+
+  .dispenser-door.opening,
+  .dispenser-door.closing {
+    animation-duration: var(--duration-fast);
+  }
+}

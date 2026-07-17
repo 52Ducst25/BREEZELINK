@@ -1,0 +1,149 @@
+# AirConditioner — VPS stack. Deploy pattern lifted from SafeKitchen.
+#
+#   docker compose -f docker/docker-compose.vps.yml up -d --build
+#
+# EXPOSURE RULE: nothing binds 0.0.0.0. Every published port is 127.0.0.1-only and
+# the single path in from the internet is the Cloudflare tunnel -> api. (The legacy
+# breezelink stack on this same box breaks that rule: it publishes 0.0.0.0:8000 and
+# 0.0.0.0:8883, so its EMQX is reachable by anyone.)
+#
+# PORT MAP on this VPS — these are taken, hence the shifts below:
+#   breezelink (/var/backend/BreezeLink):  8000 api, 5432 pg, 6379 redis, 8883 mqtts, 18083 emqx-ui, 8081 pgweb
+#   safekitchen (/home/duc/safekitchen):   8100 api, 5433 pg, 1883 mqtt, 18084 emqx-ui
+#   aircon (this file):                    8200 api, 5434 pg, 18085 emqx-ui
+name: aircon
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aircon
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aircon}
+      POSTGRES_DB: aircon
+    ports:
+      - "127.0.0.1:5434:5432"   # loopback only; reach via SSH tunnel, never publicly
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aircon"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Not published at all: only api + worker reach it, over the compose network.
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  emqx:
+    image: emqx/emqx:5.8
+    restart: unless-stopped
+    ports:
+      # Dashboard on loopback. MQTT (1883/8883) deliberately NOT published yet:
+      # EMQX 5.x defaults to authentication=[] + no_match=allow, so exposing the
+      # listener before per-device credentials exist would let anyone publish
+      # bl/{org}/indoor/cmd — i.e. drive a stranger's air conditioner. Open it only
+      # once per-device auth + topic ACL are provisioned.
+      - "127.0.0.1:18085:18083"
+    volumes:
+      - emqx_data:/opt/emqx/data
+    healthcheck:
+      test: ["CMD", "/opt/emqx/bin/emqx", "ctl", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    # Keep on ONE line: folded YAML (>) makes sh treat --proxy-headers as a separate
+    # command, and uvicorn then starts silently WITHOUT it. Cloudflare terminates TLS
+    # at the edge and calls plain http, so without --proxy-headers uvicorn thinks the
+    # scheme is http and the `secure` session cookie is dropped — login never sticks.
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips=*"
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      DB_URL: postgresql+asyncpg://aircon:${POSTGRES_PASSWORD:-aircon}@postgres:5432/aircon
+      REDIS_URL: redis://redis:6379/0
+      MQTT_HOST: emqx
+      MQTT_PORT: 1883
+      MQTT_TLS: "false"
+    ports:
+      - "127.0.0.1:8200:8000"
+    # Published APKs. WITHOUT this they are written inside the container's
+    # writable layer and destroyed by the next `up -d --build` — the release
+    # row would survive in Postgres while its file silently vanished, so the
+    # customers' update check would 404 on a build the admin can still see
+    # listed. A named volume (not a bind mount) keeps it self-contained; see
+    # docker/Dockerfile for why /data/apk must be chowned in the image first.
+    volumes:
+      - apk_data:/data/apk
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      emqx:
+        condition: service_started
+
+  worker:
+    # The image's HEALTHCHECK curls /api/v1/health, which only the api serves.
+    # The worker runs app.workers.manager and no HTTP server, so that probe can
+    # never pass and the container sits "unhealthy" forever — noise that would
+    # hide a real failure. It is not a health signal for this service.
+    healthcheck:
+      disable: true
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      DB_URL: postgresql+asyncpg://aircon:${POSTGRES_PASSWORD:-aircon}@postgres:5432/aircon
+      REDIS_URL: redis://redis:6379/0
+      MQTT_HOST: emqx
+      MQTT_PORT: 1883
+      MQTT_TLS: "false"
+    command: ["python", "-m", "app.workers.manager", "--role", "consumer"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      emqx:
+        condition: service_started
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    # network_mode "service:api" = share the api container's network stack, so the
+    # dashboard ingress `http://localhost:8000` resolves to THIS api with no dashboard
+    # edits. It also means cloudflared physically cannot reach the other projects on
+    # this host, so a mistyped hostname can't expose someone else's app.
+    #
+    # CF_TUNNEL_TOKEN comes from docker/.env — gitignored, created by hand on the VPS.
+    # The token alone is enough to impersonate the tunnel; never commit it.
+    command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN}
+    network_mode: "service:api"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  emqx_data:
+  # Only the api mounts this — the worker shares the image but never serves or
+  # receives an APK.
+  apk_data:

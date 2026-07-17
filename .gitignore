@@ -1,0 +1,55 @@
+# --- Secrets. Read this block before adding anything below it. ---
+# BreezeLink shipped real WiFi credentials to git because its .gitignore listed
+# *.pem and .env but never config.h, while both FirmWare/*/config.h stayed tracked.
+# The .example files are the only firmware/env templates that may be committed.
+.env
+.env.*
+!.env.example
+docker/.env
+FirmWare/**/config.h
+FirmWare/**/secrets.h
+!FirmWare/**/config.h.example
+!FirmWare/**/secrets.h.example
+*.pem
+*.key
+service-account*.json
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- Flutter / mobile ---
+**/.dart_tool/
+**/build/
+*.apk
+*.aab
+*.ipa
+
+# --- Firmware ---
+.pio/
+.pioenvs/
+.piolibdeps/
+*.bin
+*.elf
+
+# --- Local artifacts ---
+_backups/
+*.sql.gz
+repomix-output.*
+
+# --- Editors / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

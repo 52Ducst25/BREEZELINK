@@ -1,0 +1,273 @@
+/**
+ * Cards - The Clean Lab
+ * "Titanium Command" Card System
+ *
+ * Variants: base, selectable, accent-wash, accent-dry
+ * States: default, hover, selected, disabled
+ */
+
+/* ========================================
+   BASE CARD
+   ======================================== */
+
+.card {
+  /* Layout */
+  display: block;
+  padding: var(--space-6);
+
+  /* Visual */
+  background: var(--bg-secondary);
+  border: var(--border-width-md) solid var(--border-default);
+  clip-path: var(--shape-chamfer-lg);
+  box-shadow: var(--shadow-sm);
+
+  /* Interaction */
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.card:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-md);
+}
+
+/* ========================================
+   CARD SIZES
+   ======================================== */
+
+.card-sm {
+  padding: var(--space-4);
+  clip-path: var(--shape-chamfer-sm);
+}
+
+.card-lg {
+  padding: var(--space-8);
+  clip-path: var(--shape-chamfer-xl);
+}
+
+/* ========================================
+   SELECTABLE CARD
+   ======================================== */
+
+.card-selectable {
+  cursor: pointer;
+  position: relative;
+  transition: transform 0.1s ease, border-color 0.15s ease,
+              background 0.15s ease, color 0.15s ease;
+}
+
+/* Left accent strip indicator */
+.card-selectable::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: transparent;
+  transition: background 0.15s ease;
+  z-index: 1;
+}
+
+.card-selectable:hover {
+  border-color: var(--accent-primary);
+}
+
+.card-selectable:active {
+  transform: scale(0.98);
+}
+
+/* Selected state - inverted colors with accent strip */
+.card-selectable[aria-selected="true"],
+.card-selectable.is-selected {
+  background: var(--bg-inverse);
+  color: var(--text-inverse);
+  border-color: var(--accent-primary);
+  box-shadow: var(--shadow-lg);
+}
+
+.card-selectable[aria-selected="true"]::before,
+.card-selectable.is-selected::before {
+  background: var(--accent-primary);
+}
+
+/* Maintain text color for nested elements */
+.card-selectable[aria-selected="true"] *,
+.card-selectable.is-selected * {
+  color: inherit;
+}
+
+/* ========================================
+   ACCENT STRIP VARIANTS
+   ======================================== */
+
+.card-accent-wash {
+  border-left: 4px solid var(--accent-wash);
+}
+
+.card-accent-dry {
+  border-left: 4px solid var(--accent-dry);
+}
+
+.card-accent-success {
+  border-left: 4px solid var(--status-success);
+}
+
+.card-accent-error {
+  border-left: 4px solid var(--status-error);
+}
+
+.card-accent-warning {
+  border-left: 4px solid var(--status-warning);
+}
+
+/* ========================================
+   ELEVATED CARD (Modal/Floating)
+   ======================================== */
+
+.card-elevated {
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-xl);
+  border-color: var(--border-strong);
+}
+
+/* ========================================
+   DISABLED CARD
+   ======================================== */
+
+.card[aria-disabled="true"],
+.card.is-disabled {
+  background: var(--color-gray-100);
+  border-color: var(--border-subtle);
+  color: var(--text-muted);
+  opacity: 0.6;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* ========================================
+   CARD HEADER
+   ======================================== */
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-4);
+  padding-bottom: var(--space-3);
+  border-bottom: var(--border-width-sm) solid var(--border-subtle);
+}
+
+.card-title {
+  font: var(--heading-4);
+  margin: 0;
+}
+
+.card-subtitle {
+  font: var(--tech-label);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-widest);
+  margin: var(--space-1) 0 0;
+}
+
+/* ========================================
+   CARD BODY
+   ======================================== */
+
+.card-body {
+  /* Default spacing handled by card padding */
+}
+
+.card-body p {
+  margin: 0 0 var(--space-3);
+  font: var(--body-base);
+  color: var(--text-secondary);
+}
+
+.card-body p:last-child {
+  margin-bottom: 0;
+}
+
+/* ========================================
+   CARD FOOTER
+   ======================================== */
+
+.card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: var(--border-width-sm) solid var(--border-subtle);
+  gap: var(--space-3);
+}
+
+.card-footer-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+/* ========================================
+   CARD GRID LAYOUT
+   ======================================== */
+
+.card-grid {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+}
+
+.card-grid-2 {
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+}
+
+.card-grid-3 {
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+}
+
+/* ========================================
+   SERVICE CARD VARIANTS
+   ======================================== */
+
+.card-service {
+  text-align: center;
+  padding: var(--space-8);
+}
+
+.card-service-icon {
+  width: 80px;
+  height: 80px;
+  margin: 0 auto var(--space-4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-inverse);
+  color: var(--text-inverse);
+  clip-path: var(--shape-chamfer-md);
+}
+
+.card-service-title {
+  font: var(--heading-3);
+  text-transform: uppercase;
+  margin-bottom: var(--space-2);
+}
+
+.card-service-price {
+  font: var(--tech-price);
+  color: var(--accent-primary);
+  margin-bottom: var(--space-4);
+}
+
+/* ========================================
+   INTERACTIVE STATES FOR SELECTED CARDS
+   ======================================== */
+
+/* Selected wash card */
+.card-selectable.card-accent-wash[aria-selected="true"]::before {
+  background: var(--accent-wash);
+}
+
+/* Selected dry card */
+.card-selectable.card-accent-dry[aria-selected="true"]::before {
+  background: var(--accent-dry);
+}

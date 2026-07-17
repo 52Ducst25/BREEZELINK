@@ -1,0 +1,63 @@
+/**
+ * Motion Tokens - The Clean Lab
+ * "Titanium Command" Industrial/Tactical Design System
+ *
+ * Animation durations, easing functions, and standard transitions
+ * for consistent timing across all interactions
+ */
+
+:root {
+  /* ========================================
+     DURATIONS
+     ======================================== */
+
+  /* Instant feedback - micro-interactions */
+  --duration-instant: 100ms;
+
+  /* Fast transitions - button press, toggles */
+  --duration-fast: 150ms;
+
+  /* Normal transitions - card selection, state changes */
+  --duration-normal: 250ms;
+
+  /* Slow transitions - page changes, complex animations */
+  --duration-slow: 400ms;
+
+  /* Slower transitions - dramatic effects, screen switches */
+  --duration-slower: 600ms;
+
+  /* ========================================
+     EASING FUNCTIONS
+     ======================================== */
+
+  /* Default - balanced acceleration/deceleration */
+  --ease-default: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Ease in - accelerate */
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+
+  /* Ease out - decelerate */
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+
+  /* Bounce - slight overshoot for playful feedback */
+  --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* Spring - smooth overshoot for natural motion */
+  --ease-spring: cubic-bezier(0.175, 0.885, 0.32, 1.275);
+
+  /* ========================================
+     STANDARD TRANSITIONS
+     ======================================== */
+
+  /* Common property transitions */
+  --transition-fast: var(--duration-fast) var(--ease-default);
+  --transition-normal: var(--duration-normal) var(--ease-default);
+  --transition-slow: var(--duration-slow) var(--ease-default);
+
+  /* Specific property transitions */
+  --transition-transform: transform var(--duration-fast) var(--ease-out);
+  --transition-opacity: opacity var(--duration-normal) var(--ease-default);
+  --transition-background: background var(--duration-fast) var(--ease-default);
+  --transition-border: border-color var(--duration-fast) var(--ease-default);
+  --transition-color: color var(--duration-fast) var(--ease-default);
+}

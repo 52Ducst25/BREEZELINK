@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>{% block title %}Aircon{% endblock %}</title>
+  {# Browser-tab icon (the AC artwork). Cache-busted with ?v= like app.css so a
+     new icon shows without a hard refresh. .ico covers the address bar and old
+     browsers; the 32px PNG is what modern browsers pick for the tab. #}
+  <link rel="icon" href="/web-static/favicon.ico?v={{ v }}" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/web-static/favicon-32.png?v={{ v }}">
+  <link rel="apple-touch-icon" href="/web-static/favicon-180.png?v={{ v }}">
+  {# ds/index.css is the vendored, unmodified "Titanium Command" design
+     system (static/ds/, source: design-guiline) — it @imports tokens,
+     components, platforms and animations itself; that's the DS's own
+     contract (see its docs/design-guidelines/07-quick-start.md), so it's
+     kept as ONE link, not split apart. Files reached via @import don't
+     carry a "?v=" query string, so editing anything under ds/ needs a
+     hard refresh to see the change — acceptable because the DS is
+     vendored and stable. app.css is the project layer and DOES change
+     often, so it gets its own cache-busted "?v={{ v }}" (same reasoning
+     ds/base.css's docstring used to explain why THIS file, unlike ds/,
+     is linked directly instead of via @import). #}
+  <link rel="stylesheet" href="/web-static/ds/index.css">
+  <link rel="stylesheet" href="/web-static/app.css?v={{ v }}">
+  {# Anti-FOUC: apply the saved rail-collapsed state to <html> BEFORE first
+     paint so reloading a page never flashes the wide rail then snaps narrow. #}
+  <script>try{if(localStorage.getItem("ac_rail_collapsed")==="1"){document.documentElement.classList.add("rail-collapsed");}}catch(e){}</script>
+</head>
+<body class="{% if user %}has-rail{% endif %}">
+<a class="skip-link" href="#main">Bỏ qua, đến nội dung chính</a>
+
+{% if user %}
+{# Shell hoisted here once (rail + header) instead of repeated per page —
+   SafeKitchen re-included "_sidebar.html" and re-wrote <header> in every
+   template; every page below only fills {% block content %}. #}
+<aside class="ac-rail" id="acRail" aria-label="Menu chính">
+  <div class="ac-rail__top">
+    <a class="ac-rail__home" href="/web" title="Trang chủ">
+      <svg viewBox="0 0 24 24" width="20" height="20" class="ac-rail__ico" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+      <span class="ac-rail__brand">AIR<span class="ac-accent">CON</span></span>
+    </a>
+    <button class="ac-rail__toggle" id="acRailToggle" type="button" aria-label="Đóng/mở menu" title="Đóng/mở menu">
+      <svg viewBox="0 0 24 24" width="20" height="20" class="ac-rail__ico" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h16"/></svg>
+    </button>
+  </div>
+
+  <nav class="ac-rail__nav">
+    <a class="ac-rail__item {% if nav == 'dashboard' %}is-active{% endif %}" href="/web" title="Tổng quan">
+      <svg viewBox="0 0 24 24" width="20" height="20" class="ac-rail__ico" aria-hidden="true">
+        <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+        <rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>
+      </svg>
+      <span class="ac-rail__label">Tổng quan</span>
+    </a>
+    {# No per-item role gates: require_sysadmin guards every route this rail
+       points at, so anyone rendering this base IS vendor staff. A
+       "{% if user.role == owner %}" here would only hide menus from a
+       staff member whose household role happened to be 'member'.
+
+       "Thiết bị" and "Cấu hình" are gone as top-level items: both were scoped
+       to the viewer's own org, which for staff is not a real household.
+       Everything about a customer — nodes, readings, accounts, codes, comfort
+       config — now lives under that customer. #}
+    <a class="ac-rail__item {% if nav == 'customers' %}is-active{% endif %}" href="/web/customers" title="Khách hàng &amp; Máy">
+      <svg viewBox="0 0 24 24" width="20" height="20" class="ac-rail__ico" aria-hidden="true">
+        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
+        <path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+      </svg>
+      <span class="ac-rail__label">Khách hàng &amp; Máy</span>
+    </a>
+
+    <a class="ac-rail__item {% if nav == 'releases' %}is-active{% endif %}" href="/web/releases" title="Phiên bản app">
+      <svg viewBox="0 0 24 24" width="20" height="20" class="ac-rail__ico" aria-hidden="true">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/>
+      </svg>
+      <span class="ac-rail__label">Phiên bản app</span>
+    </a>
+
+    <a class="ac-rail__item {% if nav == 'users' %}is-active{% endif %}" href="/web/users" title="Quản trị viên">
+      <svg viewBox="0 0 24 24" width="20" height="20" class="ac-rail__ico" aria-hidden="true">
+        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+      </svg>
+      <span class="ac-rail__label">Quản trị viên</span>
+    </a>
+  </nav>
+
+  <div class="ac-rail__foot">
+    <div class="ac-live" id="acLiveDot" title="Kết nối thời gian thực">
+      <span class="ac-live__dot"></span>
+      <span class="ac-rail__label ac-live__txt">Trực tiếp</span>
+    </div>
+    <span class="ac-rail__label ac-rail__who"><!--email_off-->{{ user.email }}<!--/email_off--></span>
+  </div>
+</aside>
+
+<header class="header">
+  <div class="header-brand">AIR<span class="header-brand-accent">CON</span></div>
+  <div class="header-actions">
+    <span class="header-user-name"><!--email_off-->{{ user.email }}<!--/email_off--></span>
+    <form method="post" action="/web/logout">
+      <button class="btn btn-ghost btn-sm" type="submit">Đăng xuất</button>
+    </form>
+  </div>
+</header>
+{% endif %}
+
+<main id="main" class="{% if user %}container ac-main{% endif %} page-content-stagger">
+  {% block content %}{% endblock %}
+</main>
+
+<script src="/web-static/app.js?v={{ v }}"></script>
+</body>
+</html>

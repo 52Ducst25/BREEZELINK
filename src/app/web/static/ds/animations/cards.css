@@ -1,0 +1,120 @@
+/**
+ * Card Animations - The Clean Lab
+ * "Titanium Command" Industrial/Tactical Design System
+ *
+ * Selection transitions, hover states, and card interactions
+ */
+
+/* ========================================
+   BASE CARD TRANSITIONS
+   ======================================== */
+
+.card {
+  transition:
+    transform var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-normal) var(--ease-default);
+}
+
+/* ========================================
+   SELECTABLE CARDS
+   ======================================== */
+
+.card-selectable {
+  transition:
+    background var(--duration-normal) var(--ease-default),
+    border-color var(--duration-normal) var(--ease-default),
+    transform var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-normal) var(--ease-default);
+}
+
+/* Tech grid background transition */
+.card-selectable::before {
+  transition: background var(--duration-normal) var(--ease-default);
+}
+
+/* Press effect for selectable cards */
+.card-selectable:active {
+  transform: scale(0.98);
+}
+
+/* ========================================
+   SELECTED STATE
+   ======================================== */
+
+.card-selected {
+  /* Smooth transition to selected state */
+  transition:
+    background var(--duration-normal) var(--ease-default),
+    border-color var(--duration-normal) var(--ease-default),
+    box-shadow var(--duration-normal) var(--ease-default);
+}
+
+/* ========================================
+   HOVER EFFECTS (Desktop/Web Only)
+   ======================================== */
+
+@media (hover: hover) {
+  /* Subtle lift on hover */
+  .card:hover {
+    transform: translateY(-4px);
+  }
+
+  /* Enhanced shadow on hover */
+  .card-selectable:hover {
+    transform: translateY(-4px);
+  }
+
+  /* Combined hover + active press */
+  .card-selectable:hover:active {
+    transform: scale(0.98) translateY(0);
+  }
+}
+
+/* ========================================
+   CARD GRID ANIMATIONS
+   ======================================== */
+
+/* Staggered entrance animation for card grids */
+@keyframes card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.card-grid > .card {
+  animation: card-enter var(--duration-normal) var(--ease-out) both;
+}
+
+/* Stagger delay for each card */
+.card-grid > .card:nth-child(1) { animation-delay: 0ms; }
+.card-grid > .card:nth-child(2) { animation-delay: 50ms; }
+.card-grid > .card:nth-child(3) { animation-delay: 100ms; }
+.card-grid > .card:nth-child(4) { animation-delay: 150ms; }
+.card-grid > .card:nth-child(5) { animation-delay: 200ms; }
+.card-grid > .card:nth-child(6) { animation-delay: 250ms; }
+
+/* ========================================
+   REDUCED MOTION
+   ======================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  .card,
+  .card-selectable {
+    transition: none;
+  }
+
+  /* Preserve essential press feedback */
+  .card-selectable:active {
+    transform: scale(0.98);
+  }
+
+  /* Disable entrance animations */
+  .card-grid > .card {
+    animation: none;
+  }
+}
