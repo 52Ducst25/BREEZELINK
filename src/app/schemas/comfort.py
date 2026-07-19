@@ -72,13 +72,21 @@ class OverrideResponse(BaseModel):
 
 
 class FanSpeedResponse(BaseModel):
-    """Result of a fan-speed step press. ``available`` is False (with a
-    Vietnamese ``detail``) when the org has not yet learned the FAN_SPEED IR
-    button — the app shows that instead of pretending the press did something.
+    """Result of pressing a standalone action button. ``available`` is False
+    (with a Vietnamese ``detail``) when that IR button has not been learned yet
+    — the app shows that instead of pretending the press did something. Named
+    for the first action shipped (FAN_SPEED); now shared by every remote action.
     """
 
     available: bool
     detail: str
+
+
+class IrActionRequest(BaseModel):
+    """Press one learned remote button. ``action`` is validated against
+    ir_action_service.KNOWN_ACTIONS in the route."""
+
+    action: str
 
 
 class ComfortLogRead(BaseModel):

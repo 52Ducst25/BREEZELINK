@@ -13,10 +13,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.ir_action_code import IrActionCode
 
-# The only action today. Kept as a constant + set so the LEARN handler can
-# recognise the node's echo label and reject anything else.
+# Standalone remote buttons outside the (mode, temp) matrix — each is a single
+# learned IR frame, blasted on demand. The LEARN handler recognises these labels
+# on the node's echo and rejects anything else, and the send/learn routes
+# validate against this set. Adding a new button = one entry here (+ its label
+# and icon in the Flutter AcAction). FAN_SPEED is first for back-compat with the
+# already-shipped /comfort/fan-speed endpoint (build 6).
 FAN_SPEED = "FAN_SPEED"
-KNOWN_ACTIONS = frozenset({FAN_SPEED})
+KNOWN_ACTIONS = frozenset({
+    FAN_SPEED,
+    "SUPER",     # turbo / siêu tốc
+    "SLEEP",     # chế độ ngủ
+    "ECO",       # tiết kiệm điện
+    "QUIET",     # yên tĩnh
+    "SMART",     # tự động thông minh
+    "TIMER",     # hẹn giờ
+    "SWING_V",   # đảo gió dọc (louver lên/xuống)
+    "SWING_H",   # đảo gió ngang
+    "LIGHT",     # bật/tắt đèn màn hình dàn lạnh
+    "TEMP_UNIT", # đổi đơn vị °C/°F
+})
 
 
 async def get_action_raw(session: AsyncSession, org_id: str, action: str) -> list[int] | None:

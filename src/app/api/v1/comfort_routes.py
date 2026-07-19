@@ -20,6 +20,7 @@ from app.schemas.comfort import (
     ComfortLogRead,
     ComfortPreview,
     FanSpeedResponse,
+    IrActionRequest,
     OverrideRequest,
     OverrideResponse,
 )
@@ -123,25 +124,22 @@ def _current_indoor(state: dict | None) -> tuple[AcMode, int]:
     return mode, setpoint
 
 
-@router.post("/fan-speed", response_model=FanSpeedResponse)
-async def fan_speed_step(
-    user: User = Depends(get_current_user),
-    session: AsyncSession = Depends(get_db),
-    mqtt_client: aiomqtt.Client = Depends(get_mqtt_publisher),
+async def _send_ir_action(
+    session: AsyncSession, mqtt_client: aiomqtt.Client, org_id: str, action: str
 ) -> FanSpeedResponse:
-    """Blast the learned FAN_SPEED IR frame once — the AC advances its own fan
-    speed. Open-loop: the cloud cannot read the resulting speed. Returns
-    ``available=False`` (not an error) when the button hasn't been learned yet,
-    so the app can prompt the user to learn it.
+    """Blast one learned standalone action IR frame (FAN_SPEED, SLEEP, ECO, …).
+
+    Open-loop: the cloud can't read the AC's resulting state — the button just
+    presses the physical remote's button once. ``available=False`` (a normal
+    200, not an error) when that button hasn't been learned yet, so the app can
+    prompt the user to learn it instead of showing a failure.
     """
-    org_id = str(user.org_id)
-    raw = await ir_action_service.get_action_raw(session, org_id, ir_action_service.FAN_SPEED)
+    raw = await ir_action_service.get_action_raw(session, org_id, action)
     if raw is None:
         return FanSpeedResponse(
             available=False,
-            detail="Chưa học nút tốc độ quạt. Vào phần Học lệnh IR để học nút này từ điều khiển thật.",
+            detail="Chưa học nút này. Vào tab Học lệnh để học từ điều khiển thật.",
         )
-
     device = await telemetry_service.get_device_by_org_and_node(session, org_id, "indoor")
     if device is None:
         raise NotFoundError("Indoor device not registered for this organization")
@@ -152,12 +150,37 @@ async def fan_speed_step(
         session,
         org_id=org_id,
         device_id=device.id,
-        action=ir_action_service.FAN_SPEED,
+        action=action,
         raw_timing=raw,
         mode=mode,
         setpoint=setpoint,
     )
-    return FanSpeedResponse(available=True, detail="đã gửi lệnh tốc độ quạt")
+    return FanSpeedResponse(available=True, detail="đã gửi lệnh")
+
+
+@router.post("/ir-action", response_model=FanSpeedResponse)
+async def send_ir_action(
+    data: IrActionRequest,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+    mqtt_client: aiomqtt.Client = Depends(get_mqtt_publisher),
+) -> FanSpeedResponse:
+    """Press one learned remote button (any KNOWN_ACTIONS label). The remote UI
+    uses this for every peripheral button; fan speed included."""
+    if data.action not in ir_action_service.KNOWN_ACTIONS:
+        raise AppException(f"unknown action '{data.action}'", status_code=422)
+    return await _send_ir_action(session, mqtt_client, str(user.org_id), data.action)
+
+
+@router.post("/fan-speed", response_model=FanSpeedResponse)
+async def fan_speed_step(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+    mqtt_client: aiomqtt.Client = Depends(get_mqtt_publisher),
+) -> FanSpeedResponse:
+    """Back-compat shim for the already-shipped build 6, which posts here with
+    no body. New builds use POST /ir-action {action: "FAN_SPEED"}."""
+    return await _send_ir_action(session, mqtt_client, str(user.org_id), ir_action_service.FAN_SPEED)
 
 
 @router.get("/log", response_model=list[ComfortLogRead])
