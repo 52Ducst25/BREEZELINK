@@ -12,7 +12,12 @@ import '../../widgets/outline_panel.dart';
 /// same color function, so color never encodes "which sensor" (brief rule).
 /// Renders em-dashes when [reading] is null (no telemetry yet), never 0.0.
 class ReadingTile extends StatelessWidget {
-  const ReadingTile({super.key, required this.label, required this.reading, this.neutral});
+  const ReadingTile({
+    super.key,
+    required this.label,
+    required this.reading,
+    this.neutral,
+  });
 
   final String label;
   final LiveReading? reading;
@@ -26,10 +31,17 @@ class ReadingTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final ac = context.ac;
     final r = reading;
-    final state = r == null ? null : classifyThermal(r.temp, neutral: neutral ?? 24);
+    final state = r == null
+        ? null
+        : classifyThermal(r.temp, neutral: neutral ?? 24);
     final color = state == null
         ? ac.whiteDim
-        : state.colorFor(cold: ac.thermalCold, neutral: ac.thermalNeutral, warm: ac.thermalWarm, hot: ac.thermalHot);
+        : state.colorFor(
+            cold: ac.thermalCold,
+            neutral: ac.thermalNeutral,
+            warm: ac.thermalWarm,
+            hot: ac.thermalHot,
+          );
 
     return OutlinePanel(
       accent: state == null ? null : color,
@@ -42,7 +54,10 @@ class ReadingTile extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.baseline,
             textBaseline: TextBaseline.alphabetic,
             children: [
-              EmptyValue(r == null ? null : r.temp.toStringAsFixed(1), style: AcText.hero(size: 32, color: color)),
+              EmptyValue(
+                r?.temp.toStringAsFixed(1),
+                style: AcText.hero(size: 32, color: color),
+              ),
               Text('°C', style: AcText.label(size: 12, color: ac.whiteDim)),
             ],
           ),
@@ -51,7 +66,11 @@ class ReadingTile extends StatelessWidget {
             children: [
               Icon(Icons.water_drop_outlined, size: 13, color: ac.whiteDim),
               const SizedBox(width: 4),
-              EmptyValue(r == null ? null : r.humidity.toStringAsFixed(0), suffix: '%', style: AcText.mono(size: 12, color: ac.whiteDim)),
+              EmptyValue(
+                r?.humidity.toStringAsFixed(0),
+                suffix: '%',
+                style: AcText.mono(size: 12, color: ac.whiteDim),
+              ),
             ],
           ),
         ],

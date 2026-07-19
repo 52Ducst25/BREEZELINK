@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../services/api_client.dart';
 import '../../state/app_state.dart';
 import '../../state/theme_controller.dart';
 import '../../theme/ac_colors.dart';
@@ -8,6 +9,7 @@ import '../../theme/ac_text.dart';
 import '../../widgets/outline_panel.dart';
 import '../../widgets/primary_button.dart';
 import '../../widgets/section_label.dart';
+import '../../widgets/update_prompt.dart';
 
 /// TÀI KHOẢN tab: identity (from `/auth/me`), server address, theme toggle,
 /// logout. Changing server requires logging out first (server URL is fixed
@@ -44,6 +46,27 @@ class AccountScreen extends StatelessWidget {
         const SectionLabel('Giao diện'),
         const SizedBox(height: 10),
         const _ThemeModeSelector(),
+        const SizedBox(height: 20),
+        const SectionLabel('Ứng dụng'),
+        const SizedBox(height: 10),
+        OutlinePanel(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _row(ac, 'Phiên bản', ApiClient.appVersion.isEmpty ? '—' : ApiClient.appVersion),
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: PrimaryButton(
+                  label: 'Kiểm tra cập nhật',
+                  icon: Icons.system_update_outlined,
+                  primary: false,
+                  onPressed: () => checkForUpdate(context, s.apiClient.baseUrl),
+                ),
+              ),
+            ],
+          ),
+        ),
         const SizedBox(height: 20),
         const SectionLabel('Phiên đăng nhập'),
         const SizedBox(height: 10),

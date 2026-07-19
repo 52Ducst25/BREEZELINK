@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 
-/// "Glacier Command" palette — Aircon's re-theme of SafeKitchen's Titanium
-/// Command language for the cooling domain: dark carbon base + ICE-BLUE accent
-/// (not SafeKitchen's #0055FF tech-blue) so the two apps read as siblings, not
-/// clones. Thermal-state colors (cold/neutral/warm/hot) are the semantic core:
-/// they encode WHAT A READING MEANS, never WHICH SENSOR produced it — indoor
-/// and outdoor temperature use the exact same color scale.
+/// Aircon palette — the app half of the "Titanium Command" brand shared with
+/// the vendor web admin. Same chamfer geometry, same Inter + JetBrains Mono
+/// type, same 2px square borders — and, as of the brand-consistency pass, the
+/// SAME accent: web tech-blue #0055FF (was ice #33C7FF). The token is still
+/// named `ice` for continuity across ~114 call sites; it is now the brand blue,
+/// not a cyan. Dark base by default (a phone AC app reads best dark), but the
+/// light variant below matches the web's light surfaces for anyone who prefers
+/// it. Thermal colors (cold/neutral/warm/hot) stay the semantic core: they
+/// encode WHAT A READING MEANS, never WHICH SENSOR produced it.
 class AcColors {
   AcColors._();
 
@@ -16,12 +19,15 @@ class AcColors {
   static const carbonLine = Color(0xFF2A3B4C); // border
   static const carbonLineBright = Color(0xFF3E5468); // brighter border
 
-  // --- Brand accent: ice blue (cooling identity) ---
-  static const ice = Color(0xFF33C7FF); // primary accent
-  static const iceText = Color(0xFF7DDCFF); // links / emphasized numerals
-  static const iceDim = Color(0x2633C7FF); // ~15% soft background
-  static const iceGhost = Color(0x1433C7FF); // ~8% row hover
-  static const iceGlow = Color(0x3333C7FF); // ~20% glow
+  // --- Brand accent: web tech-blue #0055FF ---
+  // On the dark carbon base #0055FF is fine as a FILL (white text over it) and
+  // as a border, but too dark for small text — so `iceText` is a brighter tint
+  // of the same hue for links / emphasized numerals on dark.
+  static const ice = Color(0xFF0055FF); // primary accent (brand blue)
+  static const iceText = Color(0xFF4D8DFF); // links / emphasized numerals (dark-readable)
+  static const iceDim = Color(0x260055FF); // ~15% soft background
+  static const iceGhost = Color(0x140055FF); // ~8% row hover
+  static const iceGlow = Color(0x330055FF); // ~20% glow
 
   // --- Text & generic status ---
   static const white = Color(0xFFE7F1F8);
@@ -91,19 +97,20 @@ class AcPalette extends ThemeExtension<AcPalette> {
     thermalHot: AcColors.thermalHot,
   );
 
-  /// Light variant — pale ice-grey surfaces, deep ink text, deeper ice accent
-  /// for contrast on white (mirrors SafeKitchen's dark-accent-on-light trick).
+  /// Light variant — matches the web's light surfaces (page #EFF4F8, white
+  /// cards, deep ink text) with the SAME brand blue #0055FF accent, so the two
+  /// themes are one brand in either mode.
   static const light = AcPalette(
     carbon: Color(0xFFEFF4F8),
     carbonUp: Color(0xFFF8FBFD),
     carbonPanel: Color(0xFFFFFFFF),
     carbonLine: Color(0xFFC9D8E3),
     carbonLineBright: Color(0xFFDCE7EF),
-    ice: Color(0xFF0092C7),
-    iceText: Color(0xFF0092C7),
-    iceDim: Color(0x1A0092C7),
-    iceGhost: Color(0x0D0092C7),
-    iceGlow: Color(0x260092C7),
+    ice: Color(0xFF0055FF),
+    iceText: Color(0xFF0044CC),
+    iceDim: Color(0x1A0055FF),
+    iceGhost: Color(0x0D0055FF),
+    iceGlow: Color(0x260055FF),
     white: Color(0xFF0F1B24),
     whiteDim: Color(0xFF5B7285),
     success: Color(0xFF16A34A),

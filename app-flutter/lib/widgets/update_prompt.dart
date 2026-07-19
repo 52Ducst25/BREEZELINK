@@ -3,29 +3,55 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../services/ota_service.dart';
 
-/// Shows the "a new version is available" dialog, if there is one.
-///
-/// Install strategy: hand the APK URL to the browser rather than downloading
-/// it in-process. Doing it in-app would mean the REQUEST_INSTALL_PACKAGES
-/// permission, a FileProvider entry, and a runtime permission prompt — a lot
-/// of surface for a flow the browser already does natively (download, then
-/// tap to install). If that ever becomes too clunky, the download endpoint is
-/// unchanged; only this widget swaps.
+/// Launch-time check: prompt ONLY when there is actually a newer build. Silent
+/// on "up to date" and on network failure — a launch check must never
+/// interrupt or nag someone who just opened the app.
 Future<void> maybePromptUpdate(BuildContext context, String baseUrl) async {
   final ota = OtaService(baseUrl);
   final check = await ota.check();
-  // check() swallows network failures and returns null — a launch-time check
-  // must never interrupt someone who just wants to use the app.
   if (check == null || !check.available) return;
   if (!context.mounted) return;
+  await _showUpdateDialog(context, ota, check);
+}
 
+/// Manual check from Settings: ALWAYS gives feedback — the update dialog if a
+/// newer build exists, otherwise a "you're up to date" / "couldn't check"
+/// snackbar. That confirmation is the whole point of a manual "check" button.
+Future<void> checkForUpdate(BuildContext context, String baseUrl) async {
+  showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => const Center(child: CircularProgressIndicator()),
+  );
+  final check = await OtaService(baseUrl).check();
+  if (!context.mounted) return;
+  Navigator.of(context).pop(); // dismiss the spinner
+  if (!context.mounted) return;
+
+  if (check == null) {
+    _snack(context, 'Không kiểm tra được — kiểm tra mạng rồi thử lại.');
+    return;
+  }
+  if (!check.available) {
+    _snack(context, 'Bạn đang dùng phiên bản mới nhất.');
+    return;
+  }
+  await _showUpdateDialog(context, OtaService(baseUrl), check);
+}
+
+void _snack(BuildContext context, String msg) {
+  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+}
+
+/// The shared "a new version is available" dialog. Install strategy: hand the
+/// APK URL to the browser (download + tap-to-install) rather than the in-app
+/// installer, which would need REQUEST_INSTALL_PACKAGES + a FileProvider.
+Future<void> _showUpdateDialog(BuildContext context, OtaService ota, UpdateCheck check) async {
   final info = check.info;
   final sizeMb = info.apkSize > 0 ? (info.apkSize / 1048576).toStringAsFixed(1) : null;
-
   await showDialog<void>(
     context: context,
-    // A forced update is not dismissible: this build is below the server's
-    // floor and is not supposed to keep running.
+    // A forced update is not dismissible: this build is below the server's floor.
     barrierDismissible: !check.forced,
     builder: (ctx) => PopScope(
       canPop: !check.forced,
@@ -62,8 +88,6 @@ Future<void> maybePromptUpdate(BuildContext context, String baseUrl) async {
           FilledButton(
             onPressed: () async {
               final uri = Uri.parse(ota.downloadUrl(info));
-              // externalApplication = hand off to the browser, which downloads
-              // the file and offers to install it.
               await launchUrl(uri, mode: LaunchMode.externalApplication);
               if (ctx.mounted && !check.forced) Navigator.of(ctx).pop();
             },

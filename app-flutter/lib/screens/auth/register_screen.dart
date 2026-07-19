@@ -38,6 +38,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _name = TextEditingController();
   final _phone = TextEditingController();
   bool _busy = false;
+  bool _success = false;
   String? _error;
 
   @override
@@ -83,19 +84,51 @@ class _RegisterScreenState extends State<RegisterScreen> {
       );
     } catch (_) {
       err = 'Lỗi kết nối máy chủ. Kiểm tra địa chỉ và mạng rồi thử lại.';
-    } finally {
-      if (mounted) {
-        setState(() {
-          _busy = false;
-          _error = err;
-        });
-      }
+    }
+    if (!mounted) return;
+    if (err == null) {
+      // Success: show the confirmation, then return to login on its own so the
+      // customer signs in deliberately with the account they just created.
+      setState(() {
+        _busy = false;
+        _success = true;
+      });
+      Future.delayed(const Duration(milliseconds: 1800), () {
+        if (mounted) Navigator.of(context).maybePop();
+      });
+    } else {
+      setState(() {
+        _busy = false;
+        _error = err;
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final ac = context.ac;
+    if (_success) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Kích hoạt tài khoản')),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.check_circle_outline, size: 64, color: ac.success),
+                const SizedBox(height: 16),
+                Text('Tạo tài khoản thành công!',
+                    textAlign: TextAlign.center, style: AcText.heading(size: 18, color: ac.white)),
+                const SizedBox(height: 8),
+                Text('Đang quay về màn hình đăng nhập…',
+                    textAlign: TextAlign.center, style: AcText.body(size: 13, color: ac.whiteDim)),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
     return Scaffold(
       appBar: AppBar(title: const Text('Kích hoạt tài khoản')),
       body: Center(

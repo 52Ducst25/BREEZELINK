@@ -67,6 +67,7 @@ class _ControlScreenState extends State<ControlScreen> {
             if (err == null || err.contains('thiếu mã lệnh')) _startLocalCountdown();
             return err;
           },
+          onFanSpeed: () => s.fanSpeedStep(),
         ),
         const SizedBox(height: 20),
         const SectionLabel('Học lệnh IR'),

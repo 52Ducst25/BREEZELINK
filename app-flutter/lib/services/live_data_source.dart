@@ -16,10 +16,9 @@ import 'ws_client.dart';
 class LiveDataSource {
   LiveDataSource({
     required ApiClient apiClient,
-    required ComfortApi comfortApi,
-    required DeviceApi deviceApi,
-  })  : _comfortApi = comfortApi,
-        _deviceApi = deviceApi {
+    required this._comfortApi,
+    required this._deviceApi,
+  }) {
     _ws = WsClient(
       baseUrl: apiClient.baseUrl,
       getAccessToken: () => apiClient.currentAccessToken,
@@ -54,16 +53,20 @@ class LiveDataSource {
   void _onSnapshot(Map<String, dynamic> snapshot) {
     final comfortJson = snapshot['comfort'];
     if (comfortJson is Map) {
-      _comfort.add(ComfortPreview.fromJson(comfortJson.cast<String, dynamic>()));
+      _comfort.add(
+        ComfortPreview.fromJson(comfortJson.cast<String, dynamic>()),
+      );
     }
     _indoor.add(LiveReading.fromJsonOrNull(snapshot['indoor']));
     _outdoor.add(LiveReading.fromJsonOrNull(snapshot['outdoor']));
     final devicesJson = snapshot['devices'];
     if (devicesJson is List) {
-      _devices.add(devicesJson
-          .whereType<Map>()
-          .map((e) => Device.fromJson(e.cast<String, dynamic>()))
-          .toList());
+      _devices.add(
+        devicesJson
+            .whereType<Map>()
+            .map((e) => Device.fromJson(e.cast<String, dynamic>()))
+            .toList(),
+      );
     }
   }
 
@@ -88,4 +91,3 @@ class LiveDataSource {
     _wsConnected.close();
   }
 }
-

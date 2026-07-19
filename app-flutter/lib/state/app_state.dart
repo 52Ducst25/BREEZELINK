@@ -128,6 +128,17 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  /// Sends one fan-speed step. Returns null on success; a Vietnamese message
+  /// when the FAN_SPEED button hasn't been learned yet, or on request failure.
+  Future<String?> fanSpeedStep() async {
+    try {
+      final r = await comfortApi.fanSpeedStep();
+      return r.available ? null : r.detail;
+    } on ApiException catch (e) {
+      return e.message;
+    }
+  }
+
   @override
   void dispose() {
     for (final s in _subs) {

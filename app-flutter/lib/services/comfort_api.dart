@@ -28,6 +28,17 @@ class ComfortApi {
 
   Future<void> clearOverride() => _client.delete('/api/v1/comfort/override');
 
+  /// Blast the learned FAN_SPEED IR frame once (the AC advances its own fan
+  /// speed). `available` is false when the button hasn't been learned yet —
+  /// the server returns that as a normal 200, not an error.
+  Future<({bool available, String detail})> fanSpeedStep() async {
+    final body = await _client.post('/api/v1/comfort/fan-speed', data: const {});
+    return (
+      available: body['available'] == true,
+      detail: (body['detail'] ?? '').toString(),
+    );
+  }
+
   Future<List<ComfortLogEntry>> log({int limit = 100}) async {
     final rows = await _client.getList('/api/v1/comfort/log', query: {'limit': limit});
     return rows.map((e) => ComfortLogEntry.fromJson(e as Map<String, dynamic>)).toList();

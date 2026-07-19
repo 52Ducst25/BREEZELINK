@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../screens/auth/login_screen.dart';
-import '../screens/auth/register_screen.dart';
 import '../services/api_client.dart';
 import '../services/auth_api.dart';
 import '../services/comfort_api.dart';
@@ -52,19 +51,27 @@ class _AuthGateState extends State<AuthGate> {
     if (err != null) return err;
 
     if (remember) {
-      await CredentialStore.save(email, password);
+      await CredentialStore.saveAccount(email, password);
     } else {
-      await CredentialStore.clear();
+      await CredentialStore.removeAccount(email);
     }
     await _enter(client, authApi, baseUrl);
     return null;
   }
 
+  /// Ask the server to e-mail a reset link. Returns null on acceptance; the
+  /// server answers 202 whether or not the e-mail exists, so a null here means
+  /// only "request accepted", never "that e-mail is registered".
+  Future<String?> _forgot(String baseUrl, String email) async {
+    return AuthApi(ApiClient(baseUrl)).forgotPassword(email);
+  }
+
   /// Activate with a vendor-issued code, then drop straight into the app.
   ///
-  /// The API answers a successful register with the same token pair login
-  /// returns, so there is nothing to log in for afterwards — sending the user
-  /// back to the login form to retype what they just typed would be busywork.
+  /// Does NOT log the user straight in: the register screen shows a success
+  /// confirmation and returns to login (product decision — the customer sees
+  /// "account created" and signs in deliberately). The new account is saved so
+  /// it appears pre-filled in the login screen's saved-accounts picker.
   Future<String?> _register(
     String baseUrl,
     String code,
@@ -73,9 +80,7 @@ class _AuthGateState extends State<AuthGate> {
     String fullName,
     String phone,
   ) async {
-    final client = ApiClient(baseUrl);
-    final authApi = AuthApi(client);
-    final err = await authApi.register(
+    final err = await AuthApi(ApiClient(baseUrl)).register(
       code: code,
       email: email,
       password: password,
@@ -83,7 +88,8 @@ class _AuthGateState extends State<AuthGate> {
       phone: phone,
     );
     if (err != null) return err;
-    await _enter(client, authApi, baseUrl);
+    await widget.prefs.setString(_kBaseUrlKey, baseUrl);
+    await CredentialStore.saveAccount(email, password);
     return null;
   }
 
@@ -125,18 +131,13 @@ class _AuthGateState extends State<AuthGate> {
     final appState = _appState;
     if (appState == null) {
       final baseUrl = widget.prefs.getString(_kBaseUrlKey) ?? _kDefaultBaseUrl;
+      // The login screen owns register/forgot navigation now, so it can refresh
+      // its saved-accounts picker after a registration returns.
       return LoginScreen(
         initialBaseUrl: baseUrl,
         onLogin: _login,
-        // Pushed rather than swapped in: a customer who opened it by mistake
-        // can just come back. On success _register sets _appState, which
-        // rebuilds this gate into MainShell underneath the pushed route, so
-        // the register screen pops itself off the stack.
-        onRegisterTap: () => Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => RegisterScreen(initialBaseUrl: baseUrl, onRegister: _register),
-          ),
-        ),
+        onRegister: _register,
+        onForgot: _forgot,
       );
     }
     // Run the update check once, after MainShell's first frame — by then the

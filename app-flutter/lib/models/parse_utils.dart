@@ -12,7 +12,8 @@ double? asDoubleOrNull(dynamic v) {
   return null;
 }
 
-double asDouble(dynamic v, [double fallback = 0]) => asDoubleOrNull(v) ?? fallback;
+double asDouble(dynamic v, [double fallback = 0]) =>
+    asDoubleOrNull(v) ?? fallback;
 
 int? asIntOrNull(dynamic v) {
   if (v == null) return null;
@@ -30,7 +31,7 @@ bool asBool(dynamic v, [bool fallback = false]) {
   return fallback;
 }
 
-String? asStringOrNull(dynamic v) => v == null ? null : v.toString();
+String? asStringOrNull(dynamic v) => v?.toString();
 
 String asString(dynamic v, [String fallback = '']) => v?.toString() ?? fallback;
 

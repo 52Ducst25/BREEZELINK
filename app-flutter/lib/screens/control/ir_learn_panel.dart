@@ -62,6 +62,23 @@ class _IrLearnPanelState extends State<IrLearnPanel> {
     }
   }
 
+  Future<void> _learnFanSpeed() async {
+    setState(() {
+      _busy = true;
+      _status = null;
+    });
+    try {
+      await widget.irApi.triggerLearnAction('FAN_SPEED');
+      if (mounted) {
+        setState(() => _status = 'Đã gửi LEARN tốc độ quạt — bấm nút chỉnh quạt trên điều khiển thật trong vài giây, rồi bấm "Làm mới".');
+      }
+    } catch (e) {
+      if (mounted) setState(() => _status = 'Lỗi: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final ac = context.ac;
@@ -107,6 +124,28 @@ class _IrLearnPanelState extends State<IrLearnPanel> {
             const SizedBox(height: 10),
             Text(_status!, style: AcText.body(size: 12, color: ac.ice)),
           ],
+          const SizedBox(height: 16),
+          Divider(color: ac.carbonLine),
+          const SizedBox(height: 10),
+          // Standalone "fan speed" button — learned once, then the app's fan-speed
+          // control replays it so the AC steps its own fan speed.
+          Row(
+            children: [
+              Icon(Icons.air, size: 16, color: ac.ice),
+              const SizedBox(width: 8),
+              Expanded(child: Text('Nút tốc độ quạt', style: AcText.body(size: 12.5, color: ac.white))),
+              if (coverage?.hasFanSpeed == true)
+                Row(children: [
+                  Icon(Icons.check_circle, size: 14, color: ac.success),
+                  const SizedBox(width: 4),
+                  Text('đã học', style: AcText.label(size: 10, color: ac.success)),
+                ])
+              else
+                Text('chưa học', style: AcText.label(size: 10, color: ac.warning)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          PrimaryButton(label: 'Học nút tốc độ quạt', icon: Icons.settings_remote, primary: false, onPressed: _busy ? null : _learnFanSpeed),
           const SizedBox(height: 16),
           Divider(color: ac.carbonLine),
           const SizedBox(height: 10),

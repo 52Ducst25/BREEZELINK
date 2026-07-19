@@ -9,10 +9,15 @@ class IrApi {
   IrApi(this._client);
   final ApiClient _client;
 
-  Future<void> triggerLearn({required AcMode mode, int? temp}) => _client.post('/api/v1/ir/learn', data: {
-        'mode': mode.wireValue,
-        if (temp != null) 'temp': temp,
-      });
+  Future<void> triggerLearn({required AcMode mode, int? temp}) => _client.post(
+    '/api/v1/ir/learn',
+    data: {'mode': mode.wireValue, 'temp': ?temp},
+  );
+
+  /// Trigger LEARN for a standalone action button (e.g. `FAN_SPEED`) — the
+  /// captured frame lands in `ir_action_codes`, not the (mode, temp) matrix.
+  Future<void> triggerLearnAction(String action) =>
+      _client.post('/api/v1/ir/learn-action', data: {'action': action});
 
   Future<IrCoverage> coverage() async {
     final body = await _client.get('/api/v1/ir/codes');
