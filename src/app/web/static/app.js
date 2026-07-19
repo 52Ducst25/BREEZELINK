@@ -176,11 +176,23 @@
   function swapMain(html) {
     var main = document.getElementById("main");
     if (!main) return;
-    var fresh = new DOMParser().parseFromString(html, "text/html").getElementById("main");
+    var doc = new DOMParser().parseFromString(html, "text/html");
+    var fresh = doc.getElementById("main");
     if (!fresh) return;
     var y = window.scrollY; // keep the viewport where it was, not scrolled to top
     main.classList.remove("page-content-stagger");
     main.innerHTML = fresh.innerHTML;
+
+    // The header sits OUTSIDE #main, so a save that changes it (uploading or
+    // removing your avatar) would leave the old picture in the top bar. The
+    // response we already parsed carries the freshly rendered header, and the
+    // <img> in it has a new ?v=avatar_updated_at — which matters because the
+    // avatar is served with max-age=86400, so without swapping the src the
+    // browser would keep showing the cached OLD image for a day.
+    var head = document.querySelector(".header-actions");
+    var freshHead = doc.querySelector(".header-actions");
+    if (head && freshHead) head.innerHTML = freshHead.innerHTML;
+
     window.scrollTo(0, y);
   }
 

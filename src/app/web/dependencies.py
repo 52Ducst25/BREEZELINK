@@ -8,6 +8,7 @@ the same httpOnly cookie the WebSocket endpoint already reads for
 """
 
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -55,6 +56,18 @@ async def get_current_user_or_none(request: Request, session: AsyncSession) -> U
     user = await user_service.get_by_id(session, user_id)
     if user is None or not user.is_active:
         return None
+
+    # Heartbeat for the "Online" status. Updated on any authenticated page load,
+    # THROTTLED to once a minute so the SSR admin's ~5s auto-refresh doesn't
+    # write on every tick — one UPDATE/minute per active admin, no more. An
+    # admin with the panel open keeps this fresh, so the staff list can show
+    # "online" = seen in the last couple of minutes (users.html / the `online`
+    # filter). GETs otherwise don't write, so this commit is the exception.
+    now = datetime.now(timezone.utc)
+    last = user.last_seen_at
+    if last is None or (now - last).total_seconds() > 60:
+        user.last_seen_at = now
+        await session.commit()
 
     # Populate tenant contextvars for the service layer, same as the API's
     # get_current_user dependency (api/deps.py) does.

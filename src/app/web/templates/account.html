@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Tài khoản — Aircon{% endblock %}
+{% block content %}
+
+{# The signed-in admin's OWN profile. Colleagues are managed on /web/users;
+   nothing here takes a target id, so this page can only ever change you. #}
+
+<div class="ac-section-head">
+  <h2 class="ac-section-title">Tài khoản của tôi</h2>
+</div>
+
+{% if err %}<div class="status-banner status-banner-error" role="alert">{{ err }}</div>{% endif %}
+{% if ok %}<div class="status-banner status-banner-success" role="status">{{ ok }}</div>{% endif %}
+
+<div class="card ac-account">
+  <div class="ac-account__id">
+    {# Big version of the top-bar avatar: real picture if one is set, else the
+       same accent monogram the DS uses. #}
+    <span class="ac-avatar ac-avatar--lg">
+      {% if user.avatar_updated_at %}
+        <img class="ac-avatar__img"
+             src="/web/users/{{ user.id }}/avatar?v={{ user.avatar_updated_at.timestamp()|int }}"
+             alt="Ảnh đại diện">
+      {% else %}
+        {{ user|initials }}
+      {% endif %}
+    </span>
+    <div class="ac-account__who">
+      <div class="ac-account__name">{{ user.full_name or 'Chưa đặt họ tên' }}</div>
+      <div class="ac-account__mail"><!--email_off-->{{ user.email }}<!--/email_off--></div>
+      <div class="ac-account__meta">
+        Quản trị viên · tạo {{ user.created_at|ago }}
+        {% if user.last_login_at %}· đăng nhập lần cuối {{ user.last_login_at|ago }}{% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="ac-account__forms">
+    {# enctype is REQUIRED — without it the browser posts only the filename and
+       the server receives no bytes (same trap documented on releases.html). #}
+    <form class="ac-account__upload" method="post" action="/web/account/avatar"
+          enctype="multipart/form-data"
+          data-ajax="refresh" data-ajax-msg="Đã cập nhật ảnh đại diện"
+          data-ajax-pending="Đang tải ảnh lên…">
+      <label class="ac-field">
+        <span class="ac-field__label">Ảnh đại diện mới</span>
+        <input class="input" type="file" name="avatar"
+               accept="image/png,image/jpeg,image/gif,image/webp" required>
+      </label>
+      <button class="btn btn-primary" type="submit">Tải ảnh lên</button>
+    </form>
+
+    {% if user.avatar_updated_at %}
+    <form method="post" action="/web/account/avatar/delete"
+          data-ajax="refresh" data-ajax-msg="Đã xoá ảnh đại diện"
+          data-ajax-confirm="Xoá ảnh đại diện? Hệ thống sẽ hiện lại chữ viết tắt.">
+      <button class="btn btn-danger btn-sm" type="submit">Xoá ảnh</button>
+    </form>
+    {% endif %}
+  </div>
+
+  <p class="ac-form-note">
+    Nhận PNG, JPG, GIF, WEBP — tối đa 2 MB. Ảnh vuông hiển thị đẹp nhất
+    (ảnh chữ nhật sẽ bị cắt cho vừa khung tròn ở góc phải màn hình).
+  </p>
+</div>
+{% endblock %}

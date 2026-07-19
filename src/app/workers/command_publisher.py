@@ -167,3 +167,49 @@ async def publish_manual_command(
     await redis_state_service.set_last_switch(org_id, mode.value, now.timestamp())
     await redis_state_service.set_indoor_state(org_id, {"mode": mode.value, "setpoint": setpoint})
     return cmd_payload
+
+
+async def publish_ir_action(
+    client: aiomqtt.Client,
+    session: AsyncSession,
+    *,
+    org_id: str,
+    device_id: uuid.UUID,
+    action: str,
+    raw_timing: list[int],
+    mode: AcMode,
+    setpoint: int,
+) -> None:
+    """Blast a standalone learned action IR frame (e.g. FAN_SPEED) once.
+
+    Unlike the (mode, setpoint) commands, this does NOT change the operating
+    mode/setpoint — it just replays one learned button, so the AC advances its
+    own internal fan speed. The current ``mode``/``setpoint`` are carried only
+    as metadata so the node's state echo stays consistent; Redis indoor-state
+    and last_switch are deliberately left untouched. ``ir_raw`` is always sent
+    inline (action codes are not NVS-cached by id — there is no ir_code_id).
+    """
+    now = datetime.now(timezone.utc)
+    req_id = f"c-{uuid.uuid4().hex[:8]}"
+
+    cmd_payload = {
+        "req_id": req_id,
+        "mode": mode.value,
+        "setpoint": setpoint,
+        "ir_code_id": None,
+        "ir_raw": raw_timing,
+        "reason": f"action:{action}",
+    }
+    topic = mqtt_naming.topic(org_id, "indoor", "cmd")
+    await client.publish(topic, json.dumps(cmd_payload), qos=1, retain=False)
+
+    await command_service.insert_command(
+        session,
+        device_id=device_id,
+        ts=now,
+        mode=mode,
+        setpoint=setpoint,
+        ir_code_id=None,
+        source=CommandSource.manual,
+        req_id=req_id,
+    )

@@ -15,12 +15,19 @@
 <p class="ac-form-note" style="margin-bottom: var(--space-4);">
   Tài khoản ở đây đăng nhập được vào trang quản trị này. Tài khoản khách hàng
   <b>không</b> nằm ở đây — khách tự tạo bằng mã kích hoạt, và hiện trong trang của từng khách.
+  <br>
+  Cột <b>Trạng thái</b> hiện <b>Online</b> khi quản trị viên đang mở trang này
+  (hoạt động trong vòng 2 phút gần nhất), ngược lại là <b>Offline</b>. Tài khoản
+  bị khoá hiện <b>Đã khoá</b>.
 </p>
 
 <div class="ac-table-wrap chamfer-sm">
   <table class="ac-table">
     <thead>
-      <tr><th>Email</th><th>Họ tên</th><th>Trạng thái</th><th>Ngày tạo</th><th></th></tr>
+      <tr>
+        <th>Email</th><th>Họ tên</th><th>Trạng thái</th>
+        <th>Đăng nhập lần cuối</th><th>Tuổi tài khoản</th><th>Ngày tạo</th><th></th>
+      </tr>
     </thead>
     <tbody>
       {% for u in users %}
@@ -31,9 +38,25 @@
         </td>
         <td>{{ u.full_name or '—' }}</td>
         <td>
-          {% if u.is_active %}<span class="status-pill status-pill-active">Hoạt động</span>
-          {% else %}<span class="status-pill status-pill-idle">Đã khoá</span>{% endif %}
+          {% if not u.is_active %}
+            <span class="status-pill status-pill-idle">Đã khoá</span>
+          {% elif u.last_seen_at|online %}
+            <span class="status-pill status-pill-active">Online</span>
+          {% else %}
+            <span class="status-pill status-pill-idle">Offline</span>
+          {% endif %}
         </td>
+        <td>
+          {# last_login_at → "2 giờ trước" / "chưa từng". This is the honest
+             recency signal, replacing a fake "online now". #}
+          {% if u.last_login_at %}
+            <span>{{ u.last_login_at|ago }}</span>
+            <div class="ac-device__meta">{{ u.last_login_at|datetime }}</div>
+          {% else %}
+            <span class="ac-muted">Chưa đăng nhập</span>
+          {% endif %}
+        </td>
+        <td>{{ u.created_at|ago }}</td>
         <td class="ac-num">{{ u.created_at|datetime }}</td>
         <td>
           <div class="ac-row-actions">

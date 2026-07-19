@@ -127,6 +127,34 @@ html.rail-collapsed .ac-rail__top,
 html.rail-collapsed .ac-live { justify-content: center; }
 
 /* ============================================================
+   AVATAR -- the DS ships .header-user-avatar (a chamfered accent tile
+   holding initials); .ac-avatar extends that idea so the same element can
+   hold a real uploaded picture instead, at two sizes. Used by the small
+   tile in the header and the big one on the account page.
+   ============================================================ */
+.ac-avatar {
+  display: grid; place-items: center; overflow: hidden; flex: 0 0 auto;
+  background: var(--accent-primary); color: var(--text-inverse);
+  clip-path: var(--shape-chamfer-sm);
+  font-weight: var(--weight-bold);
+}
+.ac-avatar--sm { width: 36px; height: 36px; font: var(--label-sm); font-weight: var(--weight-bold); }
+.ac-avatar--lg { width: 84px; height: 84px; font: var(--heading-3); }
+/* object-fit keeps a non-square upload from stretching -- it is cropped to
+   the tile instead (the account page says so next to the file input). */
+.ac-avatar__img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* ============================================================
+   ACCOUNT PAGE
+   ============================================================ */
+.ac-account__id { display: flex; align-items: center; gap: var(--space-5); margin-bottom: var(--space-6); }
+.ac-account__name { font: var(--heading-4); }
+.ac-account__mail { font: var(--tech-code); color: var(--text-secondary); user-select: all; }
+.ac-account__meta { font-size: var(--text-xs); color: var(--text-muted); margin-top: var(--space-1); }
+.ac-account__forms { display: flex; align-items: flex-end; gap: var(--space-4); flex-wrap: wrap; }
+.ac-account__upload { display: flex; align-items: flex-end; gap: var(--space-3); flex-wrap: wrap; }
+
+/* ============================================================
    MAIN CONTENT -- .container is the DS's own utility (base.css); this
    only adds the top offset for the fixed 64px header + bottom breathing
    room, same constant SafeKitchen's .sk-main used for the same reason.
@@ -337,7 +365,7 @@ html.rail-collapsed .ac-live { justify-content: center; }
 }
 .ac-codes-banner__note { font: var(--body-sm); color: var(--text-secondary); margin-top: var(--space-1); }
 
-.ac-row-actions { display: flex; gap: var(--space-2); align-items: center; }
+.ac-row-actions { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
 .ac-addcode { display: flex; gap: var(--space-2); align-items: center; }
 .ac-addcode__n { width: 64px; text-align: center; }
 
@@ -563,6 +591,18 @@ html.rail-collapsed .ac-live { justify-content: center; }
 @keyframes ac-toast-spin { to { transform: rotate(360deg); } }
 
 .ac-toast__txt { font: var(--label-base); font-weight: var(--weight-bold); color: var(--text-primary); }
+
+/* Server-rendered variant (password-reset success). The JS toast fades in via
+   .is-in on a transition; this one is already .is-in at first paint (so it
+   survives JS being off), and CSS transitions don't run on initial render — so
+   the pop is a keyframe instead. Persistent, no auto-dismiss: once the reset
+   succeeded this page has nothing else to show. */
+.ac-toast--page .ac-toast__box {
+  max-width: 420px;
+  animation: ac-toast-pop var(--duration-normal) var(--ease-spring);
+}
+.ac-toast__sub { font: var(--body-sm); color: var(--text-secondary); text-align: center; margin: 0; }
+@keyframes ac-toast-pop { from { transform: scale(0.9); } to { transform: scale(1); } }
 
 /* In-app Yes/No confirmation — replaces the native confirm() dialog. Same
    centred, spring-in language as the toast, but interactive (a dimmed

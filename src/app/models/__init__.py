@@ -12,6 +12,7 @@ from app.models.config import Config
 from app.models.device import Device, DeviceStatus
 from app.models.enums import AcMode, CommandSource, NodeType
 from app.models.invite_code import InviteCode
+from app.models.ir_action_code import IrActionCode
 from app.models.ir_code import IrCode
 from app.models.organization import Organization, OrgType
 from app.models.telemetry import Telemetry
@@ -31,6 +32,7 @@ __all__ = [
     "AcMode",
     "Telemetry",
     "InviteCode",
+    "IrActionCode",
     "IrCode",
     "Command",
     "ComfortLog",

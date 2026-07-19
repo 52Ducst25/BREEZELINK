@@ -5,21 +5,11 @@ a public brute-force target with no throttle is the real exposure gate
 before this API leaves the local network.
 """
 
-import uuid
-
 from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
-from app.core.exceptions import UnauthorizedError
-from app.core.mailer import send_reset_email
 from app.core.rate_limit import limiter
-from app.core.security import (
-    RESET_TOKEN_TYPE,
-    create_reset_token,
-    decode_token,
-    password_fingerprint,
-)
 from app.models.user import User
 from app.schemas.auth import (
     AccessToken,
@@ -31,7 +21,7 @@ from app.schemas.auth import (
     ResetPasswordRequest,
     TokenPair,
 )
-from app.services import auth_service, user_service
+from app.services import auth_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -101,12 +91,7 @@ async def forgot_password(
     KISS: no DB table for reset tokens — a short-lived signed JWT
     (``purpose: reset``, see core/security.create_reset_token) IS the token.
     """
-    user = await user_service.get_by_email(session, data.email)
-    if user is not None and user.is_active:
-        reset_token = create_reset_token(
-            str(user.id), password_fingerprint(user.password_hash)
-        )
-        await send_reset_email(user.email, reset_token)
+    await auth_service.request_password_reset(session, data.email)
     return {"detail": _FORGOT_PASSWORD_DETAIL}
 
 
@@ -114,20 +99,5 @@ async def forgot_password(
 async def reset_password(
     data: ResetPasswordRequest, session: AsyncSession = Depends(get_db)
 ) -> dict[str, str]:
-    payload = decode_token(data.token, expected_type=RESET_TOKEN_TYPE)
-    try:
-        user_id = uuid.UUID(payload["sub"])
-    except (KeyError, ValueError) as exc:
-        raise UnauthorizedError("Invalid reset token") from exc
-
-    user = await user_service.get_by_id(session, user_id)
-    if user is None or not user.is_active:
-        raise UnauthorizedError("Invalid reset token")
-
-    # H3: reject a token minted for an older password (already used / rotated).
-    if payload.get("pwf") != password_fingerprint(user.password_hash):
-        raise UnauthorizedError("Invalid reset token")
-
-    await user_service.update_user(session, user, password=data.new_password)
-    await session.commit()
+    await auth_service.reset_password(session, data.token, data.new_password)
     return {"detail": "Password has been reset"}

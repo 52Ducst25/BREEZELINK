@@ -76,6 +76,9 @@ async def login_submit(
                      "Trang quản trị chỉ dành cho nhân viên.",
         })
 
+    # Persist the last_login_at that login_user stamped (it only flushed).
+    await session.commit()
+
     settings = get_settings()
     resp = RedirectResponse("/web", status_code=303)
     resp.set_cookie(
@@ -95,6 +98,46 @@ async def logout() -> RedirectResponse:
     resp = RedirectResponse("/web/login", status_code=303)
     resp.delete_cookie(SESSION_COOKIE_NAME, path="/")
     return resp
+
+
+# ---- Password reset — PUBLIC. The reset link e-mailed to a customer opens
+# here; the signed token IS the authorization, so there is deliberately no
+# login gate (they forgot their password — of course they are not logged in).
+# The same page serves every account, customer or staff.
+
+
+@router.get("/reset-password")
+async def reset_password_page(request: Request):
+    """Render the new-password form. The token rides in the query string of the
+    link (mailer builds ``{base}?token=…``) and is carried through in a hidden
+    field to the POST — the page itself does not validate it, the submit does,
+    so an expired link still shows the form rather than a bare error."""
+    token = request.query_params.get("token", "")
+    return render(request, "reset_password.html", {"user": None, "token": token, "error": None, "done": False})
+
+
+@router.post("/reset-password")
+async def reset_password_submit(
+    request: Request,
+    token: str = Form(...),
+    new_password: str = Form(...),
+    confirm_password: str = Form(""),
+    session: AsyncSession = Depends(get_db),
+):
+    ctx = {"user": None, "token": token, "error": None, "done": False}
+    if len(new_password) < 8:
+        ctx["error"] = "Mật khẩu cần ít nhất 8 ký tự."
+        return render(request, "reset_password.html", ctx)
+    if new_password != confirm_password:
+        ctx["error"] = "Hai mật khẩu không khớp."
+        return render(request, "reset_password.html", ctx)
+    try:
+        await auth_service.reset_password(session, token, new_password)
+    except AppException as exc:
+        ctx["error"] = exc.detail
+        return render(request, "reset_password.html", ctx)
+    ctx["done"] = True
+    return render(request, "reset_password.html", ctx)
 
 
 @router.get("")

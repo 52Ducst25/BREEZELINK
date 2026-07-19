@@ -67,7 +67,7 @@ class Settings(BaseSettings):
     smtp_user: str | None = None
     smtp_pass: str | None = None
     smtp_from: str = "no-reply@vi-du.com"
-    reset_password_url_base: str = "https://admin.vi-du.com/reset-password"
+    reset_password_url_base: str = "https://admin.vi-du.com/web/reset-password"
 
 
 _DEV_TEST_ENVIRONMENTS = {"development", "test", "testing"}

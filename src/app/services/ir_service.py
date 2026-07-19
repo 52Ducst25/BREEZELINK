@@ -54,3 +54,16 @@ async def trigger_learn(client: aiomqtt.Client, org_id: str, mode: AcMode, temp:
     learn_value = f"{mode.value} {temp}" if temp is not None else mode.value
     topic = mqtt_naming.topic(org_id, "indoor", "cmd")
     await client.publish(topic, json.dumps({"learn": learn_value}), qos=1, retain=False)
+
+
+async def trigger_learn_action(client: aiomqtt.Client, org_id: str, action: str) -> None:
+    """Put the node into LEARN mode for a standalone action button (FAN_SPEED).
+
+    Same fire-and-forget contract as :func:`trigger_learn`, but the LEARN label
+    is the action name (no mode/temp). The node captures the next raw IR and
+    echoes it on the ``learn`` topic; ``learn_handler`` routes the known action
+    label into ``ir_action_codes`` (design: fan-speed lives outside the comfort
+    matrix).
+    """
+    topic = mqtt_naming.topic(org_id, "indoor", "cmd")
+    await client.publish(topic, json.dumps({"learn": action}), qos=1, retain=False)

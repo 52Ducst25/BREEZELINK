@@ -98,6 +98,17 @@
 <header class="header">
   <div class="header-brand">AIR<span class="header-brand-accent">CON</span></div>
   <div class="header-actions">
+    {# Just the picture — no gear, no bell. Clicking it opens /web/account,
+       which is the only place the avatar can be changed. #}
+    <a class="ac-avatar ac-avatar--sm" href="/web/account" title="Đổi ảnh đại diện">
+      {% if user.avatar_updated_at %}
+        <img class="ac-avatar__img"
+             src="/web/users/{{ user.id }}/avatar?v={{ user.avatar_updated_at.timestamp()|int }}"
+             alt="">
+      {% else %}
+        {{ user|initials }}
+      {% endif %}
+    </a>
     <span class="header-user-name"><!--email_off-->{{ user.email }}<!--/email_off--></span>
     <form method="post" action="/web/logout">
       <button class="btn btn-ghost btn-sm" type="submit">Đăng xuất</button>

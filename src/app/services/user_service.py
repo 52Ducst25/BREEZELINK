@@ -1,6 +1,7 @@
 """User business logic: creation, lookup, authentication."""
 
 import uuid
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -85,6 +86,47 @@ async def update_user(
 async def delete_user(session: AsyncSession, user: User) -> None:
     await session.delete(user)
     await session.flush()
+
+
+# ------------------------------ avatar ------------------------------------
+# ``User.avatar`` is a deferred column (see the model): assigning it is cheap,
+# but READING it back off an ORM instance would lazy-load per access. So the
+# read path selects the columns explicitly instead of going through the entity.
+
+
+async def set_avatar(session: AsyncSession, user: User, data: bytes, mime: str) -> User:
+    """Store a new profile picture. ``avatar_updated_at`` is what marks the
+    avatar as present and busts the browser cache on the next page render.
+    """
+    user.avatar = data
+    user.avatar_mime = mime
+    user.avatar_updated_at = datetime.now(timezone.utc)
+    await session.flush()
+    return user
+
+
+async def clear_avatar(session: AsyncSession, user: User) -> User:
+    """Remove the picture — all three columns back to NULL so the UI falls
+    back to initials and the serving route 404s rather than sending 0 bytes.
+    """
+    user.avatar = None
+    user.avatar_mime = None
+    user.avatar_updated_at = None
+    await session.flush()
+    return user
+
+
+async def get_avatar(
+    session: AsyncSession, user_id: uuid.UUID
+) -> tuple[bytes, str, datetime] | None:
+    """Bytes + mime + last-changed for one user's picture, or None if unset."""
+    stmt = select(User.avatar, User.avatar_mime, User.avatar_updated_at).where(
+        User.id == user_id
+    )
+    row = (await session.execute(stmt)).first()
+    if row is None or row[0] is None or row[2] is None:
+        return None
+    return row[0], row[1] or "image/png", row[2]
 
 
 async def get_by_email(session: AsyncSession, email: str) -> User | None:

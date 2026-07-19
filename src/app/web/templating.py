@@ -5,6 +5,7 @@ the app renders correctly whether started from the repo root, the ``src``
 package dir, or inside the container image.
 """
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import Request
@@ -15,11 +16,16 @@ TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 # Bump on any app.css/app.js change. ds/* is the vendored design system,
 # linked WITHOUT "?v=" (see base.html's comment on that link) -- editing it
 # needs a hard refresh, not a version bump here.
-ASSET_VERSION = "260717-16"
+ASSET_VERSION = "260718-4"
+
+# Vietnam time. The container runs UTC, so ``astimezone()`` was rendering every
+# date 7 hours behind what a Vietnamese admin expects — the "sai ngày tạo" bug.
+# Vietnam has no DST, so a fixed +7 is exact year-round.
+_VN_TZ = timezone(timedelta(hours=7))
 
 
 def _format_datetime(ts) -> str:
-    """Local wall-clock time for a tz-aware datetime; em-dash when absent.
+    """A tz-aware datetime as Vietnam wall-clock time; em-dash when absent.
 
     Mirrors the project-wide rule that missing data renders as "—", never as
     a fabricated/blank value (see comfort_preview_service's docstring on the
@@ -27,7 +33,68 @@ def _format_datetime(ts) -> str:
     """
     if ts is None:
         return "—"
-    return ts.astimezone().strftime("%d/%m/%Y %H:%M:%S")
+    return ts.astimezone(_VN_TZ).strftime("%d/%m/%Y %H:%M:%S")
+
+
+def _format_ago(ts) -> str:
+    """Relative "cách đây ..." for a past timestamp, or "chưa từng" if absent.
+
+    Coarse on purpose (a vendor glancing at a staff list wants "3 giờ trước",
+    not "3h 12m 4s"). Guards against a future timestamp (clock skew) by showing
+    "vừa xong" rather than a negative duration.
+    """
+    if ts is None:
+        return "chưa từng"
+    now = datetime.now(timezone.utc)
+    delta = now - ts.astimezone(timezone.utc)
+    secs = int(delta.total_seconds())
+    if secs < 0:
+        return "vừa xong"
+    if secs < 60:
+        return "vừa xong"
+    mins = secs // 60
+    if mins < 60:
+        return f"{mins} phút trước"
+    hours = mins // 60
+    if hours < 24:
+        return f"{hours} giờ trước"
+    days = hours // 24
+    if days < 30:
+        return f"{days} ngày trước"
+    months = days // 30
+    if months < 12:
+        return f"{months} tháng trước"
+    return f"{days // 365} năm trước"
+
+
+def _is_online(ts) -> bool:
+    """True if this last-seen timestamp is within the online window (2 min).
+
+    Two minutes because the SSR admin auto-refreshes every ~5s and last_seen is
+    written at most once a minute (web/dependencies) — so an open panel updates
+    it well inside two minutes, and closing the panel drops "online" within two.
+    """
+    if ts is None:
+        return False
+    return (datetime.now(timezone.utc) - ts.astimezone(timezone.utc)).total_seconds() < 120
+
+
+def _initials(user) -> str:
+    """Two-letter monogram for the avatar fallback (DS .header-user-avatar).
+
+    A filter rather than inline Jinja because the same monogram is rendered in
+    the top bar on every page AND on the account page — the branching
+    (full name -> first+last initial, one word -> first two letters, no name ->
+    email) is too much to repeat correctly in two templates.
+    """
+    name = (getattr(user, "full_name", None) or "").strip()
+    if name:
+        parts = name.split()
+        if len(parts) >= 2:
+            return (parts[0][0] + parts[-1][0]).upper()
+        return parts[0][:2].upper()
+    email = (getattr(user, "email", "") or "?").strip()
+    return email[:2].upper()
 
 
 def _format_number(value, digits: int = 1) -> str:
@@ -41,6 +108,9 @@ def _format_number(value, digits: int = 1) -> str:
 
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 templates.env.filters["datetime"] = _format_datetime
+templates.env.filters["ago"] = _format_ago
+templates.env.filters["online"] = _is_online
+templates.env.filters["initials"] = _initials
 templates.env.filters["num"] = _format_number
 
 

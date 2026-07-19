@@ -71,6 +71,16 @@ class OverrideResponse(BaseModel):
     missing_ir_codes: list[str] = []
 
 
+class FanSpeedResponse(BaseModel):
+    """Result of a fan-speed step press. ``available`` is False (with a
+    Vietnamese ``detail``) when the org has not yet learned the FAN_SPEED IR
+    button — the app shows that instead of pretending the press did something.
+    """
+
+    available: bool
+    detail: str
+
+
 class ComfortLogRead(BaseModel):
     """One ``comfort_log`` audit row for the decision-history chart."""
 

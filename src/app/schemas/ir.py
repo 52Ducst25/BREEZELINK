@@ -20,6 +20,15 @@ class LearnRequest(BaseModel):
     temp: int | None = None
 
 
+class LearnActionRequest(BaseModel):
+    """Trigger LEARN mode for a standalone action button (e.g. FAN_SPEED) that
+    lives outside the (mode, temp) comfort matrix. Validated against the known
+    action set in the route.
+    """
+
+    action: str
+
+
 class IrCodeRead(BaseModel):
     """One captured/known IR code row."""
 
@@ -36,7 +45,12 @@ class IrCodeRead(BaseModel):
 class IrCoverageResponse(BaseModel):
     """Captured codes + which required buttons are still missing (design §5:
     COOL 24-28, DRY, FAN, OFF must all exist before auto-control is safe).
+
+    ``actions`` lists learned standalone action buttons (e.g. ``["FAN_SPEED"]``)
+    so the app can show whether the fan-speed button has been captured — these
+    are NOT part of the required-coverage matrix.
     """
 
     codes: list[IrCodeRead]
     missing: list[str]
+    actions: list[str] = []

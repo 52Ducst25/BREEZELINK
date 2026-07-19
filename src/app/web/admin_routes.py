@@ -12,8 +12,8 @@ their own customer page, not here.
 import uuid
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
+from fastapi.responses import RedirectResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User, UserRole
@@ -22,6 +22,33 @@ from app.web.dependencies import get_db, require_sysadmin
 from app.web.templating import render
 
 router = APIRouter(prefix="/web", tags=["ssr-admin"])
+
+# Profile pictures are held in a Postgres column and re-sent on demand, so the
+# ceiling is deliberately small — this is a 36px circle in the top bar, not a
+# photo library. There is no Pillow in the image to downscale with, so the size
+# cap IS the whole defence against someone storing a 20MB DSLR frame.
+MAX_AVATAR_BYTES = 2 * 1024 * 1024
+
+# Sniffed from the bytes rather than trusted from the upload's Content-Type,
+# which is attacker-controlled: without this, "evil.html" renamed to .png would
+# be stored and then served back from our own origin.
+_IMAGE_MAGIC: tuple[tuple[bytes, str], ...] = (
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+)
+
+
+def _sniff_image(data: bytes) -> str | None:
+    """Return the real image mime for these bytes, or None if unsupported."""
+    for magic, mime in _IMAGE_MAGIC:
+        if data.startswith(magic):
+            return mime
+    # WEBP is RIFF-framed: "RIFF" .... "WEBP"
+    if len(data) >= 12 and data[0:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
 
 
 # ============================== USERS =====================================
@@ -163,6 +190,11 @@ async def delete_user_submit(
     if target is None:
         return RedirectResponse("/web/users", status_code=303)
     await user_service.delete_user(session, target)
+    # MUST commit: delete_user only flushes (same contract as create_user /
+    # update_user — the route owns the transaction), and get_db closes the
+    # session without committing, so without this the DELETE is rolled back and
+    # the page redirects as if it worked while the account still signs in.
+    await session.commit()
     return RedirectResponse("/web/users", status_code=303)
 
 
@@ -171,3 +203,92 @@ async def delete_user_submit(
 # hang off a customer (web/customer_routes: /web/customers/{org_id}/config),
 # because "whose algorithm am I tuning" is only a meaningful question once you
 # have named the customer.
+
+
+# ============================== ACCOUNT ===================================
+# The signed-in admin's OWN profile. Separate from /web/users (which manages
+# colleagues) because "change my picture" needs no target id and must never be
+# reachable for somebody else's account.
+
+
+def _account_err(msg: str) -> RedirectResponse:
+    return RedirectResponse(f"/web/account?err={quote(msg)}", status_code=303)
+
+
+@router.get("/account")
+async def account_page(request: Request, user: User = Depends(require_sysadmin)):
+    return render(request, "account.html", {
+        "user": user,
+        "nav": "account",
+        "err": request.query_params.get("err"),
+        "ok": request.query_params.get("ok"),
+    })
+
+
+@router.post("/account/avatar")
+async def upload_avatar_submit(
+    avatar: UploadFile = File(...),
+    user: User = Depends(require_sysadmin),
+    session: AsyncSession = Depends(get_db),
+):
+    """Replace the signed-in admin's profile picture.
+
+    Always acts on ``user`` from the session — never on an id from the request —
+    so there is no path here to overwrite a colleague's picture.
+    """
+    # BOUNDED read. An unbounded ``read()`` would materialise the whole part in
+    # RAM before the cap below could reject it, so a signed-in admin could pin
+    # arbitrary memory in the same container that serves the API and the live
+    # feed. Reading cap+1 bytes is exactly enough to know it is oversize —
+    # which also means len(data) is then always cap+1, so the message must not
+    # quote it as if it were the file's real size.
+    data = await avatar.read(MAX_AVATAR_BYTES + 1)
+    if not data:
+        return _account_err("Chưa chọn tệp ảnh")
+    if len(data) > MAX_AVATAR_BYTES:
+        return _account_err(f"Ảnh quá lớn. Tối đa {MAX_AVATAR_BYTES // 1024} KB.")
+    mime = _sniff_image(data)
+    if mime is None:
+        return _account_err("Tệp không phải ảnh hợp lệ (chỉ nhận PNG, JPG, GIF, WEBP)")
+
+    await user_service.set_avatar(session, user, data, mime)
+    await session.commit()
+    return RedirectResponse(f"/web/account?ok={quote('Đã cập nhật ảnh đại diện')}", status_code=303)
+
+
+@router.post("/account/avatar/delete")
+async def delete_avatar_submit(
+    user: User = Depends(require_sysadmin),
+    session: AsyncSession = Depends(get_db),
+):
+    await user_service.clear_avatar(session, user)
+    await session.commit()
+    return RedirectResponse(f"/web/account?ok={quote('Đã xoá ảnh đại diện')}", status_code=303)
+
+
+@router.get("/users/{user_id}/avatar")
+async def serve_avatar(
+    user_id: uuid.UUID,
+    _: User = Depends(require_sysadmin),
+    session: AsyncSession = Depends(get_db),
+):
+    """Serve one staff picture.
+
+    By id (not "mine") so the same URL works for the top bar and for any list of
+    colleagues. Behind the same sysadmin gate as every other page — a profile
+    photo is not public. Cached hard because the URL carries an
+    ``avatar_updated_at`` cache-buster: a new upload changes the URL, so a long
+    max-age can never pin a stale picture.
+    """
+    found = await user_service.get_avatar(session, user_id)
+    if found is None:
+        return Response(status_code=404)
+    data, mime, updated = found
+    return Response(
+        content=data,
+        media_type=mime,
+        headers={
+            "Cache-Control": "private, max-age=86400",
+            "ETag": f'"{int(updated.timestamp())}"',
+        },
+    )

@@ -85,15 +85,18 @@
 {% else %}
 <div class="ac-table-wrap chamfer-sm">
   <table class="ac-table">
+    {# Compact: version + build + size collapsed into one column, and the
+       actions shortened, so the table fits without a horizontal scroll. #}
     <thead>
-      <tr><th>Phiên bản</th><th>Build</th><th>Dung lượng</th><th>Có gì mới</th><th>Ngày</th><th>Trạng thái</th><th></th></tr>
+      <tr><th>Phiên bản</th><th>Có gì mới</th><th>Ngày</th><th>Trạng thái</th><th></th></tr>
     </thead>
     <tbody>
       {% for r in releases %}
       <tr>
-        <td><b>{{ r.version_name }}</b></td>
-        <td class="ac-num">{{ r.version_code }}</td>
-        <td class="ac-num">{{ (r.apk_size / 1048576)|round(1) }} MB</td>
+        <td>
+          <b>{{ r.version_name }}</b>
+          <div class="ac-device__meta">build {{ r.version_code }} · {{ (r.apk_size / 1048576)|round(1) }} MB</div>
+        </td>
         <td class="ac-cell-wrap">{{ r.changelog or '—' }}</td>
         <td class="ac-num">{{ r.created_at|datetime }}</td>
         <td>
@@ -105,11 +108,11 @@
         </td>
         <td>
           <div class="ac-row-actions">
-            <a class="btn btn-ghost btn-sm" href="/app/download/{{ r.apk_filename }}">Tải</a>
+            <a class="btn btn-ghost btn-sm" href="/app/download/{{ r.apk_filename }}" title="Tải APK">Tải</a>
             {% if not r.is_current %}
             <form method="post" action="/web/releases/{{ r.id }}/current"
                   data-ajax="refresh" data-ajax-msg="Đã đổi bản phát hành">
-              <button class="btn btn-secondary btn-sm" type="submit">Phát hành bản này</button>
+              <button class="btn btn-secondary btn-sm" type="submit" title="Đặt làm bản đang phát hành">Phát hành</button>
             </form>
             {# Deleting the current build would leave the manifest advertising a
                404, so the route refuses it and the button is hidden here. #}
