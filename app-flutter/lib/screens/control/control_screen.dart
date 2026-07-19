@@ -8,8 +8,6 @@ import '../../theme/ac_colors.dart';
 import '../../theme/ac_text.dart';
 import '../../widgets/outline_panel.dart';
 import '../../widgets/primary_button.dart';
-import '../../widgets/section_label.dart';
-import 'ir_learn_panel.dart';
 import 'override_panel.dart';
 
 /// ĐIỀU KHIỂN tab: manual override + IR learn flow.
@@ -48,14 +46,11 @@ class _ControlScreenState extends State<ControlScreen> {
   @override
   Widget build(BuildContext context) {
     final s = context.watch<AppState>();
-    final ac = context.ac;
     final bounds = s.bounds;
 
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        Text('Điều khiển', style: AcText.heading(size: 18, color: ac.white)),
-        const SizedBox(height: 16),
         if (_overrideSetAt != null) ...[
           _OverrideStatusCard(setAt: _overrideSetAt!, overrideHours: bounds?.overrideHours, onClear: _clear),
           const SizedBox(height: 16),
@@ -67,12 +62,10 @@ class _ControlScreenState extends State<ControlScreen> {
             if (err == null || err.contains('thiếu mã lệnh')) _startLocalCountdown();
             return err;
           },
-          onFanSpeed: () => s.fanSpeedStep(),
+          // Peripheral remote buttons (fan speed, sleep, eco, …) replay a
+          // learned IR frame; returns a "chưa học" message when not yet taught.
+          onAction: (wire) => s.sendAction(wire),
         ),
-        const SizedBox(height: 20),
-        const SectionLabel('Học lệnh IR'),
-        const SizedBox(height: 10),
-        IrLearnPanel(irApi: s.irApi),
       ],
     );
   }

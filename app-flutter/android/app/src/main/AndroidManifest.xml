@@ -6,6 +6,11 @@
          is fine. It belongs in the MAIN manifest so it applies to every build
          type, release included. -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- In-app update: download the APK and launch the system installer on it
+         (open_file), instead of bouncing out to the browser. Android 8+ still
+         asks the user to allow "install unknown apps" for THIS app the first
+         time — that system prompt is expected and is the OS security gate. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
 
     <application
         android:label="Aircon"

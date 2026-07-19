@@ -28,11 +28,11 @@ class ComfortApi {
 
   Future<void> clearOverride() => _client.delete('/api/v1/comfort/override');
 
-  /// Blast the learned FAN_SPEED IR frame once (the AC advances its own fan
-  /// speed). `available` is false when the button hasn't been learned yet —
-  /// the server returns that as a normal 200, not an error.
-  Future<({bool available, String detail})> fanSpeedStep() async {
-    final body = await _client.post('/api/v1/comfort/fan-speed', data: const {});
+  /// Press one learned remote button (any `kAcActions` wire code — FAN_SPEED,
+  /// SLEEP, ECO, …). `available` is false when that button hasn't been learned
+  /// yet; the server returns that as a normal 200, not an error.
+  Future<({bool available, String detail})> sendAction(String action) async {
+    final body = await _client.post('/api/v1/comfort/ir-action', data: {'action': action});
     return (
       available: body['available'] == true,
       detail: (body['detail'] ?? '').toString(),
