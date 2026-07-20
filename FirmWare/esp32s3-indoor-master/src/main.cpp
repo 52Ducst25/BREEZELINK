@@ -81,9 +81,16 @@ static void publishSlaveStatus(const char *uuid, bool online) {
 }
 
 static void onSlavePacket(const char *uuid, const uint8_t mac[6], float t, float h) {
-  // MỌI gói đều tính là nhịp tim (5s/lần) -> phát hiện mất kết nối nhanh...
+  // MỌI gói đều tính là nhịp tim (5s/lần) -> phát hiện mất kết nối nhanh.
+  // Kể cả gói KHÔNG có số đo (NaN, do cảm biến slave lỗi): node vẫn sống, chỉ
+  // cảm biến hỏng — hai chuyện khác nhau, không được gộp thành "mất kết nối".
   SlaveWatch::heard(uuid, publishSlaveStatus);
-  // ...nhưng chỉ đẩy số đo lên cloud mỗi 15s, khỏi phồng DB vô ích.
+
+  if (isnan(t) || isnan(h)) {
+    Serial.printf("[slave] %s con song nhung cam bien loi (NaN)\n", uuid);
+    return;   // còn sống -> giữ online, nhưng KHÔNG đẩy số rác lên cloud
+  }
+  // Chỉ đẩy số đo lên cloud mỗi 15s, khỏi phồng DB vô ích.
   if (SlaveWatch::dueForRelay(uuid)) publishSlaveTelemetry(uuid, mac, t, h);
   // Khẳng định lại "online" mỗi phút để tự sửa nếu một Last Will đến muộn đã
   // đè nhầm trạng thái slave thành offline.
@@ -96,6 +103,15 @@ static void connectWifi() {
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   while (WiFi.status() != WL_CONNECTED) { delay(500); Serial.print("."); }
+
+  // BẮT BUỘC cho node master: tắt tiết kiệm điện WiFi.
+  // ESP32 mặc định bật modem sleep khi đã vào mạng — radio ngủ giữa các beacon.
+  // Lưu lượng WiFi thường không sao vì router ĐỆM HỘ trong lúc ngủ, nhưng gói
+  // ESP-NOW từ slave thì KHÔNG ai đệm: đến đúng lúc radio ngủ là mất luôn, mà
+  // broadcast lại không có ACK nên slave vẫn tưởng gửi thành công. Triệu chứng:
+  // chạy tốt vài phút rồi master "điếc" hẳn dù MQTT vẫn bình thường.
+  WiFi.setSleep(false);
+
   Serial.printf(" OK  IP=%s  RSSI=%d dBm\n", WiFi.localIP().toString().c_str(), (int)WiFi.RSSI());
 }
 
@@ -177,5 +193,11 @@ void loop() {
   char buf[192];
   size_t n = serializeJson(doc, buf);
   bool ok = mqtt.publish(tTelemetry.c_str(), (const uint8_t *)buf, n, false);
-  Serial.printf("[telemetry] t=%.1f°C h=%.0f%% -> %s\n", t, h, ok ? "da gui" : "GUI LOI");
+  // Kèm bộ đếm ESP-NOW: nếu "nhan" đứng yên trong khi slave vẫn báo "da phat"
+  // thì lỗi nằm ở đường thu của master (kênh lệch / radio ngủ), không phải slave.
+  Serial.printf("[telemetry] t=%.1f°C h=%.0f%% -> %s · espnow nhan=%lu bo=%lu · kenh=%d\n",
+                t, h, ok ? "da gui" : "GUI LOI",
+                (unsigned long)EspNowRelay::receivedCount(),
+                (unsigned long)EspNowRelay::droppedCount(),
+                WiFi.channel());
 }

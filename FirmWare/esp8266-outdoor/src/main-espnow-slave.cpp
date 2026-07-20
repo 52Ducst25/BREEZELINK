@@ -118,10 +118,14 @@ void loop() {
   if (now - lastRescan >= RESCAN_INTERVAL_MS) {
     lastRescan = now;
     int ch = findRouterChannel();
-    if (ch > 0 && ch != currentChannel) {
-      Serial.printf("Router doi kenh %d -> %d, bam lai\n", currentChannel, ch);
-      bindToChannel(ch);
-    }
+    if (ch <= 0) ch = currentChannel;   // quét trượt -> giữ nguyên kênh đang dùng
+
+    // BẮT BUỘC bám lại kênh SAU MỖI LẦN QUÉT, kể cả khi kênh không đổi:
+    // scanNetworks() nhảy qua tất cả các kênh và bỏ radio lại ở kênh cuối cùng
+    // nó dừng, KHÔNG tự trả về kênh cũ. Trước đây chỉ bám lại khi kênh đổi, nên
+    // sau mỗi lần quét radio bị lạc kênh và mọi gói gửi đi đều rơi vào hư không
+    // — mà broadcast không có ACK nên không hề báo lỗi, node cứ thế "chết ngầm".
+    bindToChannel(ch);
   }
 
   if (lastSend != 0 && now - lastSend < TELEMETRY_MS) {
@@ -129,15 +133,20 @@ void loop() {
     return;
   }
 
+  lastSend = now;
+
+  // Cảm biến hỏng KHÔNG có nghĩa là node chết. Vẫn gửi nhịp tim, chỉ để giá trị
+  // là NaN — master sẽ hiểu là "còn sống nhưng chưa có số đo", giữ node ở trạng
+  // thái online thay vì báo mất kết nối oan. Trước đây chỗ này return thẳng nên
+  // DHT lỗi là node bị coi như đã chết.
   float t = dht.readTemperature();
   float h = dht.readHumidity();
-  if (isnan(t) || isnan(h)) {
-    // Chu kỳ lấy mẫu tối thiểu của DHT22 là 2s — chờ 3s để cảm biến hồi.
-    Serial.println("Doc cam bien loi (NaN) — kiem tra day/nguon DHT");
-    delay(3000);
-    return;
+  bool sensorOk = !(isnan(t) || isnan(h));
+  if (!sensorOk) {
+    Serial.println("Doc cam bien loi (NaN) — van gui nhip tim, kiem tra day DHT");
+    t = NAN;
+    h = NAN;
   }
-  lastSend = now;
 
   AcEspNowPacket pkt;
   pkt.magic    = AC_ESPNOW_MAGIC;
@@ -154,6 +163,11 @@ void loop() {
   // LƯU Ý: với broadcast, "da gui" chỉ nghĩa là radio đã phát đi — KHÔNG có ACK
   // nên không thể biết master có nhận được hay không. Muốn biết chắc thì xem
   // log master, hoặc xem web/app có số của node này không.
-  Serial.printf("[espnow] t=%.1f h=%.0f kenh=%d -> %s\n",
-                t, h, currentChannel, lastSendOk ? "da phat" : "RADIO LOI");
+  if (sensorOk) {
+    Serial.printf("[espnow] t=%.1f h=%.0f kenh=%d -> %s\n",
+                  t, h, currentChannel, lastSendOk ? "da phat" : "RADIO LOI");
+  } else {
+    Serial.printf("[espnow] nhip tim (chua co so do) kenh=%d -> %s\n",
+                  currentChannel, lastSendOk ? "da phat" : "RADIO LOI");
+  }
 }
