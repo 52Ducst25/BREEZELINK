@@ -121,27 +121,28 @@ async def series_bucketed(
 
     # Raw SQL: bucketing by epoch division has no clean ORM form, and doing it
     # in Python would mean pulling every row (the thing we are avoiding).
+    # NOTE: bind NATIVE Python types (uuid.UUID / datetime), never ISO strings
+    # with an explicit CAST. asyncpg infers each parameter's type from where it
+    # sits in the statement (``ts >= $3`` → timestamptz) and then rejects a str
+    # outright: "invalid input for query argument $3 ... got 'str'".
     stmt = text(
         """
-        SELECT to_timestamp(floor(extract(epoch FROM ts) / :b) * :b) AS bucket_ts,
+        -- epoch is NUMERIC on PG14+; cast to float8 so :b is inferred float8
+        -- (a numeric bind would make asyncpg demand a Decimal, not a float).
+        SELECT to_timestamp(floor(extract(epoch FROM ts)::float8 / :b) * :b) AS bucket_ts,
                avg(temp)::float     AS temp,
                avg(humidity)::float AS humidity
         FROM telemetry
-        WHERE device_id = CAST(:d AS uuid)
-          AND ts >= CAST(:s AS timestamptz)
-          AND ts <= CAST(:e AS timestamptz)
+        WHERE device_id = :d
+          AND ts >= :s
+          AND ts <= :e
         GROUP BY 1
         ORDER BY 1
         """
     )
     result = await session.execute(
         stmt,
-        {
-            "b": bucket_sec,
-            "d": str(device_id),
-            "s": start.isoformat(),
-            "e": end.isoformat(),
-        },
+        {"b": float(bucket_sec), "d": device_id, "s": start, "e": end},
     )
     return [
         {"ts": row.bucket_ts, "temp": row.temp, "humidity": row.humidity}

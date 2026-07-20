@@ -91,9 +91,12 @@ void loop() {
 
   float t = dht.readTemperature();
   float h = dht.readHumidity();
-  if (isnan(t) || isnan(h)) {                 // DHT11 cần ~1-2s giữa 2 lần đọc
-    Serial.println("DHT11 doc loi (NaN) — thu lai");
-    delay(2000);
+  if (isnan(t) || isnan(h)) {
+    // DHT22 có chu kỳ lấy mẫu tối thiểu 2s; thử lại đúng 2s là sát ngưỡng nên
+    // dễ hỏng liên tiếp. Chờ 3s để cảm biến có cơ hội hồi.
+    // NaN kéo dài = lỗi phần cứng (dây lỏng/mất nguồn), KHÔNG gửi số bịa.
+    Serial.println("Doc cam bien loi (NaN) — kiem tra day/nguon DHT");
+    delay(3000);
     return;
   }
   lastPub = now;

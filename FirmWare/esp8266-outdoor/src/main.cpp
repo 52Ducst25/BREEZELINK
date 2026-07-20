@@ -84,8 +84,9 @@ void loop() {
   float t = dht.readTemperature();
   float h = dht.readHumidity();
   if (isnan(t) || isnan(h)) {
-    Serial.println("DHT11 doc loi (NaN) — thu lai");
-    delay(2000);
+    // Chu kỳ lấy mẫu tối thiểu của DHT22 là 2s — chờ 3s để cảm biến hồi.
+    Serial.println("Doc cam bien loi (NaN) — kiem tra day/nguon DHT");
+    delay(3000);
     return;
   }
   lastPub = now;

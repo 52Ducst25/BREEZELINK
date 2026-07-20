@@ -70,12 +70,13 @@ class _DeviceHistoryScreenState extends State<DeviceHistoryScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     final w = _range.window();
-    final s = await widget.api.series(deviceId: widget.device.id, start: w.start, end: w.end);
-    if (mounted) {
-      setState(() {
-        _series = s;
-        _loading = false;
-      });
+    // try/finally: whatever happens, the spinner must stop. Letting an error
+    // escape here left the screen loading forever with no way out.
+    try {
+      final s = await widget.api.series(deviceId: widget.device.id, start: w.start, end: w.end);
+      if (mounted) setState(() => _series = s);
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
   }
 

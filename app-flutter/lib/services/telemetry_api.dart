@@ -20,9 +20,11 @@ class TelemetryApi {
   /// each of `buckets` equal slots, so a 30-day window really spans 30 days
   /// (the raw `list` endpoint would return only the newest rows instead).
   ///
-  /// Returns an EMPTY series on failure rather than throwing: the history
+  /// Returns an EMPTY series on ANY failure rather than throwing: the history
   /// screen shows "chưa có dữ liệu", which is honest, instead of an error box
-  /// on a screen whose whole job is to render whatever data exists.
+  /// on a screen whose whole job is to render whatever data exists. Catching
+  /// broadly (not just [ApiException]) matters — a parse/transport error that
+  /// escaped here previously left the screen spinning forever.
   Future<SensorSeries> series({
     required String deviceId,
     required DateTime start,
@@ -39,7 +41,7 @@ class TelemetryApi {
       return SensorSeries(
         rows.map((e) => SensorPoint.fromJson(e as Map<String, dynamic>)).toList(),
       );
-    } on ApiException {
+    } catch (_) {
       return SensorSeries.empty;
     }
   }
