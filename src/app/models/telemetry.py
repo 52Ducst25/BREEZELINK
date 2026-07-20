@@ -35,3 +35,7 @@ class Telemetry(Base):
     rssi: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     # Battery voltage — outdoor (battery-powered) node only; NULL for indoor.
     batt: Mapped[float | None] = mapped_column(REAL, nullable=True)
+    # Instantaneous AC power draw in WATTS, from an in-line power sensor
+    # (PZEM/ACS712-class) on the node. NULL until such hardware is fitted and
+    # the firmware reports it — energy_service integrates these samples into kWh.
+    watt: Mapped[float | None] = mapped_column(REAL, nullable=True)

@@ -18,9 +18,12 @@ proven the device belongs to an org they may see.
 
 import uuid
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.models.device import Device
+from app.models.enums import NodeRole
 from app.services import comfort_preview_service, telemetry_service
 from app.web import charts
 
@@ -41,6 +44,15 @@ async def build_context(session: AsyncSession, org_id: uuid.UUID, device: Device
         comfort = await comfort_preview_service.build_preview(session, str(org_id))
         setpoint = comfort.t_set
 
+    # The household's master node — a slave's firmware pairs to it over ESP-NOW,
+    # so the provisioning panel shows the master's MAC on a slave's page.
+    master = (
+        await session.execute(
+            select(Device).where(Device.org_id == org_id, Device.role == NodeRole.master)
+        )
+    ).scalars().first()
+
+    settings = get_settings()
     return {
         "device": device,
         "latest": readings[-1] if readings else None,
@@ -48,4 +60,8 @@ async def build_context(session: AsyncSession, org_id: uuid.UUID, device: Device
         "hum_series": charts.build_series([r.humidity for r in readings], None, "%"),
         "history": list(reversed(readings))[:_HISTORY_ROWS],  # newest-first for the table
         "sample_count": len(readings),
+        # Firmware-provisioning context (sysadmin-only page).
+        "mqtt_host": settings.mqtt_host,
+        "mqtt_port": settings.mqtt_port,
+        "master_node": master,
     }

@@ -14,6 +14,18 @@ class NodeType(str, enum.Enum):
     indoor = "indoor"
 
 
+class NodeRole(str, enum.Enum):
+    """Network role, INDEPENDENT of node_type. The ``master`` node is the one
+    that connects to the gateway/cloud (WiFi + MQTT); ``slave`` nodes connect to
+    the master locally over ESP-NOW and never talk to the cloud directly. Exactly
+    one master per household (enforced in device_service.set_role). Nullable on a
+    device until the vendor assigns it during provisioning.
+    """
+
+    master = "master"
+    slave = "slave"
+
+
 class CommandSource(str, enum.Enum):
     """Who triggered an AC command — the adaptive algorithm or a user tap."""
 

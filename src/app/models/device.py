@@ -18,7 +18,7 @@ from sqlalchemy import BigInteger, DateTime, Enum, ForeignKey, Numeric, String, 
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin
-from app.models.enums import NodeType
+from app.models.enums import NodeRole, NodeType
 
 
 class DeviceStatus(str, enum.Enum):
@@ -36,6 +36,12 @@ class Device(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     # Comfort-control role — which physical node this row represents (Phase 1).
     node_type: Mapped[NodeType] = mapped_column(Enum(NodeType, name="node_type"), nullable=False)
+    # Network role — master (WiFi+MQTT to cloud) vs slave (ESP-NOW to the master).
+    # Independent of node_type; assigned by the vendor during provisioning, so
+    # nullable until then. device_service.set_role keeps at most one master/org.
+    role: Mapped[NodeRole | None] = mapped_column(
+        Enum(NodeRole, name="node_role"), nullable=True
+    )
     location: Mapped[str | None] = mapped_column(String(200), nullable=True)
     # Optional geo coordinates for the map (WGS84 lat/lng).
     latitude: Mapped[Decimal | None] = mapped_column(Numeric(9, 6), nullable=True)

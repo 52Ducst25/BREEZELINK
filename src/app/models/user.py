@@ -3,6 +3,7 @@
 import enum
 import uuid
 from datetime import datetime
+from decimal import Decimal
 
 from sqlalchemy import (
     Boolean,
@@ -10,6 +11,7 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     LargeBinary,
+    Numeric,
     String,
     UniqueConstraint,
     Uuid,
@@ -37,6 +39,11 @@ class User(Base, TimestampMixin):
     phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
     # Household address — one location per household; its devices share it.
     location: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Home coordinates picked on the map (WGS84). Drive the app's location card
+    # + let a future weather lookup work by lat/lng; the human ``location`` text
+    # is reverse-geocoded from these on the client.
+    latitude: Mapped[Decimal | None] = mapped_column(Numeric(9, 6), nullable=True)
+    longitude: Mapped[Decimal | None] = mapped_column(Numeric(9, 6), nullable=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[UserRole] = mapped_column(
         Enum(UserRole, name="user_role"), default=UserRole.member, nullable=False

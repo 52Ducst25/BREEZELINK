@@ -90,6 +90,7 @@ async def set_override(
         session,
         org_id=org_id,
         device_id=device.id,
+        device_uuid=device.device_uuid,
         mode=data.mode,
         setpoint=data.setpoint,
     )
@@ -150,6 +151,7 @@ async def _send_ir_action(
         session,
         org_id=org_id,
         device_id=device.id,
+        device_uuid=device.device_uuid,
         action=action,
         raw_timing=raw,
         mode=mode,

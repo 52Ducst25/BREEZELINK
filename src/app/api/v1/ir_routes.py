@@ -6,19 +6,30 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, get_mqtt_publisher
-from app.core.exceptions import AppException
+from app.core.exceptions import AppException, NotFoundError
 from app.models.user import User
 from app.schemas.common import MessageResponse
 from app.schemas.ir import IrCoverageResponse, LearnActionRequest, LearnRequest
-from app.services import ir_action_service, ir_service
+from app.services import ir_action_service, ir_service, telemetry_service
 
 router = APIRouter(prefix="/ir", tags=["ir"])
+
+
+async def _indoor_uuid(session: AsyncSession, org_id: str) -> str:
+    """device_uuid of the household's indoor node — the one whose IR receiver
+    does the learning. Per-device topics need it to address the right node.
+    (Phase 1 targets the single indoor node; per-room targeting is Phase 2.)"""
+    device = await telemetry_service.get_device_by_org_and_node(session, org_id, "indoor")
+    if device is None:
+        raise NotFoundError("Chưa có node trong nhà (indoor) cho tổ chức này")
+    return device.device_uuid
 
 
 @router.post("/learn", response_model=MessageResponse, status_code=status.HTTP_202_ACCEPTED)
 async def trigger_learn(
     data: LearnRequest,
     user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
     mqtt_client: aiomqtt.Client = Depends(get_mqtt_publisher),
 ) -> MessageResponse:
     """Put the indoor node into LEARN mode for one (mode, temp) button.
@@ -26,7 +37,8 @@ async def trigger_learn(
     Fire-and-forget: the captured code arrives later on the ``learn`` MQTT
     topic (Phase 4 ``learn_handler``), not in this response.
     """
-    await ir_service.trigger_learn(mqtt_client, str(user.org_id), data.mode, data.temp)
+    uuid = await _indoor_uuid(session, str(user.org_id))
+    await ir_service.trigger_learn(mqtt_client, str(user.org_id), uuid, data.mode, data.temp)
     return MessageResponse(detail="learn triggered")
 
 
@@ -34,6 +46,7 @@ async def trigger_learn(
 async def trigger_learn_action(
     data: LearnActionRequest,
     user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
     mqtt_client: aiomqtt.Client = Depends(get_mqtt_publisher),
 ) -> MessageResponse:
     """Put the node into LEARN mode for a standalone action button (FAN_SPEED).
@@ -43,7 +56,8 @@ async def trigger_learn_action(
     """
     if data.action not in ir_action_service.KNOWN_ACTIONS:
         raise AppException(f"unknown action '{data.action}'", status_code=422)
-    await ir_service.trigger_learn_action(mqtt_client, str(user.org_id), data.action)
+    uuid = await _indoor_uuid(session, str(user.org_id))
+    await ir_service.trigger_learn_action(mqtt_client, str(user.org_id), uuid, data.action)
     return MessageResponse(detail="learn triggered")
 
 

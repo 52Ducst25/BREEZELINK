@@ -14,6 +14,7 @@ from app.api.v1 import (
     comfort_routes,
     config_routes,
     device_routes,
+    energy_routes,
     ir_routes,
     telemetry_routes,
     ws_routes,
@@ -41,4 +42,5 @@ api_router.include_router(comfort_routes.router)
 api_router.include_router(ir_routes.router)
 api_router.include_router(config_routes.router)
 api_router.include_router(telemetry_routes.router)
+api_router.include_router(energy_routes.router)
 api_router.include_router(ws_routes.router)  # WebSocket /ws/live realtime feed

@@ -637,13 +637,52 @@ html.rail-collapsed .ac-live { justify-content: center; }
 /* ============================================================
    RESPONSIVE
    ============================================================ */
+
+/* Never let a stray wide element (a long token, an un-wrapped row) make the
+   whole page scroll sideways — that is what "cuts off" the right edge on a
+   phone. Wide content that MUST scroll (tables, the config.h block) does so
+   inside its own overflow-x container, not by widening the page. */
+html, body { overflow-x: hidden; }
+
+/* Mobile menu button + drawer backdrop — inert on desktop (button hidden, the
+   rail is always on screen so there is nothing to dim). */
+.header-burger {
+  display: none; flex: 0 0 auto; place-items: center; width: 40px; height: 40px;
+  margin-right: var(--space-2); color: var(--text-primary);
+  clip-path: var(--shape-chamfer-sm);
+}
+.header-burger:hover { color: var(--accent-primary); background: var(--bg-subtle); }
+.ac-rail-backdrop {
+  position: fixed; inset: 0; z-index: 59; background: var(--overlay-scrim);
+  opacity: 0; pointer-events: none;
+  transition: opacity var(--duration-normal) var(--ease-default);
+}
+html.rail-open .ac-rail-backdrop { opacity: 1; pointer-events: auto; }
+
 @media (max-width: 767px) {
-  body.has-rail { --rail-w: 56px; }
-  body.has-rail .ac-rail__label,
-  body.has-rail .ac-rail__brand,
-  body.has-rail .ac-rail__who { display: none; }
-  body.has-rail .ac-rail__item,
-  body.has-rail .ac-rail__top { justify-content: center; }
+  /* The rail becomes a slide-in DRAWER: content gets the full width (no
+     padding-left), and the rail sits off-screen until the hamburger opens it.
+     A full 240px labelled drawer (not the cramped 56px icon strip) since screen
+     space is no longer shared with the content. */
+  body.has-rail { padding-left: 0; }
+  body.has-rail .header { left: 0; }
+  .header-burger { display: grid; }
+
+  .ac-rail {
+    width: 240px; transform: translateX(-100%);
+    transition: transform var(--duration-normal) var(--ease-default);
+    box-shadow: var(--shadow-xl);
+  }
+  html.rail-open .ac-rail { transform: translateX(0); }
+  /* A drawer has room for labels + no need for the desktop collapse toggle. */
+  .ac-rail__label, .ac-rail__brand, .ac-rail__who { display: revert; }
+  .ac-rail__toggle { display: none; }
+  /* rail-collapsed is a desktop-only state; the drawer is always full width. */
+  html.rail-collapsed body.has-rail { --rail-w: 240px; }
+
+  /* The fixed header no longer starts at the rail edge — keep its own name text
+     from crowding the actions on a narrow bar. */
+  .header-user-name { display: none; }
 }
 
 @media (max-width: 639px) {
@@ -651,8 +690,11 @@ html.rail-collapsed .ac-live { justify-content: center; }
   .ac-devices { grid-template-columns: 1fr; }
   .ac-charts { grid-template-columns: 1fr; }
   .ac-group__nodes { grid-template-columns: 1fr; }
-  /* The header row has five things in it; let them stack rather than crush
-     the customer's name to an ellipsis on a phone. */
+  /* Section heads (title + a button) and detail heads stack instead of
+     squeezing the title to an ellipsis on a phone. */
+  .ac-section-head,
   .ac-group__head { flex-wrap: wrap; }
   .ac-group__counts { margin-left: 0; }
+  /* Sell/edit forms: one field per row on the narrowest screens. */
+  .ac-sell-form__row .ac-field { flex-basis: 100%; }
 }

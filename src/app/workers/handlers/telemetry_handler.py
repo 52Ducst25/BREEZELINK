@@ -102,10 +102,11 @@ async def handle_telemetry(client, topic: ParsedTopic, payload: dict) -> None:
     async with AsyncSessionLocal() as session:
         set_current_org(topic.org_id)
 
-        device = await telemetry_service.get_device_by_org_and_node(session, topic.org_id, topic.node)
+        device = await telemetry_service.get_device_by_uuid(session, topic.device_uuid)
         if device is None:
-            logger.warning("No device registered for org=%s node=%s", topic.org_id, topic.node)
+            logger.warning("No device registered for uuid=%s (org=%s)", topic.device_uuid, topic.org_id)
             return
+        is_indoor = device.node_type == NodeType.indoor
 
         await telemetry_service.persist_telemetry(
             session,
@@ -115,9 +116,10 @@ async def handle_telemetry(client, topic: ParsedTopic, payload: dict) -> None:
             humidity=humidity,
             rssi=int(payload.get("rssi", 0)),
             batt=payload.get("batt"),
+            watt=payload.get("watt"),
         )
 
-        if topic.node == NodeType.indoor.value:
+        if is_indoor:
             await redis_state_service.set_indoor_state(topic.org_id, {"t": temp, "h": humidity})
         else:
             await redis_state_service.set_outdoor_state(topic.org_id, {"t": temp, "h": humidity})
@@ -152,7 +154,7 @@ async def handle_telemetry(client, topic: ParsedTopic, payload: dict) -> None:
         # running-mean EMA. Indoor ticks (~10x more frequent) still trigger
         # compute() every time, but must reuse the already-persisted EMA
         # unchanged — see comfort_engine.compute()'s ``is_outdoor_tick`` gate.
-        is_outdoor_tick = topic.node == NodeType.outdoor.value
+        is_outdoor_tick = not is_indoor
 
         inputs = ComfortInputs(
             cfg=cfg,
@@ -185,9 +187,12 @@ async def handle_telemetry(client, topic: ParsedTopic, payload: dict) -> None:
         if not changed:
             return
 
+        # Phase 1 keeps ONE comfort decision per household: an outdoor tick
+        # drives the org's (single) indoor node. Per-room decisions land in
+        # Phase 2 — this still resolves "the" indoor node the same way.
         indoor_device = (
             device
-            if topic.node == NodeType.indoor.value
+            if is_indoor
             else await telemetry_service.get_device_by_org_and_node(
                 session, topic.org_id, NodeType.indoor.value
             )
@@ -201,6 +206,7 @@ async def handle_telemetry(client, topic: ParsedTopic, payload: dict) -> None:
             session,
             org_id=topic.org_id,
             device_id=indoor_device.id,
+            device_uuid=indoor_device.device_uuid,
             result=result,
             t_out=tout_raw if tout_raw is not None else tout,
             # M1 fix: audit trail must reflect reality. Unlike t_out (which

@@ -67,6 +67,89 @@
   {% endif %}
 </div>
 
+{# ---------- NẠP FIRMWARE (provisioning) — sysadmin only ---------- #}
+<div class="ac-section-head" style="margin-top: var(--space-6);">
+  <h2 class="ac-section-title">Nạp firmware</h2>
+</div>
+<div class="card ac-provision">
+  <p class="ac-form-note" style="margin-top:0;">
+    Loại node cố định (ngoài trời / trong nhà). <b>Vai trò mạng</b> do bạn đặt:
+    <b>Master</b> nối gateway (WiFi + MQTT lên cloud); <b>Slave</b> nối về master qua ESP-NOW.
+    Mỗi nhà chỉ 1 master — đặt node này thành master sẽ tự hạ các master khác xuống slave.
+  </p>
+
+  <div class="ac-row-actions" style="margin-bottom: var(--space-4);">
+    <span class="status-pill status-pill-idle">
+      {{ 'Ngoài trời (outdoor)' if device.node_type.value == 'outdoor' else 'Trong nhà (indoor)' }}
+    </span>
+    {% if device.role %}
+      <span class="status-pill status-pill-active">{{ 'MASTER' if device.role.value == 'master' else 'SLAVE' }}</span>
+    {% else %}
+      <span class="status-pill status-pill-idle">Chưa gán vai trò</span>
+    {% endif %}
+  </div>
+
+  {# Set master/slave. Refreshes the page over AJAX (same green-tick save as
+     everywhere else) — the config snippet below updates in place. #}
+  <form class="ac-sell-form__row" method="post"
+        action="/web/customers/{{ device.org_id }}/devices/{{ device.id }}/role"
+        data-ajax="refresh" data-ajax-msg="Đã đổi vai trò node" style="margin-bottom: var(--space-5);">
+    <label class="ac-field ac-field--num">
+      <span class="ac-field__label">Vai trò mạng</span>
+      <select class="input" name="role">
+        <option value="" {% if not device.role %}selected{% endif %}>— Chưa gán —</option>
+        <option value="master" {% if device.role and device.role.value == 'master' %}selected{% endif %}>Master (nối gateway)</option>
+        <option value="slave" {% if device.role and device.role.value == 'slave' %}selected{% endif %}>Slave (ESP-NOW về master)</option>
+      </select>
+    </label>
+    <button class="btn btn-primary" type="submit">Lưu vai trò</button>
+  </form>
+
+  {# The values to paste into this node's config.h. user-select:all so a tap
+     selects the whole token. This page is sysadmin-only, so showing the MQTT
+     password here is intended (it is the firmware-provisioning output). #}
+  <div class="ac-table-wrap chamfer-sm">
+    <table class="ac-table">
+      <tbody>
+        <tr><td>ORG_ID</td><td class="text-mono" style="user-select:all;">{{ device.org_id }}</td></tr>
+        <tr><td>DEVICE_UUID</td><td class="text-mono" style="user-select:all;">{{ device.device_uuid }}</td></tr>
+        <tr><td>MQTT_USERNAME</td><td class="text-mono" style="user-select:all;">{{ device.device_uuid }}</td></tr>
+        <tr><td>MQTT_PASSWORD</td><td class="text-mono" style="user-select:all;">{{ device.mqtt_token }}</td></tr>
+        <tr><td>MQTT_HOST : PORT</td><td class="text-mono" style="user-select:all;">{{ mqtt_host }} : {{ mqtt_port }}</td></tr>
+        <tr><td>MAC node này</td><td class="text-mono">{{ device.mac|mac }}</td></tr>
+        {% if device.role and device.role.value == 'slave' %}
+        <tr>
+          <td>Ghép ESP-NOW tới master</td>
+          <td class="text-mono">
+            {% if master_node %}{{ master_node.name }} · MAC {{ master_node.mac|mac }}{% else %}<span class="ac-muted">Chưa có node master trong nhà này</span>{% endif %}
+          </td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if device.role and device.role.value == 'master' or not device.role %}
+  <div class="ac-section-head" style="margin-top: var(--space-5);">
+    <h2 class="ac-section-title">Khối config.h (master — dán vào firmware)</h2>
+  </div>
+  <pre class="ac-code chamfer-sm" style="user-select:all; overflow-x:auto; padding: var(--space-4); background: var(--bg-subtle); font: var(--tech-code);">static const char *MQTT_HOST     = "{{ mqtt_host }}";
+static const int   MQTT_PORT     = {{ mqtt_port }};
+static const char *MQTT_USERNAME = "{{ device.device_uuid }}";
+static const char *MQTT_PASSWORD = "{{ device.mqtt_token }}";
+static const char *ORG_ID        = "{{ device.org_id }}";
+static const char *DEVICE_UUID   = "{{ device.device_uuid }}";</pre>
+  {% endif %}
+
+  <div class="ac-row-actions" style="margin-top: var(--space-4);">
+    <form method="post" action="/web/customers/{{ device.org_id }}/devices/{{ device.id }}/rotate"
+          data-ajax="refresh" data-ajax-msg="Đã cấp lại UUID/token"
+          data-ajax-confirm="Cấp lại UUID/token cho node này? Firmware đang chạy với mã cũ sẽ MẤT KẾT NỐI cho tới khi bạn nạp lại mã mới.">
+      <button class="btn btn-danger btn-sm" type="submit">Cấp lại UUID / token</button>
+    </form>
+  </div>
+</div>
+
 {% if not latest %}
   <p class="ac-empty chamfer-md">Chưa nhận được số liệu cảm biến nào từ thiết bị này.</p>
 {% else %}

@@ -4,9 +4,12 @@ Referenced by device/comfort services, the worker consumer, and the firmware
 sample so the scheme never drifts.
 
 Topic scheme (bidirectional — this differs from a 1-way-telemetry-only design):
-    bl/{org_id}/{node}/{kind}
-        node: outdoor | indoor
-        kind: telemetry | cmd | state | status
+    bl/{org_id}/{device_uuid}/{kind}
+        device_uuid: the node's devices.device_uuid (its MQTT identity), so any
+                     number of nodes in one household (1 outdoor + N indoor)
+                     each get their own topics — the node_type (indoor/outdoor)
+                     is resolved from the devices row, not read off the topic.
+        kind: telemetry | cmd | state | status | learn
 
     telemetry — device -> cloud sensor readings (QoS1, retain off)
     cmd       — cloud -> device downstream commands (QoS1, retain off)
@@ -41,20 +44,22 @@ class TopicKind(str, enum.Enum):
     learn = "learn"
 
 
-TOPIC_TEMPLATE = "bl/{org_id}/{node}/{kind}"
+TOPIC_TEMPLATE = "bl/{org_id}/{device_uuid}/{kind}"
 CLIENT_ID_TEMPLATE = "breezelink_{device_uuid}"
 
-# Worker subscription wildcards (Phase 4). Both org AND node are wildcarded —
-# a single worker process serves every tenant, so it must not hardcode org_id.
+# Worker subscription wildcards. org AND the device segment are wildcarded — a
+# single worker serves every tenant and every node, and the device_uuid segment
+# (previously the fixed node_type) is now per-device, so state/learn widened
+# from "bl/+/indoor/..." to "bl/+/+/...".
 TELEMETRY_WILDCARD = "bl/+/+/telemetry"
-STATE_WILDCARD = "bl/+/indoor/state"
+STATE_WILDCARD = "bl/+/+/state"
 STATUS_WILDCARD = "bl/+/+/status"
-LEARN_WILDCARD = "bl/+/indoor/learn"
+LEARN_WILDCARD = "bl/+/+/learn"
 
 
-def topic(org_id: str, node: str, kind: str) -> str:
-    """Build a single topic: ``bl/{org_id}/{node}/{kind}``."""
-    return TOPIC_TEMPLATE.format(org_id=org_id, node=node, kind=kind)
+def topic(org_id: str, device_uuid: str, kind: str) -> str:
+    """Build a single topic: ``bl/{org_id}/{device_uuid}/{kind}``."""
+    return TOPIC_TEMPLATE.format(org_id=org_id, device_uuid=device_uuid, kind=kind)
 
 
 def client_id(device_uuid: str) -> str:
@@ -63,23 +68,23 @@ def client_id(device_uuid: str) -> str:
 
 @dataclass(frozen=True)
 class ParsedTopic:
-    """A ``bl/{org_id}/{node}/{kind}`` topic, split into its 4 segments."""
+    """A ``bl/{org_id}/{device_uuid}/{kind}`` topic, split into its 4 segments."""
 
     org_id: str
-    node: str
+    device_uuid: str
     kind: str
 
 
 def parse(topic_str: str) -> ParsedTopic:
-    """Parse an incoming topic string into ``(org_id, node, kind)``.
+    """Parse an incoming topic string into ``(org_id, device_uuid, kind)``.
 
     Raises ``ValueError`` on anything not matching the 4-segment
-    ``bl/{org_id}/{node}/{kind}`` scheme (e.g. foreign topics on a shared
+    ``bl/{org_id}/{device_uuid}/{kind}`` scheme (e.g. foreign topics on a shared
     broker) — callers (the consumer dispatch loop) must catch this and skip
     the message rather than crash.
     """
     parts = topic_str.split("/")
     if len(parts) != 4 or parts[0] != "bl":
         raise ValueError(f"Unrecognized topic: {topic_str!r}")
-    _, org_id, node, kind = parts
-    return ParsedTopic(org_id=org_id, node=node, kind=kind)
+    _, org_id, device_uuid, kind = parts
+    return ParsedTopic(org_id=org_id, device_uuid=device_uuid, kind=kind)

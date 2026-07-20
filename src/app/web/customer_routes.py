@@ -21,7 +21,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppException
-from app.models.enums import NodeType
+from app.models.enums import NodeRole, NodeType
 from app.models.organization import OrgType
 from app.models.user import User, UserRole
 from app.schemas.config import ConfigUpdate
@@ -386,6 +386,44 @@ async def edit_device_submit(
     )
     await session.commit()
     return RedirectResponse(f"/web/customers/{org_id}", status_code=303)
+
+
+@router.post("/customers/{org_id}/devices/{device_id}/role")
+async def set_device_role_submit(
+    org_id: uuid.UUID,
+    device_id: uuid.UUID,
+    role: str = Form(""),
+    user: User = Depends(require_sysadmin),
+    session: AsyncSession = Depends(get_db),
+):
+    """Set the node's network role (master/slave), or clear it (empty = chưa gán).
+    Promoting to master demotes any other master in the household (device_service)."""
+    try:
+        device = await device_service.get_device(session, org_id, device_id)
+        node_role = NodeRole(role) if role else None
+    except (AppException, ValueError):
+        return _err("Không tìm thấy node hoặc vai trò không hợp lệ", f"/web/customers/{org_id}")
+    await device_service.set_role(session, device, node_role)
+    await session.commit()
+    return RedirectResponse(f"/web/customers/{org_id}/devices/{device_id}", status_code=303)
+
+
+@router.post("/customers/{org_id}/devices/{device_id}/rotate")
+async def rotate_device_creds_submit(
+    org_id: uuid.UUID,
+    device_id: uuid.UUID,
+    user: User = Depends(require_sysadmin),
+    session: AsyncSession = Depends(get_db),
+):
+    """Issue new MQTT credentials for re-flashing a board. The old ones stop
+    working on commit — the provisioning panel shows the new values to flash."""
+    try:
+        device = await device_service.get_device(session, org_id, device_id)
+    except AppException:
+        return _err("Không tìm thấy node", f"/web/customers/{org_id}")
+    await device_service.rotate_credentials(session, device)
+    await session.commit()
+    return RedirectResponse(f"/web/customers/{org_id}/devices/{device_id}", status_code=303)
 
 
 @router.post("/customers/{org_id}/devices/{device_id}/delete")

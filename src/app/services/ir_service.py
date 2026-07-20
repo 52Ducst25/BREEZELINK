@@ -44,26 +44,28 @@ async def check_coverage(session: AsyncSession, org_id: uuid.UUID) -> list[str]:
     return missing
 
 
-async def trigger_learn(client: aiomqtt.Client, org_id: str, mode: AcMode, temp: int | None) -> None:
-    """Publish ``bl/{org}/indoor/cmd {learn: "MODE TEMP"}`` (design §4.2).
+async def trigger_learn(
+    client: aiomqtt.Client, org_id: str, device_uuid: str, mode: AcMode, temp: int | None
+) -> None:
+    """Publish ``bl/{org}/{device_uuid}/cmd {learn: "MODE TEMP"}`` (design §4.2).
 
-    The indoor node enters LEARN mode and captures the next raw IR signal it
-    receives from the real remote, then reports it back over the ``learn``
-    topic (handled by Phase 4's ``learn_handler``).
+    ``device_uuid`` is the indoor node to teach (its IR receiver captures the
+    real remote). The node enters LEARN, captures the next raw IR signal and
+    reports it back over the ``learn`` topic (Phase 4's ``learn_handler``).
     """
     learn_value = f"{mode.value} {temp}" if temp is not None else mode.value
-    topic = mqtt_naming.topic(org_id, "indoor", "cmd")
+    topic = mqtt_naming.topic(org_id, device_uuid, "cmd")
     await client.publish(topic, json.dumps({"learn": learn_value}), qos=1, retain=False)
 
 
-async def trigger_learn_action(client: aiomqtt.Client, org_id: str, action: str) -> None:
-    """Put the node into LEARN mode for a standalone action button (FAN_SPEED).
+async def trigger_learn_action(
+    client: aiomqtt.Client, org_id: str, device_uuid: str, action: str
+) -> None:
+    """Put the given indoor node into LEARN for a standalone action button.
 
     Same fire-and-forget contract as :func:`trigger_learn`, but the LEARN label
-    is the action name (no mode/temp). The node captures the next raw IR and
-    echoes it on the ``learn`` topic; ``learn_handler`` routes the known action
-    label into ``ir_action_codes`` (design: fan-speed lives outside the comfort
-    matrix).
+    is the action name (no mode/temp). ``learn_handler`` routes the known action
+    label into ``ir_action_codes``.
     """
-    topic = mqtt_naming.topic(org_id, "indoor", "cmd")
+    topic = mqtt_naming.topic(org_id, device_uuid, "cmd")
     await client.publish(topic, json.dumps({"learn": action}), qos=1, retain=False)

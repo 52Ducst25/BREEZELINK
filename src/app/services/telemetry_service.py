@@ -29,6 +29,14 @@ async def get_device_by_org_and_node(
     return (await session.execute(stmt)).scalar_one_or_none()
 
 
+async def get_device_by_uuid(session: AsyncSession, device_uuid: str) -> Device | None:
+    """Resolve a node by its ``device_uuid`` — the MQTT identity now carried in
+    the topic (``bl/{org}/{device_uuid}/{kind}``). node_type/org come off the row.
+    """
+    stmt = select(Device).where(Device.device_uuid == device_uuid)
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
 async def persist_telemetry(
     session: AsyncSession,
     *,
@@ -38,6 +46,7 @@ async def persist_telemetry(
     humidity: float,
     rssi: int,
     batt: float | None = None,
+    watt: float | None = None,
 ) -> Telemetry:
     """Insert one telemetry row and commit."""
     row = Telemetry(
@@ -46,6 +55,7 @@ async def persist_telemetry(
         temp=temp,
         humidity=humidity,
         rssi=rssi,
+        watt=watt,
         batt=batt,
     )
     session.add(row)

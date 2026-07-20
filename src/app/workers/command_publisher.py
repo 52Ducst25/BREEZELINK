@@ -53,6 +53,7 @@ async def publish_command(
     *,
     org_id: str,
     device_id: uuid.UUID,
+    device_uuid: str,
     result: ComfortResult,
     t_out: float,
     h_out: float | None,
@@ -83,7 +84,7 @@ async def publish_command(
     if ir_raw:
         cmd_payload["ir_raw"] = ir_raw
 
-    topic = mqtt_naming.topic(org_id, "indoor", "cmd")
+    topic = mqtt_naming.topic(org_id, device_uuid, "cmd")
     await client.publish(topic, json.dumps(cmd_payload), qos=1, retain=False)
     if ir_raw and ir_code_id is not None:
         await _mark_ir_delivered(ir_code_id, ir_raw)
@@ -118,6 +119,7 @@ async def publish_manual_command(
     *,
     org_id: str,
     device_id: uuid.UUID,
+    device_uuid: str,
     mode: AcMode,
     setpoint: int,
 ) -> dict:
@@ -149,7 +151,7 @@ async def publish_manual_command(
     if ir_raw:
         cmd_payload["ir_raw"] = ir_raw
 
-    topic = mqtt_naming.topic(org_id, "indoor", "cmd")
+    topic = mqtt_naming.topic(org_id, device_uuid, "cmd")
     await client.publish(topic, json.dumps(cmd_payload), qos=1, retain=False)
     if ir_raw and ir_code_id is not None:
         await _mark_ir_delivered(ir_code_id, ir_raw)
@@ -175,6 +177,7 @@ async def publish_ir_action(
     *,
     org_id: str,
     device_id: uuid.UUID,
+    device_uuid: str,
     action: str,
     raw_timing: list[int],
     mode: AcMode,
@@ -200,7 +203,7 @@ async def publish_ir_action(
         "ir_raw": raw_timing,
         "reason": f"action:{action}",
     }
-    topic = mqtt_naming.topic(org_id, "indoor", "cmd")
+    topic = mqtt_naming.topic(org_id, device_uuid, "cmd")
     await client.publish(topic, json.dumps(cmd_payload), qos=1, retain=False)
 
     await command_service.insert_command(

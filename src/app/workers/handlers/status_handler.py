@@ -23,14 +23,14 @@ async def handle_status(client, topic: ParsedTopic, payload: str) -> None:
     """Update ``devices.status`` + ``last_seen_at`` from an LWT/presence msg."""
     status = _VALID.get(payload.strip().lower())
     if status is None:
-        logger.warning("Unrecognized status payload %r on org=%s node=%s", payload, topic.org_id, topic.node)
+        logger.warning("Unrecognized status payload %r on org=%s uuid=%s", payload, topic.org_id, topic.device_uuid)
         return
 
     async with AsyncSessionLocal() as session:
         set_current_org(topic.org_id)
-        device = await telemetry_service.get_device_by_org_and_node(session, topic.org_id, topic.node)
+        device = await telemetry_service.get_device_by_uuid(session, topic.device_uuid)
         if device is None:
-            logger.warning("No device registered for org=%s node=%s", topic.org_id, topic.node)
+            logger.warning("No device registered for uuid=%s (org=%s)", topic.device_uuid, topic.org_id)
             return
         device.status = status
         device.last_seen_at = utcnow()

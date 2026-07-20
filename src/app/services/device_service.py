@@ -9,12 +9,12 @@ by list/read endpoints (only used for firmware provisioning out-of-band).
 import secrets
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError
 from app.models.device import Device
-from app.models.enums import NodeType
+from app.models.enums import NodeRole, NodeType
 
 
 async def create_device(
@@ -81,6 +81,41 @@ async def update_device(
         device.node_type = node_type
     if location is not None:
         device.location = location or None
+    await session.flush()
+    return device
+
+
+async def set_role(session: AsyncSession, device: Device, role: NodeRole | None) -> Device:
+    """Assign the network role. Caller commits.
+
+    At most ONE master per household: promoting a node to master demotes any
+    OTHER current master in the same org to slave in the same flush, so the
+    "which node bridges to the cloud" answer is always unambiguous.
+    """
+    if role == NodeRole.master:
+        await session.execute(
+            update(Device)
+            .where(
+                Device.org_id == device.org_id,
+                Device.id != device.id,
+                Device.role == NodeRole.master,
+            )
+            .values(role=NodeRole.slave)
+        )
+    device.role = role
+    await session.flush()
+    return device
+
+
+async def rotate_credentials(session: AsyncSession, device: Device) -> Device:
+    """Issue a fresh device_uuid + mqtt_token. Caller commits.
+
+    For re-flashing or replacing a board: the OLD credentials stop working the
+    moment this commits, so only run it when the firmware is about to be
+    re-provisioned with the new values (the provisioning page shows them).
+    """
+    device.device_uuid = uuid.uuid4().hex
+    device.mqtt_token = secrets.token_urlsafe(32)
     await session.flush()
     return device
 

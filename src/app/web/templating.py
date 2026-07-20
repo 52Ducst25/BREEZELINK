@@ -16,7 +16,7 @@ TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 # Bump on any app.css/app.js change. ds/* is the vendored design system,
 # linked WITHOUT "?v=" (see base.html's comment on that link) -- editing it
 # needs a hard refresh, not a version bump here.
-ASSET_VERSION = "260718-4"
+ASSET_VERSION = "260720-2"
 
 # Vietnam time. The container runs UTC, so ``astimezone()`` was rendering every
 # date 7 hours behind what a Vietnamese admin expects — the "sai ngày tạo" bug.
@@ -97,6 +97,17 @@ def _initials(user) -> str:
     return email[:2].upper()
 
 
+def _format_mac(value) -> str:
+    """A 48-bit MAC stored as a BIGINT rendered as ``AA:BB:CC:DD:EE:FF``; em-dash
+    when the node hasn't reported one yet (mac is null until the first reading).
+    Used on the provisioning panel so a slave can be ESP-NOW-paired to its master.
+    """
+    if value is None:
+        return "—"
+    h = f"{int(value):012X}"
+    return ":".join(h[i : i + 2] for i in range(0, 12, 2))
+
+
 def _format_number(value, digits: int = 1) -> str:
     """Fixed-point number, or an em-dash for ``None`` -- used everywhere a
     comfort-pipeline value may be legitimately absent (see comfort.py schema).
@@ -111,6 +122,7 @@ templates.env.filters["datetime"] = _format_datetime
 templates.env.filters["ago"] = _format_ago
 templates.env.filters["online"] = _is_online
 templates.env.filters["initials"] = _initials
+templates.env.filters["mac"] = _format_mac
 templates.env.filters["num"] = _format_number
 
 

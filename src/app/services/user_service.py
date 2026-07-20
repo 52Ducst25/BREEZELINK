@@ -60,6 +60,8 @@ async def update_user(
     full_name: str | None = None,
     phone: str | None = None,
     location: str | None = None,
+    latitude: float | None = None,
+    longitude: float | None = None,
     password: str | None = None,
     role: UserRole | None = None,
     is_active: bool | None = None,
@@ -73,6 +75,10 @@ async def update_user(
         user.phone = phone
     if location is not None:
         user.location = location
+    if latitude is not None:
+        user.latitude = latitude
+    if longitude is not None:
+        user.longitude = longitude
     if password is not None:
         user.password_hash = hash_password(password)
     if role is not None:

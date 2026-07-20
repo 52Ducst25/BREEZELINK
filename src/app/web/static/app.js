@@ -18,8 +18,8 @@
 // (same-origin), no ?token= needed (see api/v1/ws_routes.py).
 
 (function () {
-  // Rail collapse/expand, persisted so base.html's inline <head> script can
-  // apply it before first paint (no flash of the wrong rail width).
+  // Rail collapse/expand (DESKTOP), persisted so base.html's inline <head>
+  // script can apply it before first paint (no flash of the wrong rail width).
   var btn = document.getElementById("acRailToggle");
   if (!btn) return;
   btn.addEventListener("click", function () {
@@ -29,8 +29,31 @@
 })();
 
 (function () {
+  // Mobile drawer: the hamburger toggles html.rail-open (rail slides in over a
+  // dimmed backdrop). Tapping the backdrop, a nav item, or Escape closes it.
+  var burger = document.getElementById("acBurger");
+  var backdrop = document.getElementById("acRailBackdrop");
+  var rail = document.getElementById("acRail");
+  if (!burger || !backdrop || !rail) return;
+  var root = document.documentElement;
+  function close() { root.classList.remove("rail-open"); }
+  burger.addEventListener("click", function () { root.classList.toggle("rail-open"); });
+  backdrop.addEventListener("click", close);
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") close(); });
+  rail.querySelectorAll(".ac-rail__item").forEach(function (a) {
+    a.addEventListener("click", close);
+  });
+})();
+
+(function () {
   var main = document.getElementById("main");
-  if (!main || !("WebSocket" in window)) return;
+  // LOGGED-IN SHELL ONLY (guarded by #acRail, which base.html renders only when
+  // there's a user). The live feed's auto-refetch does fetch(location.href) and
+  // swaps #main — fine on the dashboard, but on the PUBLIC reset-password page
+  // that URL has lost its ?token after the POST, so the refetch rendered the
+  // "Liên kết thiếu mã đặt lại" error OVER the success tick. A public page has
+  // no live state to push anyway, so skip the whole feed there.
+  if (!main || !document.getElementById("acRail") || !("WebSocket" in window)) return;
 
   var liveDot = document.getElementById("acLiveDot");
   function setLive(on) {

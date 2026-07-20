@@ -20,8 +20,23 @@ from app.schemas.auth import (
     RegisterRequest,
     ResetPasswordRequest,
     TokenPair,
+    UpdateProfileRequest,
 )
-from app.services import auth_service
+from app.services import auth_service, user_service
+
+
+def _me(user: User) -> MeResponse:
+    return MeResponse(
+        id=user.id,
+        email=user.email,
+        org_id=user.org_id,
+        role=user.role.value,
+        full_name=user.full_name,
+        phone=user.phone,
+        location=user.location,
+        latitude=float(user.latitude) if user.latitude is not None else None,
+        longitude=float(user.longitude) if user.longitude is not None else None,
+    )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -79,7 +94,29 @@ async def logout() -> dict[str, str]:
 @router.get("/me", response_model=MeResponse)
 async def me(user: User = Depends(get_current_user)) -> MeResponse:
     """Current caller's identity — backs the Flutter user_profile screen."""
-    return MeResponse(id=user.id, email=user.email, org_id=user.org_id, role=user.role.value)
+    return _me(user)
+
+
+@router.put("/me", response_model=MeResponse)
+async def update_me(
+    data: UpdateProfileRequest,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> MeResponse:
+    """Edit your own profile (household address, name, phone). Only the fields
+    present in the body are changed — the app sends just ``location`` to set the
+    home address shown on the location card."""
+    await user_service.update_user(
+        session,
+        user,
+        full_name=data.full_name,
+        phone=data.phone,
+        location=data.location,
+        latitude=data.latitude,
+        longitude=data.longitude,
+    )
+    await session.commit()
+    return _me(user)
 
 
 @router.post("/forgot-password", status_code=status.HTTP_202_ACCEPTED)
