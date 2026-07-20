@@ -38,3 +38,13 @@ async def handle_status(client, topic: ParsedTopic, payload: str) -> None:
 
     # Push the online/offline change to the realtime feed immediately.
     await live_events.publish_change(topic.org_id)
+
+    # ...and to the vendor channel, or the ADMIN never sees it live.
+    # The org nudge above only reaches sockets whose token carries THIS org —
+    # i.e. the household's own app. Vendor staff watching this customer's page
+    # are authenticated in a different org, so their socket subscribes to a
+    # different channel: unplug a node and the admin page sat stale until
+    # someone pressed refresh. Device presence flips only on connect/disconnect
+    # (unlike telemetry, which lands every 15s), so broadcasting it to all staff
+    # sockets costs almost nothing.
+    await live_events.publish_vendor_change("devices")

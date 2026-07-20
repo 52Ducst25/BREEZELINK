@@ -142,6 +142,11 @@ void setup() {
   connectWifi();
   mqtt.setServer(MQTT_HOST, MQTT_PORT);
   mqtt.setCallback(onMessage);
+  // Giữ keepalive mặc định 15s của PubSubClient -> broker kết luận master chết
+  // sau ~22s. Ưu tiên ỔN ĐỊNH: hạ xuống 3-5s thì chỉ cần mạng chớp một nhịp là
+  // broker cắt phiên rồi client nối lại, trạng thái lật online/offline liên tục.
+  // 15s là giá trị mặc định đã được kiểm nghiệm rộng rãi — không đụng vào.
+  mqtt.setKeepAlive(15);
   connectMqtt();
 
   // ESP-NOW khởi tạo SAU khi WiFi đã kết nối: nó dùng đúng kênh WiFi đang bám,

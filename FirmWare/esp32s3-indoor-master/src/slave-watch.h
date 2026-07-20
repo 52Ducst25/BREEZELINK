@@ -15,9 +15,15 @@
 // ============================================================================
 namespace SlaveWatch {
 
-/// Slave bắn nhịp tim mỗi 5s; bỏ lỡ 4 nhịp mới coi là mất. Chịu được vài gói
-/// rơi lẻ tẻ (chuyện thường với sóng vô tuyến) mà vẫn phát hiện mất kết nối
-/// trong vòng ~20 giây.
+/// Slave bắn nhịp tim mỗi 3s; ngưỡng 20s -> chịu được ~6.6 nhịp rơi LIÊN TIẾP
+/// mới báo mất kết nối. Đây là cấu hình ưu tiên ỔN ĐỊNH, chống nhấp nháy.
+///
+/// Cách đạt an toàn cao nhất là giữ nhịp tim DÀY nhưng ngưỡng RỘNG, chứ không
+/// phải kéo dài cả hai: nhịp dày cho nhiều cơ hội "điểm danh" trong cùng một
+/// cửa sổ, nên một chuỗi nhiễu sóng cũng không đủ làm node bị coi là chết.
+/// Đổi lại: mất điện thật thì mất ~20 giây mới hiện offline — đã cân nhắc và
+/// chấp nhận, vì báo nhầm liên tục làm người dùng mất tin vào đèn trạng thái,
+/// tệ hơn nhiều so với biết chậm vài giây.
 static const uint32_t SLAVE_TIMEOUT_MS = 20000UL;
 
 /// Nhịp tim 5s là để biết SỐNG/CHẾT nhanh, không phải để lưu số đo dày đặc:
