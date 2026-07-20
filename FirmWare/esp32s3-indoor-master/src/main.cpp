@@ -20,6 +20,8 @@
 #include <ArduinoJson.h>
 #include <DHT.h>
 #include "config.h"
+#include "espnow-relay.h"
+#include "slave-watch.h"
 
 // Broker EMQX tự host trên VPS chạy plaintext 1883 (MQTT_TLS=false trong
 // docker-compose), nên dùng WiFiClient thường — KHÔNG phải WiFiClientSecure.
@@ -39,6 +41,53 @@ static void buildTopics() {
 // Bản test chưa thi hành lệnh AC — chỉ in ra để xác nhận đã nhận được cmd.
 static void onMessage(char *topic, byte *payload, unsigned int len) {
   Serial.printf("[cmd] %.*s\n", (int)len, (const char *)payload);
+}
+
+static String macToText(const uint8_t m[6]) {
+  char buf[18];
+  snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X",
+           m[0], m[1], m[2], m[3], m[4], m[5]);
+  return String(buf);
+}
+
+// ---------------------------------------------------------------------------
+//  CHUYỂN TIẾP: số đo của slave đi lên topic RIÊNG của slave, không phải của
+//  master — backend nhận diện node theo uuid trong topic, nên số vào đúng hồ sơ.
+//  Kèm "mac" để web hiện MAC thật, và "via" để biết gói đã đi qua master.
+// ---------------------------------------------------------------------------
+static void publishSlaveTelemetry(const char *uuid, const uint8_t mac[6],
+                                  float t, float h) {
+  JsonDocument doc;
+  doc["ts"]   = (uint32_t)(millis() / 1000);
+  doc["t"]    = t;
+  doc["h"]    = h;
+  doc["rssi"] = 0;                    // slave không nối WiFi nên không có RSSI
+  doc["fw"]   = FW_VERSION;
+  doc["mac"]  = macToText(mac);
+  doc["via"]  = "espnow";
+  char buf[224];
+  size_t n = serializeJson(doc, buf);
+  String topic = String("bl/") + ORG_ID + "/" + uuid + "/telemetry";
+  bool ok = mqtt.publish(topic.c_str(), (const uint8_t *)buf, n, false);
+  Serial.printf("[relay] %s t=%.1f h=%.0f -> %s\n", uuid, t, h, ok ? "da chuyen" : "LOI");
+}
+
+/// Master ĐỨNG TÊN slave báo trạng thái: slave không có kết nối MQTT nên broker
+/// không thể sinh Last Will cho nó. Retained để web/app mở lên là thấy ngay.
+static void publishSlaveStatus(const char *uuid, bool online) {
+  String topic = String("bl/") + ORG_ID + "/" + uuid + "/status";
+  mqtt.publish(topic.c_str(), online ? "online" : "offline", true);
+  Serial.printf("[slave] %s -> %s\n", uuid, online ? "ONLINE" : "OFFLINE (mat nhip tim)");
+}
+
+static void onSlavePacket(const char *uuid, const uint8_t mac[6], float t, float h) {
+  // MỌI gói đều tính là nhịp tim (5s/lần) -> phát hiện mất kết nối nhanh...
+  SlaveWatch::heard(uuid, publishSlaveStatus);
+  // ...nhưng chỉ đẩy số đo lên cloud mỗi 15s, khỏi phồng DB vô ích.
+  if (SlaveWatch::dueForRelay(uuid)) publishSlaveTelemetry(uuid, mac, t, h);
+  // Khẳng định lại "online" mỗi phút để tự sửa nếu một Last Will đến muộn đã
+  // đè nhầm trạng thái slave thành offline.
+  if (SlaveWatch::dueForStatusRefresh(uuid)) publishSlaveStatus(uuid, true);
 }
 
 static void connectWifi() {
@@ -78,6 +127,15 @@ void setup() {
   mqtt.setServer(MQTT_HOST, MQTT_PORT);
   mqtt.setCallback(onMessage);
   connectMqtt();
+
+  // ESP-NOW khởi tạo SAU khi WiFi đã kết nối: nó dùng đúng kênh WiFi đang bám,
+  // nên phải để WiFi chốt kênh trước thì slave (đang dò kênh router) mới gặp.
+  if (EspNowRelay::begin()) {
+    Serial.printf("ESP-NOW san sang · MAC master = %s · kenh %d\n",
+                  WiFi.macAddress().c_str(), WiFi.channel());
+  } else {
+    Serial.println("ESP-NOW KHOI TAO LOI — se khong nhan duoc so lieu tu slave");
+  }
 }
 
 static unsigned long lastPub = 0;
@@ -85,6 +143,12 @@ void loop() {
   connectWifi();
   if (!mqtt.connected()) connectMqtt();
   mqtt.loop();
+
+  // Rút hàng đợi ESP-NOW: chuyển tiếp số đo + cập nhật nhịp tim của slave.
+  EspNowRelay::poll(onSlavePacket);
+  // Slave im quá lâu -> master đứng tên nó báo offline (broker không có LWT
+  // cho slave vì slave không hề kết nối MQTT).
+  SlaveWatch::checkTimeouts(publishSlaveStatus);
 
   unsigned long now = millis();
   if (lastPub != 0 && now - lastPub < TELEMETRY_MS) return;  // chưa tới nhịp
@@ -106,6 +170,9 @@ void loop() {
   doc["t"]    = t;
   doc["h"]    = h;
   doc["rssi"] = (int)WiFi.RSSI();
+  // MAC của chính master: gửi được nghĩa là master ĐANG có WiFi + MQTT, và web
+  // hiện được MAC thật thay vì "—" (ô "MAC node này" ở panel Nạp firmware).
+  doc["mac"]  = WiFi.macAddress();
   doc["fw"]   = FW_VERSION;
   char buf[192];
   size_t n = serializeJson(doc, buf);

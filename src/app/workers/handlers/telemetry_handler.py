@@ -50,6 +50,28 @@ class TelemetryValidationError(ValueError):
     """Raised when a reading is out of physically-plausible range."""
 
 
+def _parse_mac(raw) -> int | None:
+    """``"AA:BB:CC:DD:EE:FF"`` -> 48-bit int, or None if unusable.
+
+    ``devices.mac`` is a BIGINT (models/device.py), and the firmware reports a
+    human-readable MAC, so the conversion happens here. A master reporting its
+    MAC is also the signal that it really is on WiFi + MQTT; a slave's MAC is
+    forwarded by its master (the slave never connects itself).
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, int):
+        return raw if 0 < raw < (1 << 48) else None
+    text = str(raw).replace(":", "").replace("-", "").strip()
+    if len(text) != 12:
+        return None
+    try:
+        value = int(text, 16)
+    except ValueError:
+        return None
+    return value or None  # all-zero MAC means "unknown", not a real address
+
+
 def _validate_ranges(payload: dict) -> tuple[float, float]:
     temp, humidity = payload.get("t"), payload.get("h")
     if temp is None or humidity is None:
@@ -107,6 +129,13 @@ async def handle_telemetry(client, topic: ParsedTopic, payload: dict) -> None:
             logger.warning("No device registered for uuid=%s (org=%s)", topic.device_uuid, topic.org_id)
             return
         is_indoor = device.node_type == NodeType.indoor
+
+        # Set BEFORE persist_telemetry: that call commits, so the device row is
+        # flushed in the same transaction as the reading.
+        mac = _parse_mac(payload.get("mac"))
+        if mac is not None and device.mac != mac:
+            device.mac = mac
+            logger.info("Device %s reported MAC %012X", topic.device_uuid, mac)
 
         await telemetry_service.persist_telemetry(
             session,
