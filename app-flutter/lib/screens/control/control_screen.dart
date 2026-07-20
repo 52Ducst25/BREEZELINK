@@ -3,14 +3,18 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../models/live_reading.dart';
 import '../../state/app_state.dart';
 import '../../theme/ac_colors.dart';
 import '../../theme/ac_text.dart';
+import '../../widgets/empty_value.dart';
+import '../../widgets/icon_badge.dart';
 import '../../widgets/outline_panel.dart';
 import '../../widgets/primary_button.dart';
 import 'override_panel.dart';
 
-/// ĐIỀU KHIỂN tab: manual override + IR learn flow.
+/// ĐIỀU KHIỂN tab: manual override + IR learn flow, restyled to the BenKon
+/// look — a small indoor readings card, then the big circular dial + controls.
 ///
 /// TTL COUNTDOWN GAP (documented, not silently faked): the backend has no
 /// GET-current-override endpoint (`redis_override_service` only exposes
@@ -51,6 +55,8 @@ class _ControlScreenState extends State<ControlScreen> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        _ReadingsCard(indoor: s.indoor),
+        const SizedBox(height: 16),
         if (_overrideSetAt != null) ...[
           _OverrideStatusCard(setAt: _overrideSetAt!, overrideHours: bounds?.overrideHours, onClear: _clear),
           const SizedBox(height: 16),
@@ -66,6 +72,7 @@ class _ControlScreenState extends State<ControlScreen> {
           // learned IR frame; returns a "chưa học" message when not yet taught.
           onAction: (wire) => s.sendAction(wire),
         ),
+        const SizedBox(height: 8),
       ],
     );
   }
@@ -78,6 +85,56 @@ class _ControlScreenState extends State<ControlScreen> {
         _tick?.cancel();
       });
     }
+  }
+}
+
+/// Small indoor readings card above the dial — Temperature / Humidity, em-dash
+/// when there is no telemetry yet.
+class _ReadingsCard extends StatelessWidget {
+  const _ReadingsCard({required this.indoor});
+  final LiveReading? indoor;
+
+  @override
+  Widget build(BuildContext context) {
+    final ac = context.ac;
+    return OutlinePanel(
+      child: Row(
+        children: [
+          Expanded(
+            child: _metric(ac, Icons.thermostat_outlined, indoor?.temp.toStringAsFixed(1), '°C', 'Nhiệt độ phòng'),
+          ),
+          Container(width: 1, height: 40, color: ac.carbonLine),
+          Expanded(
+            child: _metric(ac, Icons.water_drop_outlined, indoor?.humidity.toStringAsFixed(0), '%', 'Độ ẩm phòng'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _metric(AcPalette ac, IconData icon, String? value, String unit, String label) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(icon, size: 20, color: ac.whiteDim),
+        const SizedBox(width: 10),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
+              children: [
+                EmptyValue(value, style: AcText.mono(size: 20, color: ac.iceText)),
+                if (value != null) Text(unit, style: AcText.mono(size: 12, color: ac.whiteDim)),
+              ],
+            ),
+            Text(label, style: AcText.body(size: 11, color: ac.whiteDim)),
+          ],
+        ),
+      ],
+    );
   }
 }
 
@@ -105,8 +162,8 @@ class _OverrideStatusCard extends StatelessWidget {
       accent: ac.warning,
       child: Row(
         children: [
-          Icon(Icons.pan_tool_outlined, color: ac.warning, size: 20),
-          const SizedBox(width: 10),
+          AcIconBadge(icon: Icons.pan_tool_outlined, color: ac.warning, size: 40, iconSize: 20),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,

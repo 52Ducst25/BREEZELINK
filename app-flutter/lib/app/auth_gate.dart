@@ -9,6 +9,7 @@ import '../services/comfort_api.dart';
 import '../services/config_api.dart';
 import '../services/credential_store.dart';
 import '../services/device_api.dart';
+import '../services/energy_api.dart';
 import '../services/ir_api.dart';
 import '../services/telemetry_api.dart';
 import '../state/app_state.dart';
@@ -107,6 +108,7 @@ class _AuthGateState extends State<AuthGate> {
       telemetryApi: TelemetryApi(client),
       irApi: IrApi(client),
       configApi: ConfigApi(client),
+      energyApi: EnergyApi(client),
     );
     client.onSessionExpired = _forceLogout;
     appState.start();

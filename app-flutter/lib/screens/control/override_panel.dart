@@ -6,22 +6,21 @@ import '../../models/ac_action.dart';
 import '../../models/ac_mode.dart';
 import '../../models/config_bounds.dart';
 import '../../theme/ac_colors.dart';
+import '../../theme/ac_shapes.dart';
 import '../../theme/ac_text.dart';
-import '../../theme/chamfer_border.dart';
-import '../../widgets/outline_panel.dart';
+import '../../widgets/icon_badge.dart';
+import 'temp_dial.dart';
 
-/// The AC remote, laid out like a physical handset: a green LCD screen on top,
-/// then the button grid — TEMP ▲/▼, POWER, MODE and every peripheral key
-/// (SUPER, SLEEP, ECO, QUIET, SMART, TIMER, đảo gió, đèn, °C/°F).
+/// The AC remote, restyled to the BenKon look: a big circular temperature dial,
+/// a prominent power control, "Chế độ" + "Tốc độ quạt" cards, and a tidy grid
+/// of the peripheral learned actions.
 ///
-/// Two command paths:
+/// Two command paths (UNCHANGED behaviour):
 ///  - POWER / TEMP / MODE change the operating (mode, setpoint) via [onSubmit]
 ///    (a manual override) — these always work.
 ///  - Every other key replays ONE learned IR frame via [onAction]. If that
 ///    button hasn't been learned yet the server says so and the status line
 ///    tells the user to go learn it — no key is ever silently dead.
-///
-/// Every press sends immediately (temp is debounced so holding ▲ fires once).
 class OverridePanel extends StatefulWidget {
   const OverridePanel({
     super.key,
@@ -45,6 +44,10 @@ class OverridePanel extends StatefulWidget {
 enum _SendState { idle, sending, sent, error }
 
 const _kModes = [AcMode.cool, AcMode.dry, AcMode.fan];
+
+/// Peripheral keys shown in the grid — every [kAcActions] entry EXCEPT
+/// FAN_SPEED, which has its own dedicated "Tốc độ quạt" card above.
+final _kGridActions = kAcActions.where((a) => a.wire != 'FAN_SPEED').toList();
 AcAction _act(String wire) => kAcActions.firstWhere((a) => a.wire == wire);
 
 class _OverridePanelState extends State<OverridePanel> {
@@ -130,109 +133,55 @@ class _OverridePanelState extends State<OverridePanel> {
 
   @override
   Widget build(BuildContext context) {
-    return OutlinePanel(
-      child: Column(
-        children: [
-          _lcd(context),
-          const SizedBox(height: 18),
-          _TempKey(up: true, onTap: _on ? () => _step(1) : null),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(child: _Key(action: _act('SUPER'), onTap: () => _action('SUPER'))),
-              const SizedBox(width: 10),
-              _PowerKey(on: _on, onTap: _togglePower),
-              const SizedBox(width: 10),
-              Expanded(child: _Key(action: _act('FAN_SPEED'), onTap: () => _action('FAN_SPEED'))),
-            ],
-          ),
-          const SizedBox(height: 10),
-          _TempKey(up: false, onTap: _on ? () => _step(-1) : null),
-          const SizedBox(height: 14),
-          // 3-column grid of the remaining keys, matching the handset.
-          _row3(
-            _Key(action: _act('SLEEP'), onTap: () => _action('SLEEP')),
-            _Key(label: 'CHẾ ĐỘ', icon: _mode.icon, onTap: _cycleMode, accent: true),
-            _Key(action: _act('ECO'), onTap: () => _action('ECO')),
-          ),
-          const SizedBox(height: 10),
-          _row3(
-            _Key(action: _act('QUIET'), onTap: () => _action('QUIET')),
-            _Key(action: _act('LIGHT'), onTap: () => _action('LIGHT')),
-            _Key(action: _act('SWING_V'), onTap: () => _action('SWING_V')),
-          ),
-          const SizedBox(height: 10),
-          _row3(
-            _Key(action: _act('SMART'), onTap: () => _action('SMART')),
-            _Key(action: _act('TIMER'), onTap: () => _action('TIMER')),
-            _Key(action: _act('SWING_H'), onTap: () => _action('SWING_H')),
-          ),
-          const SizedBox(height: 10),
-          _Key(action: _act('TEMP_UNIT'), onTap: () => _action('TEMP_UNIT')),
-          const SizedBox(height: 14),
-          _status(context),
-        ],
-      ),
-    );
-  }
-
-  Widget _row3(Widget a, Widget b, Widget c) => Row(
-        children: [
-          Expanded(child: a),
-          const SizedBox(width: 10),
-          Expanded(child: b),
-          const SizedBox(width: 10),
-          Expanded(child: c),
-        ],
-      );
-
-  // ---- the green LCD screen ----
-  Widget _lcd(BuildContext ctx) {
-    // Deliberately its own colour world (not the app's blue): it mimics the
-    // physical remote's backlit green LCD so the handset reads as a handset.
-    const lcdBg = Color(0xFF12251A);
-    const lcdInk = Color(0xFF8BE9A8);
-    const lcdDim = Color(0xFF3F6E52);
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-      decoration: BoxDecoration(
-        color: lcdBg,
-        border: Border.all(color: const Color(0xFF1E3A28), width: 2),
-      ),
-      child: Row(
-        children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(children: [
-                Icon(_mode.icon, size: 16, color: _on ? lcdInk : lcdDim),
-                const SizedBox(width: 6),
-                Text(_on ? _mode.label.toUpperCase() : 'TẮT',
-                    style: AcText.label(size: 11, color: _on ? lcdInk : lcdDim)),
-              ]),
-            ],
-          ),
-          const Spacer(),
-          // Setpoint number only for COOL (DRY/FAN ignore it — the server snaps
-          // it away); those show the mode name, off shows a blank readout.
-          if (!_on)
-            Text('— —', style: AcText.mono(size: 40, color: lcdDim))
-          else if (_mode == AcMode.cool)
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('$_setpoint', style: AcText.mono(size: 48, color: lcdInk)),
-                Padding(
-                  padding: const EdgeInsets.only(top: 8, left: 2),
-                  child: Text('°C', style: AcText.mono(size: 18, color: lcdInk)),
-                ),
-              ],
-            )
-          else
-            Text(_mode.label.toUpperCase(), style: AcText.mono(size: 26, color: lcdInk)),
-        ],
-      ),
+    final steppable = _on && _mode == AcMode.cool;
+    return Column(
+      children: [
+        TempDial(
+          mode: _mode,
+          setpoint: _setpoint,
+          on: _on,
+          onDecrement: steppable ? () => _step(-1) : null,
+          onIncrement: steppable ? () => _step(1) : null,
+        ),
+        const SizedBox(height: 20),
+        _PowerBar(on: _on, onTap: _togglePower),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            Expanded(
+              child: _ControlCard(
+                icon: _mode.icon,
+                title: 'Chế độ',
+                value: _on ? _mode.label : 'TẮT',
+                onTap: _cycleMode,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _ControlCard(
+                icon: Icons.air,
+                title: 'Tốc độ quạt',
+                value: 'Nhấn để đổi',
+                onTap: () => _action('FAN_SPEED'),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        GridView.count(
+          crossAxisCount: 4,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 10,
+          crossAxisSpacing: 10,
+          childAspectRatio: 0.86,
+          children: [
+            for (final a in _kGridActions) _ActionKey(action: a, onTap: () => _action(a.wire)),
+          ],
+        ),
+        const SizedBox(height: 16),
+        _status(context),
+      ],
     );
   }
 
@@ -259,89 +208,10 @@ class _OverridePanelState extends State<OverridePanel> {
       );
 }
 
-/// A standard remote key: an icon over a short label, chamfered like the rest of
-/// the UI. [accent] outlines it in the brand blue (used for the MODE key).
-class _Key extends StatelessWidget {
-  const _Key({this.action, this.label, this.icon, required this.onTap, this.accent = false});
-  final AcAction? action;
-  final String? label;
-  final IconData? icon;
-  final VoidCallback onTap;
-  final bool accent;
-
-  @override
-  Widget build(BuildContext context) {
-    final ac = context.ac;
-    final ico = icon ?? action?.icon ?? Icons.circle;
-    final txt = label ?? action?.label ?? '';
-    final line = accent ? ac.ice : ac.carbonLine;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        customBorder: const ChamferBorder(cut: 8),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 6),
-          decoration: ShapeDecoration(
-            color: ac.carbonUp,
-            shape: ChamferBorder(cut: 8, side: BorderSide(color: line, width: 2)),
-          ),
-          child: Column(
-            children: [
-              Icon(ico, size: 20, color: accent ? ac.ice : ac.white),
-              const SizedBox(height: 5),
-              Text(txt, textAlign: TextAlign.center, maxLines: 1,
-                  overflow: TextOverflow.ellipsis, style: AcText.label(size: 8.5, color: ac.whiteDim)),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Wide TEMP ▲/▼ bar. Disabled (dimmed) when the AC is off.
-class _TempKey extends StatelessWidget {
-  const _TempKey({required this.up, required this.onTap});
-  final bool up;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final ac = context.ac;
-    final on = onTap != null;
-    return Opacity(
-      opacity: on ? 1 : 0.4,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          customBorder: const ChamferBorder(cut: 8),
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            decoration: ShapeDecoration(
-              color: ac.carbonUp,
-              shape: ChamferBorder(cut: 8, side: BorderSide(color: ac.carbonLine, width: 2)),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(up ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, size: 22, color: ac.ice),
-                const SizedBox(width: 8),
-                Text(up ? 'TĂNG NHIỆT' : 'GIẢM NHIỆT', style: AcText.label(size: 11, color: ac.white)),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// The central POWER key — round, accent-filled + glowing when on, dim when off.
-class _PowerKey extends StatelessWidget {
-  const _PowerKey({required this.on, required this.onTap});
+/// Prominent full-width power control — accent-filled + glowing when on, dim
+/// when off.
+class _PowerBar extends StatelessWidget {
+  const _PowerBar({required this.on, required this.onTap});
   final bool on;
   final VoidCallback onTap;
 
@@ -350,22 +220,115 @@ class _PowerKey extends StatelessWidget {
     final ac = context.ac;
     return Material(
       color: Colors.transparent,
-      shape: const CircleBorder(),
+      borderRadius: cardRadius,
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
-        customBorder: const CircleBorder(),
         child: Container(
-          width: 76,
-          height: 76,
-          alignment: Alignment.center,
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(vertical: 15),
           decoration: BoxDecoration(
-            shape: BoxShape.circle,
             color: on ? ac.ice : ac.carbonUp,
-            border: Border.all(color: on ? ac.ice : ac.carbonLine, width: 2),
-            boxShadow: on ? [BoxShadow(color: ac.iceGlow, blurRadius: 16)] : null,
+            borderRadius: cardRadius,
+            border: Border.all(color: on ? ac.ice : ac.carbonLine, width: 1.5),
+            boxShadow: on ? [BoxShadow(color: ac.iceGlow, blurRadius: 18, spreadRadius: -2)] : null,
           ),
-          child: Icon(Icons.power_settings_new, size: 32, color: on ? Colors.white : ac.whiteDim),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.power_settings_new, size: 20, color: on ? Colors.white : ac.whiteDim),
+              const SizedBox(width: 10),
+              Text(
+                on ? 'ĐANG BẬT · NHẤN ĐỂ TẮT' : 'ĐÃ TẮT · NHẤN ĐỂ BẬT',
+                style: AcText.label(size: 12, color: on ? Colors.white : ac.whiteDim),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A rounded "setting" card ("Chế độ", "Tốc độ quạt") — leading icon badge,
+/// title over a value, whole card tappable.
+class _ControlCard extends StatelessWidget {
+  const _ControlCard({required this.icon, required this.title, required this.value, required this.onTap});
+  final IconData icon;
+  final String title;
+  final String value;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ac = context.ac;
+    return Material(
+      color: Colors.transparent,
+      borderRadius: cardRadius,
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: ac.carbonUp,
+            borderRadius: cardRadius,
+            border: Border.all(color: ac.carbonLine, width: 1),
+          ),
+          child: Row(
+            children: [
+              AcIconBadge(icon: icon, size: 40, iconSize: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: AcText.label(size: 10.5, color: ac.whiteDim)),
+                    const SizedBox(height: 3),
+                    Text(value, maxLines: 1, overflow: TextOverflow.ellipsis, style: AcText.heading(size: 13, color: ac.white)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// One peripheral remote key in the grid: an icon badge over a short label.
+class _ActionKey extends StatelessWidget {
+  const _ActionKey({required this.action, required this.onTap});
+  final AcAction action;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ac = context.ac;
+    return Material(
+      color: Colors.transparent,
+      borderRadius: innerRadius,
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+          decoration: BoxDecoration(
+            color: ac.carbonUp,
+            borderRadius: innerRadius,
+            border: Border.all(color: ac.carbonLine, width: 1),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(action.icon, size: 22, color: ac.white),
+              const SizedBox(height: 6),
+              Text(action.label,
+                  textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis,
+                  style: AcText.label(size: 9, color: ac.whiteDim)),
+            ],
+          ),
         ),
       ),
     );

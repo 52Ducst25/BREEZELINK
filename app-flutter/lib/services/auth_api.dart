@@ -69,6 +69,26 @@ class AuthApi {
     }
   }
 
+  /// Edit the caller's own profile. Only the non-null fields are sent, so the
+  /// account screen can save just the home address. Throws [ApiException] on
+  /// failure so the caller can surface the reason.
+  Future<UserProfile> updateProfile({
+    String? fullName,
+    String? phone,
+    String? location,
+    double? latitude,
+    double? longitude,
+  }) async {
+    final body = await _client.put('/api/v1/auth/me', data: {
+      'full_name': ?fullName,
+      'phone': ?phone,
+      'location': ?location,
+      'latitude': ?latitude,
+      'longitude': ?longitude,
+    });
+    return UserProfile.fromJson(body);
+  }
+
   Future<String?> forgotPassword(String email) async {
     try {
       await _client.postPublic('/api/v1/auth/forgot-password', data: {'email': email});

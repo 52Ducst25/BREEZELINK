@@ -2,12 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'ac_colors.dart';
-import 'chamfer_border.dart';
+import 'ac_shapes.dart';
 
-/// "Glacier Command" Material 3 theme: chamfer-cut corners everywhere (no
-/// rounded corners), square 2px-bordered inputs, ice-blue accent. Both light
-/// and dark variants attach [AcPalette] so custom widgets read colors via
-/// `context.ac.*`.
+/// Material 3 theme: soft ROUNDED corners everywhere (BenKon-style), ice-blue
+/// #0055FF accent, dark carbon surfaces. Both light and dark variants attach
+/// [AcPalette] so custom widgets read colors via `context.ac.*`.
 class AcTheme {
   AcTheme._();
 
@@ -43,13 +42,13 @@ class AcTheme {
         color: p.carbonPanel,
         elevation: 0,
         margin: EdgeInsets.zero,
-        shape: ChamferBorder(cut: 12, side: BorderSide(color: p.carbonLine, width: 2)),
+        shape: acCardShape(BorderSide(color: p.carbonLine, width: 1)),
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
           backgroundColor: p.ice,
-          foregroundColor: b == Brightness.dark ? Colors.black : Colors.white,
-          shape: const ChamferBorder(cut: 8),
+          foregroundColor: Colors.white,
+          shape: acInnerShape(),
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
           textStyle: GoogleFonts.inter(fontWeight: FontWeight.w700, letterSpacing: 0.4),
         ),
@@ -57,29 +56,29 @@ class AcTheme {
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           foregroundColor: p.ice,
-          side: BorderSide(color: p.ice, width: 2),
-          shape: const ChamferBorder(cut: 8),
+          side: BorderSide(color: p.ice, width: 1.5),
+          shape: acInnerShape(),
         ),
       ),
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(foregroundColor: p.ice),
       ),
-      // Square inputs, 2px borders — no rounded corners per the brief.
+      // Rounded inputs to match the soft-card language.
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: p.carbonUp,
-        border: const OutlineInputBorder(borderRadius: BorderRadius.zero),
+        border: OutlineInputBorder(borderRadius: innerRadius),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.zero,
-          borderSide: BorderSide(color: p.carbonLine, width: 2),
+          borderRadius: innerRadius,
+          borderSide: BorderSide(color: p.carbonLine, width: 1.5),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.zero,
-          borderSide: BorderSide(color: p.ice, width: 2),
+          borderRadius: innerRadius,
+          borderSide: BorderSide(color: p.ice, width: 1.5),
         ),
         errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.zero,
-          borderSide: BorderSide(color: p.error, width: 2),
+          borderRadius: innerRadius,
+          borderSide: BorderSide(color: p.error, width: 1.5),
         ),
         labelStyle: TextStyle(color: p.whiteDim),
       ),
@@ -119,7 +118,7 @@ class AcTheme {
       snackBarTheme: SnackBarThemeData(
         backgroundColor: p.carbonUp,
         contentTextStyle: TextStyle(color: p.white),
-        shape: const ChamferBorder(cut: 8),
+        shape: acInnerShape(),
       ),
     );
   }

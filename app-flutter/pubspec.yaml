@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.6+7
+version: 1.0.9+10
 
 environment:
   sdk: ^3.12.2
@@ -46,6 +46,9 @@ dependencies:
   url_launcher: ^6.3.2
   open_file: ^3.5.10       # in-app APK install: open the downloaded file -> system installer
   path_provider: ^2.1.5    # writable dir to download the update APK into
+  flutter_map: ^8.1.1      # OpenStreetMap tiles (free, no API key) for the home-location picker
+  latlong2: ^0.9.1         # LatLng type used by flutter_map
+  geolocator: ^13.0.4      # device GPS for the "vị trí hiện tại" button
 
 dev_dependencies:
   flutter_test:

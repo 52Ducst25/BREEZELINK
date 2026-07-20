@@ -6,6 +6,7 @@ import '../models/ac_mode.dart';
 import '../models/comfort_preview.dart';
 import '../models/config_bounds.dart';
 import '../models/device.dart';
+import '../models/energy_overview.dart';
 import '../models/live_reading.dart';
 import '../models/user_profile.dart';
 import '../services/api_client.dart';
@@ -14,6 +15,7 @@ import '../services/auth_api.dart';
 import '../services/comfort_api.dart';
 import '../services/config_api.dart';
 import '../services/device_api.dart';
+import '../services/energy_api.dart';
 import '../services/ir_api.dart';
 import '../services/live_data_source.dart';
 import '../services/telemetry_api.dart';
@@ -33,6 +35,7 @@ class AppState extends ChangeNotifier {
     required this.telemetryApi,
     required this.irApi,
     required this.configApi,
+    required this.energyApi,
   }) {
     _live = LiveDataSource(apiClient: apiClient, comfortApi: comfortApi, deviceApi: deviceApi);
   }
@@ -44,6 +47,7 @@ class AppState extends ChangeNotifier {
   final TelemetryApi telemetryApi;
   final IrApi irApi;
   final ConfigApi configApi;
+  final EnergyApi energyApi;
 
   late final LiveDataSource _live;
   final _subs = <StreamSubscription>[];
@@ -60,6 +64,11 @@ class AppState extends ChangeNotifier {
   /// override UI must show that honestly rather than guessing a range.
   ConfigBounds? _bounds;
 
+  /// Today's energy overview for the dashboard power card. Null when the
+  /// endpoint is unavailable or the meter has no data — the card then shows
+  /// "Chưa có dữ liệu điện" (never a fabricated 0).
+  EnergyOverview? _energy;
+
   ComfortPreview get comfort => _comfort;
   LiveReading? get indoor => _indoor;
   LiveReading? get outdoor => _outdoor;
@@ -67,6 +76,7 @@ class AppState extends ChangeNotifier {
   bool get wsConnected => _wsConnected;
   UserProfile? get profile => _profile;
   ConfigBounds? get bounds => _bounds;
+  EnergyOverview? get energy => _energy;
 
   void start() {
     _subs.add(_live.comfort.listen((c) {
@@ -92,6 +102,7 @@ class AppState extends ChangeNotifier {
     _live.start();
     unawaited(_loadProfile());
     unawaited(_loadBounds());
+    unawaited(refreshEnergy());
   }
 
   Future<void> _loadProfile() async {
@@ -99,8 +110,37 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Save profile fields (the account screen sends just the home address).
+  /// Returns null on success, else a Vietnamese error message.
+  Future<String?> updateProfile({
+    String? fullName,
+    String? location,
+    double? latitude,
+    double? longitude,
+  }) async {
+    try {
+      _profile = await authApi.updateProfile(
+        fullName: fullName,
+        location: location,
+        latitude: latitude,
+        longitude: longitude,
+      );
+      notifyListeners();
+      return null;
+    } on ApiException catch (e) {
+      return e.message;
+    }
+  }
+
   Future<void> _loadBounds() async {
     _bounds = await configApi.bounds(); // silently null for non-owner — by design
+    notifyListeners();
+  }
+
+  /// (Re)load today's energy overview — safe to call from a pull-to-refresh.
+  /// [EnergyApi.overview] returns null on any failure, so this never throws.
+  Future<void> refreshEnergy() async {
+    _energy = await energyApi.overview();
     notifyListeners();
   }
 

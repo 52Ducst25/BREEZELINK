@@ -11,6 +11,10 @@
          asks the user to allow "install unknown apps" for THIS app the first
          time — that system prompt is expected and is the OS security gate. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+    <!-- "Vị trí hiện tại" (GPS) button in the home-location picker. Coarse is
+         enough to centre the map on the user; they fine-tune by dragging the pin. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
 
     <application
         android:label="Aircon"

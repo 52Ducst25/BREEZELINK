@@ -8,6 +8,7 @@ import '../../services/ir_api.dart';
 import '../../state/app_state.dart';
 import '../../theme/ac_colors.dart';
 import '../../theme/ac_text.dart';
+import '../../widgets/icon_badge.dart';
 import '../../widgets/outline_panel.dart';
 import '../../widgets/primary_button.dart';
 import '../../widgets/section_label.dart';
@@ -196,7 +197,7 @@ class _LearnScreenState extends State<LearnScreen> {
     final learned = _coverage?.actions.contains(a.wire) ?? false;
     return Row(
       children: [
-        Icon(a.icon, size: 20, color: learned ? ac.ice : ac.whiteDim),
+        AcIconBadge(icon: a.icon, size: 40, iconSize: 20, color: learned ? ac.ice : ac.whiteDim),
         const SizedBox(width: 12),
         Expanded(
           child: Column(
