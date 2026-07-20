@@ -1,0 +1,38 @@
+#pragma once
+// ============================================================================
+//  Aircon — ESP8266  ·  node NGOÀI TRỜI (outdoor)
+//  BẢN MẪU — copy thành `config.h` rồi điền. (config.h bị gitignore vì chứa
+//  mật khẩu WiFi + token MQTT thật.)
+// ============================================================================
+//  Lấy giá trị ở: Web admin -> Khách hàng -> mở node (Ngoài trời) -> "Nạp firmware".
+//  DEVICE_UUID/MQTT_PASSWORD khác node trong nhà; ORG_ID + MQTT_HOST thì giống.
+// ============================================================================
+
+// -------- 1) WiFi --------
+#define WIFI_SSID      "TEN_WIFI"
+#define WIFI_PASSWORD  "MAT_KHAU_WIFI"
+
+// -------- 2) MQTT (EMQX tự host trên VPS — plaintext 1883, KHÔNG TLS) --------
+//  Panel web ghi MQTT_HOST = "emqx" (tên service nội bộ Docker) — ESP phải dùng
+//  IP/domain công khai của server.
+#define MQTT_HOST      "IP_CONG_KHAI_SERVER"
+#define MQTT_PORT      1883
+#define MQTT_USERNAME  "DAN_DEVICE_UUID_NGOAI_TROI"
+#define MQTT_PASSWORD  "DAN_MQTT_PASSWORD_NGOAI_TROI"
+
+// -------- 3) Định danh node (khớp hàng devices trên web) --------
+#define ORG_ID         "DAN_ORG_ID"
+#define DEVICE_UUID    "DAN_DEVICE_UUID_NGOAI_TROI"
+#define FW_VERSION     "test-1.0"
+
+// ============================================================================
+//  Phần cứng — cắm cảm biến theo ../README.md
+// ============================================================================
+//  Cảm biến:  VCC -> 3V3   |   GND -> G   |   DATA -> D2 (GPIO4)
+//  D2 = GPIO4 trên NodeMCU/Wemos — tránh chân nạp boot (D3/D4/D8).
+#define DHT_PIN        4        // GPIO4 == D2
+//  DHT22/AM2302 hay DHT11 — ĐẶT ĐÚNG LOẠI (đặt sai ra số vô lý ~1.8°C / ~23%).
+#define DHT_TYPE       DHT22
+
+//  Chu kỳ gửi số liệu (ms). 15s cho dễ theo dõi khi test; 30000 khi chạy thật.
+#define TELEMETRY_MS   15000UL

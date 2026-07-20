@@ -90,7 +90,7 @@
 <div class="ac-table-wrap chamfer-sm">
   <table class="ac-table">
     <thead>
-      <tr><th>Tên</th><th>Loại</th><th>Vị trí</th><th>Số đo</th><th>Trạng thái</th><th></th></tr>
+      <tr><th>Tên</th><th>Loại</th><th>Vị trí</th><th>Số đo</th><th>Trạng thái</th><th>Vai trò</th><th></th></tr>
     </thead>
     <tbody>
       {% for d in devices %}
@@ -116,6 +116,17 @@
             <span class="status-pill status-pill-active">Trực tuyến</span>
           {% else %}
             <span class="status-pill status-pill-idle">Ngoại tuyến</span>
+          {% endif %}
+        </td>
+        <td>
+          {# Vai trò mạng do admin đặt ở trang chi tiết node (Master nối gateway /
+             Slave qua ESP-NOW). Hiện ngay ở danh sách để biết node nào là gì. #}
+          {% if d.role and d.role.value == 'master' %}
+            <span class="badge badge-primary">MASTER</span>
+          {% elif d.role and d.role.value == 'slave' %}
+            <span class="badge badge-secondary">SLAVE</span>
+          {% else %}
+            <span class="ac-muted">Chưa gán</span>
           {% endif %}
         </td>
         <td>

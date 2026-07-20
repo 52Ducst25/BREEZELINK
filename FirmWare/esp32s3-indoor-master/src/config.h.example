@@ -1,0 +1,41 @@
+#pragma once
+// ============================================================================
+//  Aircon — ESP32-S3  ·  node MASTER / TRONG NHÀ (indoor)
+//  BẢN MẪU — copy thành `config.h` rồi điền. (config.h bị gitignore vì chứa
+//  mật khẩu WiFi + token MQTT thật.)
+// ============================================================================
+//  Lấy ORG_ID / DEVICE_UUID / MQTT_PASSWORD ở đâu?
+//    Web admin -> Khách hàng -> mở node (Trong nhà) -> mục "Nạp firmware".
+//    MQTT_USERNAME luôn = DEVICE_UUID.
+// ============================================================================
+
+// -------- 1) WiFi --------
+#define WIFI_SSID      "TEN_WIFI"
+#define WIFI_PASSWORD  "MAT_KHAU_WIFI"
+
+// -------- 2) MQTT (EMQX tự host trên VPS — plaintext 1883, KHÔNG TLS) --------
+//  LƯU Ý: panel web ghi MQTT_HOST = "emqx" — đó là tên service nội bộ Docker,
+//  ESP không phân giải được. Phải dùng IP/domain công khai của server.
+#define MQTT_HOST      "IP_CONG_KHAI_SERVER"
+#define MQTT_PORT      1883
+//  Broker đã bật authentication (built-in DB): user = DEVICE_UUID, pass = token.
+#define MQTT_USERNAME  "DAN_DEVICE_UUID"
+#define MQTT_PASSWORD  "DAN_MQTT_PASSWORD"
+
+// -------- 3) Định danh node (khớp hàng devices trên web) --------
+#define ORG_ID         "DAN_ORG_ID"
+#define DEVICE_UUID    "DAN_DEVICE_UUID"
+#define FW_VERSION     "test-1.0"
+
+// ============================================================================
+//  Phần cứng — cắm cảm biến theo ../README.md
+// ============================================================================
+//  Cảm biến:  VCC -> 3V3   |   GND -> GND   |   DATA -> GPIO4
+//  (Loại 4 chân rời: thêm điện trở 10k giữa DATA và 3V3.)
+#define DHT_PIN        4
+//  DHT22/AM2302 hay DHT11 — ĐẶT ĐÚNG LOẠI. Đặt sai vẫn đọc được (checksum pass)
+//  nhưng ra số vô lý: DHT22 mà khai DHT11 sẽ cho ~1.8°C / ~23%.
+#define DHT_TYPE       DHT22
+
+//  Chu kỳ gửi số liệu (ms). 15s cho dễ theo dõi khi test; 30000 khi chạy thật.
+#define TELEMETRY_MS   15000UL

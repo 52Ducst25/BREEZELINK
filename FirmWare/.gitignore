@@ -1,0 +1,7 @@
+# config.h thật chứa mật khẩu WiFi + MQTT token per-device -> KHÔNG commit.
+# Bản mẫu (config.h.example) mới là thứ được commit; copy nó thành config.h rồi điền.
+*/src/config.h
+
+# Thư mục build của PlatformIO
+.pio/
+*/.pio/
