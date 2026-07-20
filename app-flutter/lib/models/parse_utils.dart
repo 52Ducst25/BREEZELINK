@@ -37,8 +37,16 @@ String asString(dynamic v, [String fallback = '']) => v?.toString() ?? fallback;
 
 /// Parse an ISO-8601 timestamp; null on absent/malformed input rather than
 /// throwing (server clock skew / partial rows should not crash a screen).
+///
+/// Always returns LOCAL time. The API sends UTC ("…Z"), and `DateTime.tryParse`
+/// keeps that as a UTC instance — which `DateFormat` then renders in UTC, so a
+/// reading taken at 14:13 in Vietnam displayed as "07:13". Every timestamp that
+/// crosses this boundary is shown to a person in their own timezone, so the
+/// conversion belongs here rather than being re-remembered at each call site.
+/// (`toLocal()` only changes the display zone; the instant is unchanged, so
+/// comparisons and arithmetic stay correct.)
 DateTime? asDateTimeOrNull(dynamic v) {
   if (v == null) return null;
-  if (v is String) return DateTime.tryParse(v);
+  if (v is String) return DateTime.tryParse(v)?.toLocal();
   return null;
 }
