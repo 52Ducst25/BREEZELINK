@@ -1,0 +1,63 @@
+#pragma once
+// ============================================================================
+//  Aircon — ESP32 DevKit V1  ·  node TRONG NHÀ (indoor) + MASTER + IR
+//  BẢN MẪU — copy thành `config.h` rồi điền. (config.h bị gitignore vì chứa
+//  mật khẩu WiFi + token MQTT thật.)
+// ============================================================================
+//  Lấy ORG_ID / DEVICE_UUID / MQTT_PASSWORD ở đâu?
+//    Web admin -> Khách hàng -> mở node (Trong nhà) -> mục "Nạp firmware".
+//    MQTT_USERNAME luôn = DEVICE_UUID.
+//
+//  QUAN TRỌNG — DÙNG LẠI ĐÚNG DEVICE_UUID CỦA NODE "TRONG NHÀ" ĐANG CÓ:
+//    backend chỉ chấp nhận DUY NHẤT 1 node node_type=indoor cho mỗi org
+//    (telemetry_service.get_device_by_org_and_node dùng scalar_one_or_none).
+//    Tạo thêm một hàng device "indoor" thứ hai sẽ làm worker ném
+//    MultipleResultsFound và toàn bộ luồng điều khiển tự động đứng. Node này
+//    THAY THẾ node ESP32-S3 cũ, nên nó phải mang chính UUID đó.
+// ============================================================================
+
+// -------- 1) WiFi --------
+#define WIFI_SSID      "TEN_WIFI"
+#define WIFI_PASSWORD  "MAT_KHAU_WIFI"
+
+// -------- 2) MQTT (EMQX tự host trên VPS — plaintext 1883, KHÔNG TLS) --------
+//  LƯU Ý: panel web ghi MQTT_HOST = "emqx" — đó là tên service nội bộ Docker,
+//  ESP không phân giải được. Phải dùng IP/domain công khai của server.
+#define MQTT_HOST      "IP_CONG_KHAI_SERVER"
+#define MQTT_PORT      1883
+//  Broker đã bật authentication (built-in DB): user = DEVICE_UUID, pass = token.
+#define MQTT_USERNAME  "DAN_DEVICE_UUID"
+#define MQTT_PASSWORD  "DAN_MQTT_PASSWORD"
+
+// -------- 3) Định danh node (khớp hàng devices trên web) --------
+#define ORG_ID         "DAN_ORG_ID"
+#define DEVICE_UUID    "DAN_DEVICE_UUID"
+#define FW_VERSION     "indoor-1.0"
+
+// ============================================================================
+//  Phần cứng — sơ đồ chân đầy đủ ở ../README.md §6
+// ============================================================================
+//  Cảm biến DHT:  VCC -> 3V3 | GND -> GND | DATA -> GPIO4
+//  (Loại 4 chân rời: thêm điện trở 10k giữa DATA và 3V3.)
+#define DHT_PIN        4
+//  DHT22/AM2302 hay DHT11 — ĐẶT ĐÚNG LOẠI. Đặt sai vẫn đọc được (checksum pass)
+//  nhưng ra số vô lý: DHT22 mà khai DHT11 sẽ cho ~1.8°C / ~23%.
+#define DHT_TYPE       DHT22
+
+//  Mắt THU hồng ngoại (module "IR Receiver", chân OUT) -> GPIO27
+//    VCC -> 3V3 (KHÔNG dùng 5V: chân OUT sẽ đẩy 5V vào GPIO 3.3V) | GND -> GND
+#define IR_RX_PIN      27
+//  LED PHÁT hồng ngoại (module "IR Transmitter", chân DAT) -> GPIO26
+//    VCC -> 3V3 | GND -> GND
+#define IR_TX_PIN      26
+//  Chọn 26/27 vì chúng không phải chân strapping và không bị ràng buộc lúc boot
+//  (khác GPIO0/2/5/12/15). Đổi chân thì tránh: GPIO6-11 (nối flash), GPIO34-39
+//  (chỉ vào, không phát được).
+
+//  Thời gian chờ người dùng bấm remote khi vào chế độ HỌC (ms).
+//  30s: đủ để đi từ chỗ đặt node tới chỗ cầm remote, chưa lâu tới mức người
+//  lắp tưởng máy treo.
+#define LEARN_TIMEOUT_MS  30000UL
+
+//  Chu kỳ gửi số liệu (ms). 15s cho dễ theo dõi khi test; 30000 khi chạy thật.
+#define TELEMETRY_MS   15000UL
