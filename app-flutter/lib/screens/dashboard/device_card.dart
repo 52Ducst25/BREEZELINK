@@ -96,15 +96,17 @@ class DeviceCard extends StatelessWidget {
     );
   }
 
-  /// "Nhiệt độ phòng: 25.8°C   Độ ẩm phòng: 62%" — accent numbers, em-dash when
-  /// no reading yet.
+  /// "Nhiệt độ trong nhà: 25.8°C   Độ ẩm trong nhà: 62%" — accent numbers,
+  /// em-dash when no reading yet. An outdoor sensor node reads the OUTDOOR
+  /// air, so its labels say "ngoài trời" instead of "trong nhà".
   Widget _roomLine(AcPalette ac) {
+    final where = device.nodeType == NodeType.outdoor ? 'ngoài trời' : 'trong nhà';
     return Wrap(
       spacing: 18,
       runSpacing: 6,
       children: [
-        _kv(ac, 'Nhiệt độ phòng', reading?.temp.toStringAsFixed(1), '°C'),
-        _kv(ac, 'Độ ẩm phòng', reading?.humidity.toStringAsFixed(0), '%'),
+        _kv(ac, 'Nhiệt độ $where', reading?.temp.toStringAsFixed(1), '°C'),
+        _kv(ac, 'Độ ẩm $where', reading?.humidity.toStringAsFixed(0), '%'),
       ],
     );
   }
