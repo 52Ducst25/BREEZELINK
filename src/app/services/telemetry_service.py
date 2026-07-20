@@ -8,7 +8,7 @@ worker never receives a ``device_id`` directly, only the topic's org/node.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.device import Device
@@ -89,3 +89,61 @@ async def list_telemetry(
     rows = list((await session.execute(stmt)).scalars().all())
     rows.reverse()  # newest-first from DB → oldest-first for the chart series
     return rows
+
+
+# Splitting the window into a fixed number of slots (rather than a fixed slot
+# WIDTH) keeps every range — a day or a month — at the same point count, so the
+# chart stays readable and the payload stays small.
+_DEFAULT_BUCKETS = 120
+
+
+async def series_bucketed(
+    session: AsyncSession,
+    *,
+    device_id: uuid.UUID,
+    start: datetime,
+    end: datetime,
+    buckets: int = _DEFAULT_BUCKETS,
+) -> list[dict]:
+    """Down-sampled temp/humidity series: the window is cut into ``buckets``
+    equal slots and each slot yields the AVERAGE of its samples.
+
+    Why not reuse ``list_telemetry``: that returns the most recent ``limit``
+    rows, so at a 15s cadence a 30-day request would plot only the last ~4
+    hours while the UI labelled it "30 ngày" — a chart that quietly lies about
+    its own range. Bucketing keeps the whole window represented regardless of
+    sampling rate. Empty slots are simply absent (no fabricated zeros).
+
+    Caller must have verified the device belongs to the caller's org.
+    """
+    span_sec = max((end - start).total_seconds(), 1.0)
+    bucket_sec = max(span_sec / max(buckets, 1), 1.0)
+
+    # Raw SQL: bucketing by epoch division has no clean ORM form, and doing it
+    # in Python would mean pulling every row (the thing we are avoiding).
+    stmt = text(
+        """
+        SELECT to_timestamp(floor(extract(epoch FROM ts) / :b) * :b) AS bucket_ts,
+               avg(temp)::float     AS temp,
+               avg(humidity)::float AS humidity
+        FROM telemetry
+        WHERE device_id = CAST(:d AS uuid)
+          AND ts >= CAST(:s AS timestamptz)
+          AND ts <= CAST(:e AS timestamptz)
+        GROUP BY 1
+        ORDER BY 1
+        """
+    )
+    result = await session.execute(
+        stmt,
+        {
+            "b": bucket_sec,
+            "d": str(device_id),
+            "s": start.isoformat(),
+            "e": end.isoformat(),
+        },
+    )
+    return [
+        {"ts": row.bucket_ts, "temp": row.temp, "humidity": row.humidity}
+        for row in result.all()
+    ]

@@ -9,6 +9,7 @@ import '../../theme/ac_text.dart';
 import '../../widgets/offline_banner.dart';
 import '../../widgets/section_label.dart';
 import '../../widgets/status_dot.dart';
+import '../device/device_history_screen.dart';
 import '../energy/energy_screen.dart';
 import 'comfort_pipeline_card.dart';
 import 'device_card.dart';
@@ -31,6 +32,15 @@ class DashboardScreen extends StatelessWidget {
     if (err != null && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
     }
+  }
+
+  /// Opens one node's temperature/humidity history. The screen takes the API
+  /// directly (no Provider) because it is pushed above the tab shell's scope.
+  void _openHistory(BuildContext context, Device device) {
+    final api = context.read<AppState>().telemetryApi;
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => DeviceHistoryScreen(device: device, api: api),
+    ));
   }
 
   void _openEnergy(BuildContext context) {
@@ -89,6 +99,7 @@ class DashboardScreen extends StatelessWidget {
                 mode: comfort.mode,
                 setpoint: comfort.tSet,
                 onTogglePower: (on) => _togglePower(context, on),
+                onTap: () => _openHistory(context, d),
               ),
               const SizedBox(height: 10),
             ],

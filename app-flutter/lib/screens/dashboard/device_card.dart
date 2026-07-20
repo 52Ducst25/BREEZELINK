@@ -30,12 +30,16 @@ class DeviceCard extends StatelessWidget {
     required this.mode,
     required this.setpoint,
     required this.onTogglePower,
+    this.onTap,
   });
 
   final Device device;
   final LiveReading? reading;
   final AcMode? mode;
   final int? setpoint;
+
+  /// Opens this node's history charts. Null leaves the card non-interactive.
+  final VoidCallback? onTap;
 
   /// Called with the desired power state when the toggle is flipped. Wired to a
   /// manual override on the dashboard; a no-op is fine for read-only contexts.
@@ -49,7 +53,13 @@ class DeviceCard extends StatelessWidget {
     final ac = context.ac;
     final online = device.status == DeviceOnlineStatus.online;
 
-    return OutlinePanel(
+    // Opaque hit test so taps anywhere on the card (including its padding)
+    // open the history charts — but the power Switch below still wins its own
+    // gestures, so toggling never navigates by accident.
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: OutlinePanel(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -81,6 +91,8 @@ class DeviceCard extends StatelessWidget {
                 dense: true,
                 leading: StatusDot(size: 7, color: online ? ac.success : ac.whiteDim),
               ),
+              // Affordance: without it nothing signals the card opens a screen.
+              if (onTap != null) Icon(Icons.chevron_right, size: 18, color: ac.whiteDim),
             ],
           ),
           const SizedBox(height: 14),
@@ -92,6 +104,7 @@ class DeviceCard extends StatelessWidget {
             _controlRow(context, ac),
           ],
         ],
+      ),
       ),
     );
   }
