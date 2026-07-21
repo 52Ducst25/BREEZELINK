@@ -95,6 +95,7 @@ async def build_preview(session: AsyncSession, org_id: str) -> ComfortPreview:
             humid_penalty=penalty,
             t_target=t_target,
             stale=outdoor_stale,
+            override_active=override_on,
             reason=_NO_IR_CODES,
         )
 
@@ -113,5 +114,6 @@ async def build_preview(session: AsyncSession, org_id: str) -> ComfortPreview:
         t_set=result.t_set,
         mode=result.mode,
         stale=result.stale,
+        override_active=override_on,
         reason=reason,
     )

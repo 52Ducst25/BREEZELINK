@@ -21,6 +21,7 @@ class ComfortPreview {
     required this.mode,
     required this.stale,
     required this.reason,
+    this.overrideActive = false,
   });
 
   final bool dataAvailable;
@@ -39,6 +40,14 @@ class ComfortPreview {
   /// True if outdoor telemetry was stale this cycle (UI should flag it).
   final bool stale;
 
+  /// True khi đang có ghi đè thủ công — tức điều khiển tự động ĐANG TẠM DỪNG.
+  ///
+  /// Do SERVER khẳng định, không phải app tự nhớ: ghi đè sống trong Redis và có
+  /// hạn tự hết, nên chỉ server mới biết chắc. App tự nhớ bằng biến cục bộ thì
+  /// mở lại app là quên, rồi báo "đang tự động" trong khi máy vẫn đang chạy theo
+  /// lệnh tay — nói sai về trạng thái điều khiển là kiểu sai tệ nhất ở đây.
+  final bool overrideActive;
+
   /// Human-readable explanation of why this decision (or lack of one) holds —
   /// always render this so "no data"/"gated" states are self-explanatory.
   final String reason;
@@ -53,6 +62,10 @@ class ComfortPreview {
       tSet: asIntOrNull(json['t_set']),
       mode: acModeFromWire(asStringOrNull(json['mode'])),
       stale: asBool(json['stale']),
+      // Vắng field (server cũ) -> false: mặc định coi là ĐANG TỰ ĐỘNG. Chọn
+      // hướng này vì tự động là trạng thái mặc định của hệ; đoán nhầm hướng kia
+      // sẽ hiện thẻ "đang ghi đè" cho người chưa hề ghi đè.
+      overrideActive: asBool(json['override_active']),
       reason: asString(json['reason'], ''),
     );
   }

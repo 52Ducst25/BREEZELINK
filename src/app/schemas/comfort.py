@@ -52,6 +52,11 @@ class ComfortPreview(BaseModel):
     t_set: int | None = None
     mode: AcMode | None = None
     stale: bool = False
+    # True khi đang có ghi đè thủ công, tức auto-control ĐANG BỊ TẠM DỪNG.
+    # Trước đây chỉ được nhét vào câu chữ `reason`; app phải tự nhớ bằng biến
+    # cục bộ nên mở lại app là quên mất, hiện "đang tự động" trong khi server
+    # vẫn đang ghi đè. Trạng thái điều khiển phải do SERVER khẳng định.
+    override_active: bool = False
     reason: str
 
 
