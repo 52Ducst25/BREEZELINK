@@ -331,7 +331,16 @@ static void connectMqtt() {
 void setup() {
   Serial.begin(115200);
   delay(300);
-  Serial.println("\n== Aircon · ESP32 DevKit V1 · TRONG NHA (indoor + master + IR) ==");
+  // Tên bo lấy theo đích biên dịch, KHÔNG viết cứng: cùng mã nguồn này build
+  // cho hai bo, mà log ghi sai bo là thứ đánh lừa đúng lúc đang tìm lỗi.
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+  const char *board = "ESP32-S3";
+#elif defined(CONFIG_IDF_TARGET_ESP32)
+  const char *board = "ESP32 DevKit V1";
+#else
+  const char *board = "ESP32 (khong ro bien the)";
+#endif
+  Serial.printf("\n== Aircon · %s · TRONG NHA (indoor + master + IR) ==\n", board);
 
   dht.begin();
   IrIo::begin(IR_TX_PIN, IR_RX_PIN);
