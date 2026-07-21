@@ -54,6 +54,10 @@ class MeResponse(BaseModel):
     location: str | None = None
     latitude: float | None = None
     longitude: float | None = None
+    # Vendor staff, not a household member. The app lets them in (handy for
+    # testing) but says so — otherwise staff see an empty device list, because
+    # their own org owns no nodes, and reasonably conclude the app is broken.
+    is_sysadmin: bool = False
 
 
 class UpdateProfileRequest(BaseModel):

@@ -36,6 +36,7 @@ def _me(user: User) -> MeResponse:
         location=user.location,
         latitude=float(user.latitude) if user.latitude is not None else None,
         longitude=float(user.longitude) if user.longitude is not None else None,
+        is_sysadmin=user.is_sysadmin,
     )
 
 router = APIRouter(prefix="/auth", tags=["auth"])

@@ -7,6 +7,7 @@ import '../../state/app_state.dart';
 import '../../theme/ac_colors.dart';
 import '../../theme/ac_text.dart';
 import '../../widgets/offline_banner.dart';
+import '../../widgets/outline_panel.dart';
 import '../../widgets/section_label.dart';
 import '../../widgets/status_dot.dart';
 import '../device/device_history_screen.dart';
@@ -82,6 +83,14 @@ class DashboardScreen extends StatelessWidget {
           const SizedBox(height: 16),
           if (!s.wsConnected) ...[const OfflineBanner(), const SizedBox(height: 16)],
 
+          // Tài khoản nhân viên: org của họ không sở hữu node nào nên app rỗng
+          // là ĐÚNG, không phải hỏng. Không nói ra thì người xem sẽ đi tìm lỗi
+          // ở chỗ không có lỗi.
+          if (s.profile?.isSysadmin == true) ...[
+            _StaffNotice(),
+            const SizedBox(height: 16),
+          ],
+
           LocationCard(locationName: _locationName(s.profile?.location, s.devices), outdoor: s.outdoor),
           const SizedBox(height: 14),
           PowerConsumptionCard(energy: s.energy, onTap: () => _openEnergy(context)),
@@ -128,5 +137,41 @@ class DashboardScreen extends StatelessWidget {
       if (d.location != null && d.location!.isNotEmpty) return d.location!;
     }
     return 'Nhà của bạn';
+  }
+}
+
+/// Nhắc nhân viên rằng app này dành cho hộ gia đình.
+///
+/// Tài khoản nhân viên đăng nhập được (tiện để thử app), nhưng org của họ không
+/// sở hữu node nào — nên màn hình trống trơn là ĐÚNG. Không có dòng này thì
+/// người xem sẽ tưởng app hỏng và đi tìm lỗi ở chỗ vốn không có lỗi.
+class _StaffNotice extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final ac = context.ac;
+    return OutlinePanel(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.badge_outlined, size: 18, color: ac.warning),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Tài khoản nhân viên', style: AcText.heading(size: 13.5, color: ac.white)),
+                const SizedBox(height: 3),
+                Text(
+                  'App này dành cho tài khoản hộ gia đình. Nhà quản trị không có thiết bị '
+                  'nào nên màn hình trống là bình thường — dùng trang quản trị trên web '
+                  'để xem toàn bộ node đã bán.',
+                  style: AcText.body(size: 11.5, color: ac.whiteDim),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

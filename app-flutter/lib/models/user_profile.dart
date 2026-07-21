@@ -20,6 +20,7 @@ class UserProfile {
     this.location,
     this.latitude,
     this.longitude,
+    this.isSysadmin = false,
   });
 
   final String id;
@@ -37,6 +38,11 @@ class UserProfile {
   final double? latitude;
   final double? longitude;
 
+  /// Vendor staff, not a household member. Their org owns no nodes, so the app
+  /// legitimately looks empty for them — the UI says so instead of leaving them
+  /// to guess it is broken.
+  final bool isSysadmin;
+
   bool get isOwner => role == UserRole.owner;
 
   factory UserProfile.fromJson(Map<String, dynamic> json) {
@@ -50,6 +56,10 @@ class UserProfile {
       location: asStringOrNull(json['location']),
       latitude: asDoubleOrNull(json['latitude']),
       longitude: asDoubleOrNull(json['longitude']),
+      // Vắng field (server cũ) -> false: mặc định coi là tài khoản hộ gia đình,
+      // tức là KHÔNG hiện banner nhân viên. Đoán nhầm theo hướng này thì chỉ
+      // thiếu một lời nhắc; đoán nhầm hướng kia là doạ khách hàng thật.
+      isSysadmin: asBool(json['is_sysadmin']),
     );
   }
 }
