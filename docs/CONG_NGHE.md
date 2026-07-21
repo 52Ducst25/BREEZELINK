@@ -10,11 +10,18 @@ phần cứng:
 
 > **Cập nhật (đã triển khai):** vai trò *indoor-master* (trung chuyển ESP-NOW) trước đây tách
 > thành node riêng, nay **gộp vào chính node indoor** — xem §6 "Đề xuất bổ sung" mục 1-2 và
-> `FirmWare/README.md` §6.1. Hai ràng buộc buộc phải gộp: (a) backend chỉ chấp nhận **đúng 1
-> node `node_type=indoor` mỗi org** (`telemetry_service.get_device_by_org_and_node` dùng
-> `scalar_one_or_none`), nên indoor và indoor-master không thể là hai hàng `devices`; (b) lệnh
-> IR mang `ir_raw` cỡ **vài KB**, vượt xa giới hạn **250 byte/gói** của ESP-NOW nên không thể
-> trung chuyển qua master. Topology thực tế còn **2 node/hộ**.
+> `FirmWare/README.md` §6.1. Lý do gộp: lệnh IR mang `ir_raw` cỡ **vài KB**, vượt xa giới hạn
+> **250 byte/gói** của ESP-NOW nên không thể trung chuyển qua master. Topology thực tế còn
+> **2 node/hộ**.
+>
+> **Đính chính 21/07/2026:** trước đây phần này còn nêu ràng buộc thứ hai — *"backend chỉ chấp
+> nhận đúng 1 node `node_type=indoor` mỗi org vì `get_device_by_org_and_node` dùng
+> `scalar_one_or_none`"*. **Ràng buộc đó đã được gỡ.** Hàm này nay **suy biến an toàn**: gặp
+> nhiều node indoor thì chọn node cũ nhất + ghi log cảnh báo, không còn ném
+> `MultipleResultsFound` làm sập toàn bộ luồng điều khiển. Tạo nhiều node indoor giờ **không
+> làm hỏng gì**, nhưng **chỉ node cũ nhất được điều khiển** cho tới khi làm xong Phase 2
+> (quyết định comfort riêng cho từng phòng). Lý do (b) — giới hạn 250 byte của ESP-NOW — vẫn
+> nguyên giá trị và tự nó đã đủ để giữ quyết định gộp.
 
 Phần lý do lựa chọn là phân tích kỹ thuật dựa trên ràng buộc thực tế của dự án (quy mô
 multi-tenant nhỏ, 1 VPS dùng chung với 2 dự án khác, đội phát triển nhỏ, thiết bị nhúng giá
@@ -92,7 +99,7 @@ chưa có ADR (Architecture Decision Record) riêng.
 |---|---|---|---|
 | Container | **Docker Compose** | Kubernetes, chạy trực tiếp (bare-metal/systemd) | Quy mô hiện tại là 1 VPS với vài container (Postgres, Redis, EMQX, api, worker, cloudflared) — Kubernetes over-engineering, tốn tài nguyên cho control-plane và độ phức tạp vận hành không cần thiết cho 1 node. Docker Compose đủ để cô lập service, dễ tái tạo môi trường dev giống prod, phù hợp với một người/nhóm nhỏ vận hành. Chạy trực tiếp không container hoá sẽ khó cô lập version dependency và khó rollback. |
 | MQTT broker (production) | **EMQX** | Mosquitto (self-host), HiveMQ, VerneMQ | Production cần quản lý **auth/ACL theo từng thiết bị** (nhiều node của nhiều khách khác nhau chia sẻ 1 broker) — EMQX có dashboard quản trị, hỗ trợ auth/ACL linh hoạt và cả bản Serverless cloud managed giảm gánh vận hành. Mosquitto (đang dùng ở dev) nhẹ và nhanh để phát triển nhưng thiếu tooling quản lý ACL đa tổ chức mà production cần. HiveMQ/VerneMQ cũng mạnh nhưng không có lợi thế rõ rệt so với EMQX ở quy mô này, trong khi hệ sinh thái/tài liệu EMQX phổ biến hơn với Postgres/Redis stack đang dùng. |
-| Ingress / TLS | **Cloudflare Tunnel** | Nginx reverse proxy + Let's Encrypt (mở port trực tiếp), VPN (WireGuard) | Cloudflare Tunnel không cần mở bất kỳ port nào ra internet (giảm bề mặt tấn công về 0 cổng public ngoài SSH), tự động TLS, miễn phí, dễ setup hơn tự quản lý renew chứng chỉ Let's Encrypt. Mở port + Nginx tự quản lý sẽ phải tự vá lỗ hổng và theo dõi cert hết hạn. VPN phù hợp cho truy cập nội bộ nhưng không tiện cho việc phục vụ traffic công khai từ khách hàng (app/web cần dùng được mà không phải cài VPN client). |
+| Ingress / TLS | **Cloudflare Tunnel** (HTTP/HTTPS) | Nginx reverse proxy + Let's Encrypt (mở port trực tiếp), VPN (WireGuard) | Cloudflare Tunnel phục vụ **web + app** mà không cần mở port HTTP nào, tự động TLS, miễn phí, dễ setup hơn tự quản lý renew chứng chỉ Let's Encrypt. **Đính chính 21/07/2026:** câu "0 cổng public ngoài SSH" **không còn đúng** — CF Tunnel chỉ chở được HTTP(S), không chở MQTT thô, nên **cổng 1883 đã phải mở trực tiếp ra internet** cho các node ESP kết nối. Đã bật authentication per-device trên EMQX trước khi mở, **nhưng chưa có topic ACL**: một token thiết bị bị lộ hiện vẫn publish được sang topic của hộ khác. Đây là món nợ bảo mật cần trả trước khi lắp cho khách thật. Mở port + Nginx tự quản lý sẽ phải tự vá lỗ hổng và theo dõi cert hết hạn. VPN phù hợp cho truy cập nội bộ nhưng không tiện cho việc phục vụ traffic công khai từ khách hàng (app/web cần dùng được mà không phải cài VPN client). |
 
 ---
 
@@ -121,7 +128,7 @@ phần ML/RL nào.
 |---|---|---|---|---|
 | 1 | ~~**Node indoor (còn thiếu)**~~ → **ĐÃ LÀM** | `FirmWare/esp32-indoor/` — ESP32 DevKit V1 + `IRremoteESP8266`, phủ đủ 5 topic `telemetry`/`status`/`cmd`/`state`/`learn`, có học remote + cache mã IR trong NVS | Đúng như đề xuất là dùng `IRremoteESP8266` thay vì tự viết. **Khác đề xuất ở một điểm:** node nối WiFi/MQTT **trực tiếp**, KHÔNG làm ESP-NOW slave của master — lệnh `ir_raw` cỡ vài KB không lọt qua giới hạn 250 byte/gói của ESP-NOW (xem mục 2) | `FirmWare/esp32-indoor/` |
 | 2 | ~~**Hoàn thiện ESP-NOW**~~ → **ĐÃ CHỐT KHÁC** | Giữ ESP-NOW **chỉ cho chiều outdoor → indoor** (gói 43 byte). Node indoor không làm slave mà kiêm luôn vai trò master, nối MQTT thẳng | Đề xuất ban đầu (chuyển *cả* indoor sang ESP-NOW slave) không khả thi: chiều cloud → indoor chở `ir_raw` vài KB, muốn qua ESP-NOW phải tự viết chia mảnh + ghép lại + báo thiếu mảnh — trong khi MQTT đã lo sẵn. ESP-NOW vẫn đúng cho outdoor vì gói chỉ 43 byte và một chiều | `esp32-indoor`, `esp8266-outdoor` |
-| 2b | **Dọn node ESP32-S3** *(còn lại)* | Ngừng chạy `esp32s3-indoor-master`, chuyển `DEVICE_UUID` "indoor" sang bo DevKit V1 | Hai bo cùng `client_id = breezelink_{uuid}` sẽ đá nhau khỏi broker liên tục; còn tạo device "indoor" thứ hai thì worker ném `MultipleResultsFound`. Bắt buộc chọn một | Vận hành + `FirmWare/README.md` §6.1 |
+| 2b | ~~**Dọn node ESP32-S3**~~ → **ĐÃ GIẢI QUYẾT KHÁC** (21/07/2026) | Không loại bo S3 nữa: `esp32-indoor/` nay có **2 build environment** (`esp32-devkit` và `esp32-s3`) dùng CHUNG một mã nguồn, khác nhau chỉ ở sơ đồ chân. Bo S3 đang chạy chính firmware đầy đủ này | Tránh chép phần IR sang thư mục thứ hai — hai bản sao cùng logic sẽ trôi xa nhau (dự án đã có vết như vậy, xem comment `web/static/app.js`). Cảnh báo "hai bo đá nhau khỏi broker" vẫn đúng nhưng chỉ khi chạy **đồng thời** hai bo cùng `DEVICE_UUID` — đã kiểm chứng trên broker: hiện chỉ 1 client indoor. Còn `MultipleResultsFound` thì không còn xảy ra (xem Đính chính đầu tài liệu) | `FirmWare/esp32-indoor/platformio.ini` |
 | 3 | **Cảm biến mm-Wave radar** | Module radar (vd. Hi-Link LD2410/LD2450, Seeed MR60BHA2) trên node indoor để định vị người dùng | So với camera (vi phạm riêng tư, tốn xử lý ảnh) hoặc PIR thường (chỉ phát hiện chuyển động, không định vị/đo khoảng cách) — mm-Wave cho độ chính xác vị trí cao mà vẫn không quay video, phù hợp không gian phòng ngủ | Phần cứng node indoor; dữ liệu gửi kèm telemetry qua MQTT |
 | 4 | **Thuật toán comfort cá nhân hoá** | Module tính target temp/humidity theo giới tính/tuổi/BMI/vùng miền (như `Adaptive.html`), **cộng thêm** vào engine hiện có chứ không thay thế | Giữ nguyên engine running-mean hiện tại làm baseline ổn định đã kiểm chứng, thêm lớp cá nhân hoá làm điều chỉnh biên — an toàn hơn thay thế toàn bộ bằng mô hình chưa kiểm chứng thực tế | `src/app/comfort/personalization.py` (mới) |
 | 5 | **Điều khiển bằng RL (MAPPO)** | Engine điều khiển reinforcement learning làm lựa chọn thay thế rule-based, bật/tắt qua config flag, benchmark trước khi đưa vào production | Rule-based hiện tại dễ giải thích/debug cho một sản phẩm bán ra thị trường (khách hàng/nhà quản trị cần hiểu vì sao nhiệt độ đặt ra vậy) — RL là "hộp đen" hơn, nên triển khai song song và A/B test thay vì thay thế ngay | Module riêng trong `src/app/comfort/` |
