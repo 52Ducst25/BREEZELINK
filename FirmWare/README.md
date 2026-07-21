@@ -109,10 +109,12 @@ làm master nhận ESP‑NOW từ node ngoài trời.
 
 Hai ràng buộc từ backend, không phải lựa chọn thẩm mỹ:
 
-1. **Mỗi org chỉ được có ĐÚNG 1 node `node_type=indoor`.**
-   `telemetry_service.get_device_by_org_and_node()` dùng `scalar_one_or_none()` → tạo hàng
-   device "indoor" thứ hai sẽ làm worker ném `MultipleResultsFound` và **toàn bộ luồng điều
-   khiển tự động đứng**.
+1. ~~**Mỗi org chỉ được có ĐÚNG 1 node `node_type=indoor`.**~~ — *đã sửa 21/07/2026.*
+   `get_device_by_org_and_node()` từng dùng `scalar_one_or_none()`, nên device "indoor" thứ
+   hai làm worker ném `MultipleResultsFound` và toàn bộ luồng điều khiển tự động đứng. Nay
+   nó **suy biến an toàn**: chọn node indoor cũ nhất + ghi log cảnh báo, không crash nữa.
+   Tạo nhiều node indoor giờ **không làm sập gì**, nhưng **chỉ node cũ nhất được điều khiển**
+   cho tới khi làm xong Phase 2 (quyết định comfort riêng cho từng phòng).
 2. **Lệnh IR quá to để đi qua ESP‑NOW.** `command_publisher.py` gửi kèm `ir_raw` — mảng vài
    trăm mốc thời gian µs, cỡ vài KB. ESP‑NOW giới hạn **250 byte/gói**, muốn trung chuyển
    qua master thì phải tự viết giao thức chia mảnh + ghép lại + báo thiếu mảnh. Nối MQTT
