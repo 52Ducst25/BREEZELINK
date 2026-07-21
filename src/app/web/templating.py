@@ -16,7 +16,7 @@ TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 # Bump on any app.css/app.js change. ds/* is the vendored design system,
 # linked WITHOUT "?v=" (see base.html's comment on that link) -- editing it
 # needs a hard refresh, not a version bump here.
-ASSET_VERSION = "260720-2"
+ASSET_VERSION = "260721-1"
 
 # Vietnam time. The container runs UTC, so ``astimezone()`` was rendering every
 # date 7 hours behind what a Vietnamese admin expects — the "sai ngày tạo" bug.

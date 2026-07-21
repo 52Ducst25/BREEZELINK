@@ -159,6 +159,8 @@
 //
 //   data-ajax="save"      -> just confirm success (values already on screen)
 //   data-ajax="refresh"   -> also swap #main from the response (a list changed)
+//   data-ajax="redirect"  -> show the tick, then GO to where the server sent us
+//                            (for deletes: the page you were on no longer exists)
 //   data-ajax-msg="..."    -> success text (default "Đã lưu thành công")
 //   data-ajax-pending="…" -> hold a spinner while the request runs (for a slow
 //                            upload like a 50MB APK, so it doesn't look frozen)
@@ -283,7 +285,15 @@
           var err = url && url.searchParams.get("err");
           if (err) { toast(false, err); return; }
           toast(true, okMsg);
-          if (mode === "refresh") swapMain(text); // the response IS the fresh page
+          if (mode === "refresh") {
+            swapMain(text); // the response IS the fresh page
+          } else if (mode === "redirect" && url) {
+            // The record this page was showing is gone, so staying here (even
+            // with swapped content) leaves the address bar pointing at a row
+            // that 404s on reload. Follow wherever the server redirected to,
+            // after a beat so the success tick is actually seen.
+            setTimeout(function () { location.href = url.href; }, 900);
+          }
         });
       })
       .catch(function () { removeToast(pendingEl); toast(false, "Lỗi kết nối — thử lại"); })

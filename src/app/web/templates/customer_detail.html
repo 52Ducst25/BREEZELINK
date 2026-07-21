@@ -311,7 +311,14 @@
   <h2 class="ac-section-title ac-danger-title">Xoá khách hàng</h2>
 </div>
 
-<form class="card ac-danger-zone" method="post" action="/web/customers/{{ org.id }}/delete">
+{# Gõ đúng tên VẪN là cổng chính (xem docstring delete_customer_submit: hộp xác
+   nhận chỉ cách cú click nhầm đúng một click, gõ tên thì không). Hộp Có/Không
+   dưới đây là cổng THỨ HAI, thêm vào chứ không thay thế. #}
+<form class="card ac-danger-zone" method="post" action="/web/customers/{{ org.id }}/delete"
+      data-ajax="redirect"
+      data-ajax-msg="Đã xoá khách hàng {{ org.name }}"
+      data-ajax-pending="Đang xoá khách hàng…"
+      data-ajax-confirm="Xoá vĩnh viễn khách hàng {{ org.name }}? Toàn bộ node, số đo, tài khoản và mã kích hoạt của khách này sẽ mất. Không thể hoàn tác.">
   <p class="ac-form-note">
     Xoá <b>{{ org.name }}</b> sẽ xoá vĩnh viễn: <b>{{ devices|length }}</b> node và toàn bộ số đo,
     <b>{{ members|length }}</b> tài khoản, <b>{{ codes|length }}</b> mã kích hoạt, và cấu hình của khách này.
