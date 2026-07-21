@@ -46,10 +46,12 @@ async def update_manifest(request: Request, session: AsyncSession = Depends(get_
 
 @router.get("/download/{filename}")
 # Tighter than the manifest's: this is ~50MB a hit and open to the internet.
-# 10/hour still covers a customer retrying a failed install several times.
+# Raised 10 -> 20/hour: the app now auto-retries a stalled download up to 3x,
+# so a single "Cập nhật" tap can spend 3 of these. At 10 the customer hit 429
+# after ~3 taps and the app reported it as a network failure.
 # The limiter keys on CF-Connecting-IP (core/rate_limit) — behind the tunnel
 # every client looks like 127.0.0.1 and would otherwise share one bucket.
-@limiter.limit("10/hour")
+@limiter.limit("20/hour")
 async def download_apk(filename: str, request: Request) -> FileResponse:
     """Stream a published APK.
 
