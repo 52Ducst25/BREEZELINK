@@ -61,7 +61,12 @@ async def build_context(session: AsyncSession, org_id: uuid.UUID, device: Device
         "history": list(reversed(readings))[:_HISTORY_ROWS],  # newest-first for the table
         "sample_count": len(readings),
         # Firmware-provisioning context (sysadmin-only page).
-        "mqtt_host": settings.mqtt_host,
-        "mqtt_port": settings.mqtt_port,
+        #
+        # Địa chỉ CÔNG KHAI, không phải settings.mqtt_host: cái sau là "emqx",
+        # tên service Docker mà thiết bị ngoài mạng không phân giải được. Panel
+        # này tồn tại để người lắp chép thẳng vào config.h, nên in sai ở đây là
+        # node không bao giờ kết nối được.
+        "mqtt_host": settings.mqtt_public_host or settings.mqtt_host,
+        "mqtt_port": settings.mqtt_public_port or settings.mqtt_port,
         "master_node": master,
     }

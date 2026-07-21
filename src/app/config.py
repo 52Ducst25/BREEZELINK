@@ -44,13 +44,24 @@ class Settings(BaseSettings):
     web_session_ttl_hours: int = 12
 
     # --- MQTT / MQTTS ---
-    # Prod broker = EMQX Serverless (cloud managed, e.g. <cluster>.ap1.emqxsl.com),
-    # MQTTS on port 8883 with TLS required (infra decision: no self-hosted EMQX).
-    # Dev: docker-compose overrides these to a local eclipse-mosquitto broker on
-    # plaintext 1883 (see docker/docker-compose.yml) — TLS is not needed locally.
+    # Prod broker = EMQX tự host trong Docker (docker-compose.vps.yml), plaintext
+    # 1883. Đây là địa chỉ INTERNAL: api/worker gọi nhau qua tên service Docker.
     mqtt_host: str = "mosquitto"
     mqtt_port: int = 8883
     mqtt_tls: bool = True
+
+    # Địa chỉ broker mà THIẾT BỊ ngoài mạng dùng — KHÁC với mqtt_host ở trên.
+    #
+    # Vì sao phải tách: mqtt_host là "emqx", tên service Docker, chỉ phân giải
+    # được bên trong compose network. Panel "Nạp firmware" lại in thẳng giá trị
+    # đó ra cho người lắp chép vào config.h, nên node thật ôm một hostname không
+    # bao giờ phân giải được và im lặng không kết nối — đã xảy ra thật khi lắp 2
+    # node đầu tiên, phải sửa tay mới chạy.
+    #
+    # Để trống thì panel tự lùi về mqtt_host/mqtt_port (giữ nguyên hành vi cũ
+    # cho môi trường dev, nơi hai địa chỉ trùng nhau).
+    mqtt_public_host: str = ""
+    mqtt_public_port: int = 0
     mqtt_user: str = "aircon_worker"
     mqtt_pass: str = "worker-secret"
     mqtt_keepalive: int = 30

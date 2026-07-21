@@ -78,6 +78,11 @@ services:
       MQTT_HOST: emqx
       MQTT_PORT: 1883
       MQTT_TLS: "false"
+      # Địa chỉ broker cho THIẾT BỊ ngoài mạng. Bắt buộc phải khác MQTT_HOST:
+      # "emqx" là tên service Docker, node ESP không phân giải được. Panel "Nạp
+      # firmware" in giá trị này ra cho người lắp chép vào config.h.
+      MQTT_PUBLIC_HOST: SERVER_IP
+      MQTT_PUBLIC_PORT: 1883
     ports:
       - "127.0.0.1:8200:8000"
     # Published APKs. WITHOUT this they are written inside the container's
@@ -116,6 +121,11 @@ services:
       MQTT_HOST: emqx
       MQTT_PORT: 1883
       MQTT_TLS: "false"
+      # Địa chỉ broker cho THIẾT BỊ ngoài mạng. Bắt buộc phải khác MQTT_HOST:
+      # "emqx" là tên service Docker, node ESP không phân giải được. Panel "Nạp
+      # firmware" in giá trị này ra cho người lắp chép vào config.h.
+      MQTT_PUBLIC_HOST: SERVER_IP
+      MQTT_PUBLIC_PORT: 1883
     command: ["python", "-m", "app.workers.manager", "--role", "consumer"]
     depends_on:
       postgres:
