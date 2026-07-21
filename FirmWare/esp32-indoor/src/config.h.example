@@ -39,17 +39,26 @@
 // ============================================================================
 //  Cảm biến DHT:  VCC -> 3V3 | GND -> GND | DATA -> GPIO4
 //  (Loại 4 chân rời: thêm điện trở 10k giữa DATA và 3V3.)
+//  Bọc #ifndef để platformio.ini ghi đè chân theo từng BO mà không phải sửa file
+//  này: cùng một mã nguồn chạy được cả ESP32 DevKit V1 lẫn ESP32-S3, vốn có sơ
+//  đồ chân khác nhau (xem phần build_flags của env esp32-s3).
+#ifndef DHT_PIN
 #define DHT_PIN        4
+#endif
 //  DHT22/AM2302 hay DHT11 — ĐẶT ĐÚNG LOẠI. Đặt sai vẫn đọc được (checksum pass)
 //  nhưng ra số vô lý: DHT22 mà khai DHT11 sẽ cho ~1.8°C / ~23%.
 #define DHT_TYPE       DHT22
 
 //  Mắt THU hồng ngoại (module "IR Receiver", chân OUT) -> GPIO27
 //    VCC -> 3V3 (KHÔNG dùng 5V: chân OUT sẽ đẩy 5V vào GPIO 3.3V) | GND -> GND
+#ifndef IR_RX_PIN
 #define IR_RX_PIN      27
+#endif
 //  LED PHÁT hồng ngoại (module "IR Transmitter", chân DAT) -> GPIO26
 //    VCC -> 3V3 | GND -> GND
+#ifndef IR_TX_PIN
 #define IR_TX_PIN      26
+#endif
 //  Chọn 26/27 vì chúng không phải chân strapping và không bị ràng buộc lúc boot
 //  (khác GPIO0/2/5/12/15). Đổi chân thì tránh: GPIO6-11 (nối flash), GPIO34-39
 //  (chỉ vào, không phát được).
