@@ -9,7 +9,7 @@ import logging
 from app.core.database import AsyncSessionLocal
 from app.core.tenant import set_current_org
 from app.models.enums import AcMode
-from app.services import ir_action_service, ir_code_service
+from app.services import ir_action_service, ir_code_service, telemetry_service
 from app.utils.mqtt_naming import ParsedTopic
 
 logger = logging.getLogger("aircon.worker.learn")
@@ -39,6 +39,12 @@ async def handle_learn(client, topic: ParsedTopic, payload: dict) -> None:
     if label in ir_action_service.KNOWN_ACTIONS:
         async with AsyncSessionLocal() as session:
             set_current_org(topic.org_id)
+            # Learned codes are what the household's AC is later driven with —
+            # never accept them from a node that isn't actually in this org.
+            if await telemetry_service.get_device_for_topic(session, topic.org_id, topic.device_uuid) is None:
+                logger.warning("Ignoring LEARN action from unknown/mismatched uuid=%s org=%s",
+                               topic.device_uuid, topic.org_id)
+                return
             await ir_action_service.upsert_action_code(session, topic.org_id, label, raw_timing)
         logger.info("Learned IR action org=%s action=%s", topic.org_id, label)
         return
@@ -52,6 +58,10 @@ async def handle_learn(client, topic: ParsedTopic, payload: dict) -> None:
 
     async with AsyncSessionLocal() as session:
         set_current_org(topic.org_id)
+        if await telemetry_service.get_device_for_topic(session, topic.org_id, topic.device_uuid) is None:
+            logger.warning("Ignoring LEARN code from unknown/mismatched uuid=%s org=%s",
+                           topic.device_uuid, topic.org_id)
+            return
         ir_code = await ir_code_service.upsert_learned_code(session, topic.org_id, mode, temp, raw_timing)
 
     logger.info("Learned IR code org=%s mode=%s temp=%s id=%s", topic.org_id, mode.value, temp, ir_code.id)

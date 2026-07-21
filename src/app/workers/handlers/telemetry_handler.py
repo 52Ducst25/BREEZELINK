@@ -124,7 +124,12 @@ async def handle_telemetry(client, topic: ParsedTopic, payload: dict) -> None:
     async with AsyncSessionLocal() as session:
         set_current_org(topic.org_id)
 
-        device = await telemetry_service.get_device_by_uuid(session, topic.device_uuid)
+        # Verifies the node really belongs to the org named in the topic — a
+        # mistyped ORG_ID would otherwise file this reading under a stranger's
+        # household and drive THEIR comfort engine.
+        device = await telemetry_service.get_device_for_topic(
+            session, topic.org_id, topic.device_uuid
+        )
         if device is None:
             logger.warning("No device registered for uuid=%s (org=%s)", topic.device_uuid, topic.org_id)
             return
@@ -247,4 +252,7 @@ async def handle_telemetry(client, topic: ParsedTopic, payload: dict) -> None:
             h_out=hout_raw,
             t_in=tin,
             h_in=hin,
+            # Only a real mode switch restarts the compressor dwell timer; a
+            # setpoint-only change must not (it would freeze mode switching).
+            mode_changed=result.mode != prev_mode,
         )

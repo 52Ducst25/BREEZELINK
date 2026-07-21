@@ -59,9 +59,16 @@ async def publish_command(
     h_out: float | None,
     t_in: float,
     h_in: float,
+    mode_changed: bool = True,
 ) -> None:
     """Publish ``bl/{org}/indoor/cmd`` (QoS1, retain OFF) and persist
     ``commands`` + ``comfort_log`` rows for the same decision.
+
+    ``mode_changed`` says whether this publish actually switches AC MODE (as
+    opposed to only nudging the setpoint). Only a mode change may restart the
+    dwell timer — see the comment at the ``set_last_switch`` call. Defaults to
+    True so any future caller that forgets it errs toward the SAFE side
+    (protecting the compressor) rather than silently disabling the guard.
     """
     now = datetime.now(timezone.utc)
     req_id = f"c-{uuid.uuid4().hex[:8]}"
@@ -109,7 +116,15 @@ async def publish_command(
         h_in=h_in,
         result=result,
     )
-    await redis_state_service.set_last_switch(org_id, result.mode.value, now.timestamp())
+    # DWELL guards the COMPRESSOR against rapid mode flipping, so only a real
+    # mode change may restart its clock. This ran on every publish, and a publish
+    # happens when mode OR setpoint changed — so a plain setpoint nudge (e.g.
+    # 25°C -> 24°C, same COOL mode) froze all mode switching for dwell_sec.
+    # Setpoints drift with the comfort maths every few ticks, so the timer was
+    # forever being rearmed and COOL -> DRY/FAN could effectively never happen:
+    # the energy-saving half of the engine was switched off in practice.
+    if mode_changed:
+        await redis_state_service.set_last_switch(org_id, result.mode.value, now.timestamp())
     await redis_state_service.set_indoor_state(org_id, {"mode": result.mode.value, "setpoint": result.t_set})
 
 
@@ -166,7 +181,14 @@ async def publish_manual_command(
         source=CommandSource.manual,
         req_id=req_id,
     )
-    await redis_state_service.set_last_switch(org_id, mode.value, now.timestamp())
+    # Same rule as the automatic path: the dwell timer protects the compressor
+    # from rapid MODE flipping, so a manual setpoint tweak at the same mode must
+    # not rearm it. Previous mode comes from the live state we are about to
+    # overwrite, so read it first.
+    prev = await redis_state_service.get_indoor_state(org_id)
+    prev_mode = (prev or {}).get("mode")
+    if prev_mode != mode.value:
+        await redis_state_service.set_last_switch(org_id, mode.value, now.timestamp())
     await redis_state_service.set_indoor_state(org_id, {"mode": mode.value, "setpoint": setpoint})
     return cmd_payload
 

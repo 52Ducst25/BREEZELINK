@@ -5,6 +5,7 @@ org, so a device is uniquely identified by ``(org_id, node_type)`` — the
 worker never receives a ``device_id`` directly, only the topic's org/node.
 """
 
+import logging
 import uuid
 from datetime import datetime
 
@@ -15,18 +16,78 @@ from app.models.device import Device
 from app.models.enums import NodeType
 from app.models.telemetry import Telemetry
 
+logger = logging.getLogger("aircon.telemetry_service")
+
 _DEFAULT_LIMIT = 200
 
 
 async def get_device_by_org_and_node(
     session: AsyncSession, org_id: str, node_type: str
 ) -> Device | None:
-    """Look up the single device for this org/node (2-node design)."""
-    stmt = select(Device).where(
-        Device.org_id == uuid.UUID(org_id),
-        Device.node_type == NodeType(node_type),
+    """Resolve ONE device of this node type for the org — the oldest if several.
+
+    Answers "which indoor node carries the IR blaster for this household".
+
+    The 2-node era could assume uniqueness and used ``scalar_one_or_none()``,
+    which raises ``MultipleResultsFound`` the moment a household has a SECOND
+    indoor node — something the admin form allows with a single click. That
+    exception surfaced as a 500 on every override / IR endpoint, and inside the
+    worker a broad ``except`` swallowed it, so automatic commands silently
+    stopped being published while the system still looked healthy. Failing that
+    way is worse than being approximate.
+
+    Degrading to "oldest match" keeps the household behaving exactly as it did
+    before the extra node appeared, and the warning marks the ambiguity. Real
+    per-room decisions are Phase 2.
+    """
+    stmt = (
+        select(Device)
+        .where(
+            Device.org_id == uuid.UUID(org_id),
+            Device.node_type == NodeType(node_type),
+        )
+        .order_by(Device.created_at.asc(), Device.id.asc())
     )
-    return (await session.execute(stmt)).scalar_one_or_none()
+    rows = list((await session.execute(stmt)).scalars().all())
+    if len(rows) > 1:
+        logger.warning(
+            "Org %s has %d '%s' nodes; driving the oldest (%s). "
+            "Per-room control is Phase 2 — the others are not controlled.",
+            org_id, len(rows), node_type, rows[0].id,
+        )
+    return rows[0] if rows else None
+
+
+async def get_device_for_topic(
+    session: AsyncSession, org_id: str, device_uuid: str
+) -> Device | None:
+    """Resolve a node by uuid AND verify it belongs to the org named in the topic.
+
+    The MQTT topic is attacker/typo-controlled input, not proof of ownership:
+    ``get_device_by_uuid`` looks the node up GLOBALLY, and every caller then
+    writes state keyed by ``topic.org_id``. A single mistyped ORG_ID in a hand
+    edited ``config.h`` therefore files a real node's readings under a different
+    household — poisoning that household's Redis state and driving its comfort
+    engine.
+
+    Returns None (caller skips the message) when the uuid is unknown OR when the
+    topic's org does not match the device's real org.
+
+    NOTE: this closes the misconfiguration hole, NOT a determined attacker — a
+    device holding valid credentials can still publish to another household's
+    topic, because both halves of the comparison come from that same topic.
+    Only a broker-side topic ACL fixes that; see the audit's EMQX item.
+    """
+    device = await get_device_by_uuid(session, device_uuid)
+    if device is None:
+        return None
+    if str(device.org_id) != str(org_id):
+        logger.warning(
+            "Topic org mismatch: uuid=%s belongs to org %s but published under org %s — ignored.",
+            device_uuid, device.org_id, org_id,
+        )
+        return None
+    return device
 
 
 async def get_device_by_uuid(session: AsyncSession, device_uuid: str) -> Device | None:

@@ -28,7 +28,10 @@ async def handle_status(client, topic: ParsedTopic, payload: str) -> None:
 
     async with AsyncSessionLocal() as session:
         set_current_org(topic.org_id)
-        device = await telemetry_service.get_device_by_uuid(session, topic.device_uuid)
+        # Org-checked: presence must not be settable from another org's topic.
+        device = await telemetry_service.get_device_for_topic(
+            session, topic.org_id, topic.device_uuid
+        )
         if device is None:
             logger.warning("No device registered for uuid=%s (org=%s)", topic.device_uuid, topic.org_id)
             return

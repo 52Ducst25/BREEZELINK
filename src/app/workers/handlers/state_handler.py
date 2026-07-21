@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 from app.core.database import AsyncSessionLocal
 from app.core.tenant import set_current_org
-from app.services import command_service, redis_state_service
+from app.services import command_service, redis_state_service, telemetry_service
 from app.utils.mqtt_naming import ParsedTopic
 
 logger = logging.getLogger("aircon.worker.state")
@@ -21,6 +21,14 @@ async def handle_state(client, topic: ParsedTopic, payload: dict) -> None:
     """Match ``payload['ack']`` to a dispatched command and mirror state."""
     async with AsyncSessionLocal() as session:
         set_current_org(topic.org_id)
+
+        # This mirrors mode/setpoint into the org's live state, which the comfort
+        # loop then treats as ground truth — so verify the publishing node really
+        # belongs to the org in the topic before trusting a word of it.
+        if await telemetry_service.get_device_for_topic(session, topic.org_id, topic.device_uuid) is None:
+            logger.warning("Ignoring state from unknown/mismatched uuid=%s org=%s",
+                           topic.device_uuid, topic.org_id)
+            return
 
         ack_req_id = payload.get("ack")
         if ack_req_id:
