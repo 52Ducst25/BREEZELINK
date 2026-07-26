@@ -33,12 +33,20 @@ bool begin() {
   return ready;
 }
 
+/// Khoá bí danh: "a" + mode + nhiệt độ. Dài nhất "aCOOL30" = 7 ký tự, thừa chỗ
+/// trong giới hạn 15 của NVS. temp < 0 -> mã cố định (DRY/FAN/OFF), bỏ số.
+static void makeAliasKey(const char *mode, int temp, char *out, size_t n) {
+  if (temp >= 0) snprintf(out, n, "a%s%d", mode, temp);
+  else           snprintf(out, n, "a%s", mode);
+}
+
 bool save(const char *irCodeId, const uint16_t *raw, uint16_t len) {
   if (!ready || irCodeId == nullptr || irCodeId[0] == '\0' || raw == nullptr || len == 0) {
     return false;
   }
   char keyUuid[12], keyRaw[12];
   makeKeys(irCodeId, keyUuid, keyRaw);
+  const bool isNew = (prefs.getString(keyUuid, "") != irCodeId);
 
   // Ghi mảng TRƯỚC, ghi uuid SAU: uuid là thứ load() dùng để xác nhận "mã này
   // có thật". Ghi ngược lại, mà mất điện đúng giữa chừng, thì lần đọc sau thấy
@@ -52,7 +60,48 @@ bool save(const char *irCodeId, const uint16_t *raw, uint16_t len) {
     Serial.println("[ir-store] ghi uuid that bai — NVS day?");
     return false;
   }
+  // Đếm riêng thay vì duyệt namespace: Preferences không có API liệt kê khoá,
+  // mà màn THONG TIN chỉ cần một con số để người lắp biết "node đã có mã chưa".
+  if (isNew) prefs.putUShort("cnt", (uint16_t)(prefs.getUShort("cnt", 0) + 1));
   return true;
+}
+
+uint16_t count() {
+  return ready ? prefs.getUShort("cnt", 0) : 0;
+}
+
+bool saveAlias(const char *mode, int temp, const char *irCodeId) {
+  if (!ready || mode == nullptr || mode[0] == '\0' || irCodeId == nullptr || irCodeId[0] == '\0') {
+    return false;
+  }
+  char key[16];
+  makeAliasKey(mode, temp, key, sizeof(key));
+  if (prefs.getString(key, "") == irCodeId) return true;   // khỏi mòn flash vô ích
+  return prefs.putString(key, irCodeId) > 0;
+}
+
+bool hasAlias(const char *mode, int temp) {
+  if (!ready || mode == nullptr || mode[0] == '\0') return false;
+  char key[16];
+  makeAliasKey(mode, temp, key, sizeof(key));
+  const String id = prefs.getString(key, "");
+  if (id.length() == 0) return false;
+
+  // Bí danh trỏ tới id, nhưng mảng thời gian mới là thứ phát được. Hai thứ có
+  // thể lệch nhau (NVS đầy lúc ghi mảng, hoặc băm đụng) — kiểm cả hai thì nút
+  // trên màn mới phản ánh đúng "bấm vào có ra lệnh không".
+  char keyUuid[12], keyRaw[12];
+  makeKeys(id.c_str(), keyUuid, keyRaw);
+  return prefs.getString(keyUuid, "") == id && prefs.getBytesLength(keyRaw) > 0;
+}
+
+uint16_t loadAlias(const char *mode, int temp, uint16_t *out, uint16_t maxLen) {
+  if (!ready || mode == nullptr || mode[0] == '\0' || out == nullptr) return 0;
+  char key[16];
+  makeAliasKey(mode, temp, key, sizeof(key));
+  const String id = prefs.getString(key, "");
+  if (id.length() == 0) return 0;
+  return load(id.c_str(), out, maxLen);
 }
 
 uint16_t load(const char *irCodeId, uint16_t *out, uint16_t maxLen) {

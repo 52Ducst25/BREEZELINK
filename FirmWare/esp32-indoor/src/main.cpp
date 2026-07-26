@@ -28,6 +28,12 @@
 #include "slave-watch.h"
 #include "ir-io.h"
 #include "ir-store.h"
+#ifdef HAS_DISPLAY
+// Bo QR Box Advance Touch Screen: màn 2.8" chạy trên TÁC VỤ RIÊNG Ở LÕI 0.
+// Thiết kế giao diện + lý do phải tách lõi: ../../Interface/README.md và ui.h.
+// loop() dưới đây không vẽ một pixel nào — nó chỉ đổ số liệu sang và rút lệnh về.
+#include "ui/ui.h"
+#endif
 
 // Broker EMQX tự host trên VPS chạy plaintext 1883 (MQTT_TLS=false trong
 // docker-compose), nên dùng WiFiClient thường — KHÔNG phải WiFiClientSecure.
@@ -59,6 +65,30 @@ static uint16_t irBuf[IrIo::RAW_MAX];
 // "COOL 25" -> label="COOL", temp=25   |   "FAN_SPEED" -> label="FAN_SPEED", temp=-1
 static char learnLabel[24] = "";
 static int  learnTemp = -1;
+
+// --- Dấu vết quyền điều khiển ------------------------------------------------
+// Ai đang cầm lái: máy chủ (mặc định) hay người vừa bấm trên màn cảm ứng.
+// `overrideLocal` chỉ có ý nghĩa HIỂN THỊ — nó KHÔNG dừng vòng lặp comfort của
+// máy chủ, vì node không có kênh nào để xin đặt ghi đè (Interface/README.md
+// §8.3). Giao diện nói đúng chuyện đó thay vì hứa hão.
+static uint32_t lastCmdMs = 0;
+static bool     overrideLocal = false;
+
+// Số đo ngoài trời và trạng thái máy lạnh gần nhất — CHỈ để hiển thị. Giữ riêng
+// chứ không đọc ké `pending`: pending.mode được điền ngay khi bóc gói, kể cả
+// những lệnh sau đó bị bỏ vì chưa học mã, nên lấy nó ra hiển thị là màn hình
+// khoe một trạng thái máy lạnh chưa bao giờ xảy ra.
+static float    lastSlaveT = NAN, lastSlaveH = NAN;
+static uint32_t lastSlaveMs = 0;
+static char     actMode[8] = "";
+static int      actSetpoint = -1;
+
+/// Nhiệt độ có tham gia vào khoá tra mã IR không.
+/// Chỉ COOL mới có ma trận (mode, temp); DRY/FAN/OFF là mã cố định — đúng theo
+/// ir_service._REQUIRED_* ("COOL 24..28 + DRY + FAN + OFF").
+static int aliasTemp(const char *mode, int setpoint) {
+  return (strcmp(mode, "COOL") == 0) ? setpoint : -1;
+}
 
 // --- Lệnh chờ thi hành -------------------------------------------------------
 // Callback của PubSubClient chạy NGAY GIỮA lúc thư viện đang đọc gói vào bộ đệm
@@ -128,6 +158,7 @@ static void onSlavePacket(const char *uuid, const uint8_t mac[6], float t, float
     Serial.printf("[slave] %s con song nhung cam bien loi (NaN)\n", uuid);
     return;
   }
+  lastSlaveT = t; lastSlaveH = h; lastSlaveMs = millis();
   if (SlaveWatch::dueForRelay(uuid)) publishSlaveTelemetry(uuid, mac, t, h);
   if (SlaveWatch::dueForStatusRefresh(uuid)) publishSlaveStatus(uuid, true);
 }
@@ -226,6 +257,12 @@ static void takeCommand(JsonDocument &doc) {
     if (codeId != nullptr && pending.frameLen > 0) {
       if (IrStore::save(codeId, irBuf, pending.frameLen)) {
         Serial.printf("[cmd] da luu ma %s vao NVS (%u moc)\n", codeId, pending.frameLen);
+        // Ghi thêm bí danh (mode, temp) -> id. Đây là thứ DUY NHẤT cho phép màn
+        // cảm ứng tự tra ra khung IR khi người dùng bấm tại chỗ: kho chính khoá
+        // theo UUID của server, node không có bảng tra ngược. Xem ir-store.h.
+        if (pending.mode[0]) {
+          IrStore::saveAlias(pending.mode, aliasTemp(pending.mode, pending.setpoint), codeId);
+        }
       }
     }
   } else if (codeId != nullptr) {
@@ -252,6 +289,10 @@ static void takeCommand(JsonDocument &doc) {
                 pending.reqId, pending.mode, pending.setpoint, reason, pending.frameLen);
   pending.hasFrame = true;
   pending.needAck  = true;
+  // Máy chủ vừa ra lệnh -> nó đã giành lại quyền, huy hiệu trên màn trở về
+  // "TU DONG". Đây chính là điều giao diện đã cảnh báo lúc người dùng ghi đè.
+  lastCmdMs = millis();
+  overrideLocal = false;
 }
 
 static void onMessage(char *topic, byte *payload, unsigned int len) {
@@ -342,7 +383,18 @@ void setup() {
 #endif
   Serial.printf("\n== Aircon · %s · TRONG NHA (indoor + master + IR) ==\n", board);
 
+#ifdef HAS_DISPLAY
+  // Dựng màn TRƯỚC WiFi, có chủ đích: tác vụ giao diện chạy ở lõi 0 nên nó vẫn
+  // vẽ bình thường suốt lúc connectWifi()/connectMqtt() đang chặn lõi 1 hàng
+  // chục giây. Người đi lắp nhìn thấy "MAT KET NOI" nhấp nháy — tức là node
+  // sống và đang dò mạng — thay vì một màn đen không nói gì.
+  //
+  // Bo này KHÔNG có DHT: GPIO4 đã là I2C SCL. Nhiệt/ẩm đo bằng SHT3x trên chính
+  // bus I2C đó, do tác vụ UI đọc hộ (Interface/README.md §3.1).
+  Ui::begin();
+#else
   dht.begin();
+#endif
   IrIo::begin(IR_TX_PIN, IR_RX_PIN);
   if (!IrStore::begin()) {
     // Không chặn khởi động: node vẫn chạy được, chỉ là mọi lệnh phải kèm ir_raw.
@@ -375,10 +427,105 @@ void setup() {
 
 static unsigned long lastPub = 0;
 
+#ifdef HAS_DISPLAY
+// --- Cầu nối sang tác vụ giao diện ------------------------------------------
+// Hai chiều, cả hai đều không chặn:
+//   UI -> loop(): Ui::pollCommand()  (người dùng vừa bấm GUI / TU DONG)
+//   loop() -> UI: Ui::publish()      (ảnh chụp trạng thái để vẽ)
+// Việc THI HÀNH lệnh nằm ở đây chứ không ở tác vụ UI, vì đúng hai lý do đã ghi
+// trong ui.h: PubSubClient không an toàn đa luồng, và IR bit-bang 38kHz phải
+// chạy ở lõi 1 để không bị bộ lập lịch xen giữa.
+
+/// Người dùng bấm GUI trên màn: tra mã theo bí danh rồi bắn ngay tại chỗ.
+static void runPanelCommand(const Ui::Command &c) {
+  if (c.kind == Ui::Command::AUTO) {
+    overrideLocal = false;
+    Serial.println("[panel] tra quyen ve cho may chu");
+    return;
+  }
+
+  const uint16_t n = IrStore::loadAlias(c.mode, aliasTemp(c.mode, c.setpoint),
+                                        irBuf, IrIo::RAW_MAX);
+  if (n == 0) {
+    // Giao diện đã làm mờ nút này rồi, nên tới được đây là hiếm (mã bị xoá
+    // giữa chừng). Vẫn báo, không im lặng.
+    Serial.printf("[panel] %s %d: chua co ma trong NVS\n", c.mode, c.setpoint);
+    Ui::reply("CHUA HOC MA - vao app de hoc");
+    return;
+  }
+
+  IrIo::blast(irBuf, n);
+  copyStr(actMode, sizeof(actMode), c.mode);
+  actSetpoint = c.setpoint;
+  Serial.printf("[panel] da phat %u moc -> %s %d\n", n, c.mode, c.setpoint);
+
+  // Publish state KHÔNG kèm ack: không có req_id nào để khớp, nhưng
+  // state_handler vẫn soi mode/setpoint vào redis_state_service nên app và web
+  // thấy ngay trạng thái mới. Đây là tất cả những gì node làm được — đặt ghi đè
+  // thật cần một topic mà backend chưa có (Interface/README.md §8.3).
+  pending.reqId[0] = '\0';
+  copyStr(pending.mode, sizeof(pending.mode), c.mode);
+  pending.setpoint = c.setpoint;
+  publishState();
+
+  overrideLocal = true;
+  Ui::reply("DA GUI - may chu se gianh lai quyen");
+}
+
+/// Dựng ảnh chụp cho màn. Bitmask mã IR tính ở đây vì NVS thuộc quyền lõi 1.
+static void pushUiModel() {
+  Ui::Model m;
+  m.wifiUp = (WiFi.status() == WL_CONNECTED);
+  m.mqttUp = mqtt.connected();
+  m.rssi   = m.wifiUp ? (int)WiFi.RSSI() : 0;
+  m.channel = (uint8_t)WiFi.channel();
+  strncpy(m.ip,   m.wifiUp ? WiFi.localIP().toString().c_str() : "", sizeof(m.ip) - 1);
+  strncpy(m.ssid, WIFI_SSID, sizeof(m.ssid) - 1);
+  strncpy(m.mac,  WiFi.macAddress().c_str(), sizeof(m.mac) - 1);
+
+  Ui::readIndoor(m.tIn, m.hIn);     // để nguyên NAN nếu chưa có số đo hợp lệ
+
+  m.tOut = lastSlaveT; m.hOut = lastSlaveH;
+  // Cùng ngưỡng với SlaveWatch để màn hình và topic status không bao giờ nói
+  // hai chuyện khác nhau về cùng một node.
+  m.outOnline = lastSlaveMs && (millis() - lastSlaveMs < SlaveWatch::SLAVE_TIMEOUT_MS);
+  m.outAgeSec = lastSlaveMs ? (millis() - lastSlaveMs) / 1000 : 0;
+  m.espnowRx   = EspNowRelay::receivedCount();
+  m.espnowDrop = EspNowRelay::droppedCount();
+
+  copyStr(m.mode, sizeof(m.mode), actMode);
+  m.setpoint      = actSetpoint;
+  m.overrideLocal = overrideLocal;
+  m.lastCmdSec    = lastCmdMs ? (millis() - lastCmdMs) / 1000 : 0;
+
+  for (uint8_t i = 0; i < 15; i++) {
+    if (IrStore::hasAlias("COOL", 16 + i)) m.coolMask |= (uint16_t)(1u << i);
+  }
+  m.hasDry = IrStore::hasAlias("DRY", -1);
+  m.hasFan = IrStore::hasAlias("FAN", -1);
+  m.hasOff = IrStore::hasAlias("OFF", -1);
+
+  m.learning = IrIo::learning();
+  copyStr(m.learnLabel, sizeof(m.learnLabel), learnLabel);
+  m.learnRemainSec = IrIo::learnRemainingMs() / 1000;
+
+  m.irCodeCount = IrStore::count();
+  m.uptimeSec   = millis() / 1000;
+  m.fw          = FW_VERSION;
+  Ui::publish(m);
+}
+#endif  // HAS_DISPLAY
+
 void loop() {
   connectWifi();
   if (!mqtt.connected()) connectMqtt();
   mqtt.loop();
+
+#ifdef HAS_DISPLAY
+  Ui::Command panelCmd;
+  while (Ui::pollCommand(panelCmd)) runPanelCommand(panelCmd);
+  pushUiModel();
+#endif
 
   // Thi hành lệnh Ở ĐÂY chứ không trong callback: xem ghi chú ở struct pending.
   if (pending.hasFrame) {
@@ -386,6 +533,8 @@ void loop() {
     IrIo::blast(irBuf, pending.frameLen);
     strncpy(lastReqId, pending.reqId, sizeof(lastReqId) - 1);
     lastReqId[sizeof(lastReqId) - 1] = '\0';
+    copyStr(actMode, sizeof(actMode), pending.mode);   // trạng thái THẬT đã bắn ra máy lạnh
+    actSetpoint = pending.setpoint;
     Serial.printf("[ir] da phat %u moc ra may lanh\n", pending.frameLen);
   }
   if (pending.needAck) {
@@ -410,8 +559,18 @@ void loop() {
   unsigned long now = millis();
   if (lastPub != 0 && now - lastPub < TELEMETRY_MS) return;  // chưa tới nhịp
 
-  float t = dht.readTemperature();
-  float h = dht.readHumidity();
+  float t, h;
+#ifdef HAS_DISPLAY
+  // Cảm biến nằm trên bus I2C do tác vụ UI sở hữu (nó đo mỗi 2s). Ở đây chỉ
+  // lấy số đã đo sẵn — KHÔNG delay(): số mới sẽ có ở vòng sau, mà lõi 1 còn
+  // phải chạy mqtt.loop() và rút hàng đợi ESP-NOW.
+  if (!Ui::readIndoor(t, h)) {
+    Serial.println("Chua co so do SHT3x — kiem tra day I2C tren J1");
+    return;
+  }
+#else
+  t = dht.readTemperature();
+  h = dht.readHumidity();
   if (isnan(t) || isnan(h)) {
     // DHT22 có chu kỳ lấy mẫu tối thiểu 2s; thử lại đúng 2s là sát ngưỡng nên
     // dễ hỏng liên tiếp. Chờ 3s để cảm biến có cơ hội hồi.
@@ -420,6 +579,7 @@ void loop() {
     delay(3000);
     return;
   }
+#endif
   lastPub = now;
 
   JsonDocument doc;

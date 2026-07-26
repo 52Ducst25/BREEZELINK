@@ -66,6 +66,14 @@ void learnStart(uint32_t timeoutMs) {
 
 bool learning() { return active; }
 
+uint32_t learnRemainingMs() {
+  if (!active) return 0;
+  // Trừ số học có dấu để vẫn đúng khi millis() tràn (~49 ngày) — cùng lý do
+  // với expired() bên dưới.
+  const int32_t left = (int32_t)(deadline - millis());
+  return left > 0 ? (uint32_t)left : 0;
+}
+
 void learnStop() {
   if (receiver) receiver->disableIRIn();
   active = false;

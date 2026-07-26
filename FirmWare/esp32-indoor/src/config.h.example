@@ -70,3 +70,48 @@
 
 //  Chu kỳ gửi số liệu (ms). 15s cho dễ theo dõi khi test; 30000 khi chạy thật.
 #define TELEMETRY_MS   15000UL
+
+// ============================================================================
+//  Bo QR Box Advance Touch Screen (env `qrbox-touch`) — chỉ dùng khi HAS_DISPLAY
+// ----------------------------------------------------------------------------
+//  Thiết kế giao diện + cách đọc ngược sơ đồ chân: ../../Interface/README.md
+//  Chân TFT (MOSI/SCK/CS/DC/RST) khai trong platformio.ini vì TFT_eSPI đọc
+//  chúng lúc BIÊN DỊCH THƯ VIỆN, không đọc file này.
+// ============================================================================
+#ifdef HAS_DISPLAY
+
+//  Bus I2C dùng chung: cảm ứng màn (0x38/0x5D/0x15) + DS1307 (0x68).
+//  ĐỪNG nâng lên 400kHz — DS1307 chỉ chịu 100kHz, xem Interface/README.md §2.1.
+#ifndef I2C_SCL_PIN
+#define I2C_SCL_PIN        4
+#endif
+#ifndef I2C_SDA_PIN
+#define I2C_SDA_PIN        16
+#endif
+#define TOUCH_RST_PIN      25
+#define TOUCH_INT_PIN      33
+
+//  Đèn nền qua Q5 (BSS138 hạ áp phía mát): mức CAO = sáng, PWM được.
+#define LCD_BACKLIGHT_PIN  27
+#define BUZZER_PIN         13
+
+//  OE của TXS0104. Hai chân IR đi qua bộ dịch mức này ra cổng P3, nên không
+//  kéo lên HIGH thì IR câm hoàn toàn. Ui::begin() đặt trong setup() — KHÔNG
+//  được kéo lên bằng trở ngoài (GPIO12 = MTDI, HIGH lúc reset là bo không boot).
+#define EN_LEVEL_SHIFT_PIN 12
+
+//  1 hoặc 3 = nằm ngang 320x240. Đổi sang 3 nếu màn bị lộn ngược 180 độ.
+#define TFT_ROTATION       1
+
+//  Xoay/lật toạ độ cảm ứng về hệ của TFT. Mỗi lô module dán tấm cảm ứng lệch
+//  trục khác nhau và schematic không nói gì — chạm thử rồi chỉnh ba cờ này.
+#define TOUCH_SWAP_XY      1
+#define TOUCH_INVERT_X     0
+#define TOUCH_INVERT_Y     1
+
+//  Múi giờ cho nút "DONG BO GIO" (nạp giờ NTP vào DS1307). Chuỗi POSIX TZ:
+//  Việt Nam UTC+7, không có giờ mùa hè — dấu trừ trong "ICT-7" là đúng chuẩn
+//  POSIX (nó ghi độ lệch cần CỘNG vào giờ địa phương để ra UTC).
+#define TZ_INFO            "ICT-7"
+
+#endif  // HAS_DISPLAY

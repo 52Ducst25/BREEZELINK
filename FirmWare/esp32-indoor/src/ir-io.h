@@ -35,6 +35,11 @@ void learnStart(uint32_t timeoutMs);
 
 bool learning();
 
+/// Còn bao nhiêu mili giây nữa thì hết giờ chờ. 0 khi không ở chế độ học.
+/// Có để màn hình đếm ngược cho người đang cầm remote — không có nó thì họ chỉ
+/// thấy một dòng chữ đứng im, không biết còn kịp hay đã hết giờ.
+uint32_t learnRemainingMs();
+
 /// Gọi mỗi vòng loop(). Trả về số mốc vừa bắt được (>0 = xong, tự thoát chế độ
 /// học), 0 = chưa có gì. Nhiễu và khung dài bất thường bị bỏ, vẫn học tiếp.
 uint16_t learnPoll(uint16_t *out, uint16_t maxLen);

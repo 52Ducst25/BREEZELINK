@@ -29,4 +29,33 @@ uint16_t load(const char *irCodeId, uint16_t *out, uint16_t maxLen);
 /// Xoá sạch kho (dùng khi muốn ép backend gửi lại toàn bộ ir_raw).
 void wipe();
 
+/// Số mã đang giữ (đếm bằng bộ đếm riêng, xem .cpp) — cho màn THONG TIN.
+uint16_t count();
+
+// ---------------------------------------------------------------------------
+//  Chỉ mục BÍ DANH (mode, temp) -> ir_code_id
+// ---------------------------------------------------------------------------
+//  VÌ SAO CẦN: kho trên khoá theo ir_code_id — một UUID do backend sinh. Node
+//  không có bảng tra ngược, nên khi người dùng bấm "COOL 26" TRÊN MÀN HÌNH của
+//  chính node thì nó không biết phát khung nào.
+//
+//  Cách giải rẻ nhất: mỗi lần backend gửi một lệnh, nó đã kèm sẵn `mode` +
+//  `setpoint` + `ir_code_id`. Lưu thêm một khoá "aCOOL26" -> id là node tự dựng
+//  được bảng tra ngược mà backend không phải đổi gì.
+//
+//  HỆ QUẢ PHẢI NÓI THẬT TRÊN GIAO DIỆN: panel chỉ điều khiển được những tổ hợp
+//  mà server ĐÃ TỪNG gửi ít nhất một lần. Bo vừa nạp firmware thì mọi nút chế
+//  độ đều mờ cho tới khi vòng lặp comfort chạy vài chu kỳ — đó là lý do màn
+//  ĐIỀU KHIỂN bắt buộc có trạng thái "mờ + giải thích", không có phím chết.
+//
+//  [temp] < 0 nghĩa là mã cố định không kèm nhiệt độ (DRY/FAN/OFF).
+// ---------------------------------------------------------------------------
+bool saveAlias(const char *mode, int temp, const char *irCodeId);
+
+/// true nếu có mã cho tổ hợp này (dùng để làm mờ nút chưa học).
+bool hasAlias(const char *mode, int temp);
+
+/// Tra bí danh rồi đọc luôn mảng thời gian. Trả 0 nếu chưa có.
+uint16_t loadAlias(const char *mode, int temp, uint16_t *out, uint16_t maxLen);
+
 } // namespace IrStore
