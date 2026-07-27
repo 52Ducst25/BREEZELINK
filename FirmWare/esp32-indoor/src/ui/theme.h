@@ -44,6 +44,29 @@ static const uint16_t thermalHot      = 0xFA69;  // #FF4D4D nóng hẳn
 /// dùng cho vùng "dễ chịu" — cùng ngôn ngữ màu với thẻ trên app.
 uint16_t thermalColor(float celsius);
 
+// --- Chữ -------------------------------------------------------------------
+//  Ba cỡ chữ, đều là font VLW (smooth font) nhúng trong flash — KHÔNG phải font
+//  GFX. Font GFX đánh chỉ số theo MỘT BYTE nên chỉ có ASCII: "LÀM LẠNH" sẽ ra ô
+//  vuông hoặc rụng dấu. VLW đánh chỉ số theo mã Unicode nên chứa đủ 134 ký tự
+//  tiếng Việt. Sinh lại bằng `python tools/make_vlw.py`.
+//
+//  VÌ SAO PHẢI ĐỦ BA CỠ: khi TFT_eSPI đã loadFont() thì setFreeFont() và
+//  setTextFont() ĐỀU BỊ BỎ QUA — không trộn được VLW với font GFX trong cùng
+//  một khung hình. Nên toàn bộ phân cấp cỡ chữ phải dựng lại bằng VLW.
+enum FontId : uint8_t {
+  F_SMALL = 0,   // 13px thường — nhãn phụ, thanh trạng thái, màn THÔNG TIN
+  F_LABEL = 1,   // 17px đậm    — tiêu đề, nhãn nút
+  F_BIG   = 2,   // 34px đậm    — số lớn (nhiệt độ, setpoint); chỉ có chữ số
+};
+
+/// Nạp font đầu tiên. Gọi MỘT LẦN, ngay sau tft.init().
+void fontBegin(TFT_eSPI &g);
+
+/// Đổi cỡ chữ. Trả về ngay nếu đang đúng cỡ — không thừa: mỗi lần đổi thật là
+/// một lượt malloc + đọc lại bảng 230 glyph từ flash, mà giao diện chỉ vẽ lại
+/// những trường ĐỔI GIÁ TRỊ nên phần lớn khung hình không cần đổi font lần nào.
+void useFont(TFT_eSPI &g, FontId f);
+
 // --- Lưới ---
 static const int16_t SCREEN_W   = 320;
 static const int16_t SCREEN_H   = 240;

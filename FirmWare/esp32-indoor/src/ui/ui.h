@@ -12,7 +12,6 @@
 //  1. loop() ĐỨNG HÌNH HÀNG GIÂY, KHÔNG PHẢI HÃN HỮU MÀ LÀ BÌNH THƯỜNG:
 //       connectWifi()  vòng while + delay(500) tới khi vào được mạng
 //       connectMqtt()  delay(2000) mỗi lần rc != 0
-//       DHT lỗi        delay(3000)
 //       IrIo::blast()  chặn 50-250ms
 //     Vẽ trong loop() thì đúng lúc mất mạng — lúc người dùng cần nhìn màn nhất
 //     — màn đứng im như node đã chết. Đó là kiểu hỏng tệ nhất của một bảng điều
@@ -33,7 +32,7 @@
 //
 //  Sở hữu phần cứng, chia dứt khoát:
 //     tác vụ UI  -> SPI màn hình, bus I2C (cảm ứng + DS1307), LEDC (đèn nền/còi)
-//     loop()     -> WiFi, MQTT, ESP-NOW, IR, DHT, NVS
+//     loop()     -> WiFi, MQTT, ESP-NOW, IR, NVS
 // ============================================================================
 namespace Ui {
 

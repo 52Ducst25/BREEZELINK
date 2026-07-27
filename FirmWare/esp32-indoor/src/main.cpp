@@ -1,10 +1,12 @@
 // ============================================================================
-//  Aircon — ESP32 DevKit V1 · node TRONG NHÀ (indoor) + MASTER + IR blaster
+//  Aircon — QR Box Advance Touch · node TRONG NHÀ (indoor) + MASTER + IR blaster
 // ----------------------------------------------------------------------------
-//  Node này gộp cả 3 vai trò của một hộ vào một bo:
-//    1. Đo DHT -> đẩy t_in/h_in lên cloud (đầu vào của thuật toán comfort)
+//  Node này gộp cả 4 vai trò của một hộ vào một bo:
+//    1. Đo nhiệt/ẩm (SHT3x qua I2C) -> đẩy t_in/h_in lên cloud (đầu vào của
+//       thuật toán comfort). Số đo do tác vụ UI lấy hộ vì bus I2C thuộc về nó.
 //    2. Nhận lệnh từ cloud -> phát hồng ngoại điều khiển máy lạnh + học remote
 //    3. Nhận ESP-NOW từ node outdoor -> chuyển tiếp lên MQTT hộ nó
+//    4. Hiển thị + cho điều khiển tại chỗ trên màn cảm ứng 2.8" (tác vụ lõi 0)
 //
 //  Vì sao gộp: backend chỉ chấp nhận DUY NHẤT một node node_type=indoor cho mỗi
 //  org (telemetry_service.get_device_by_org_and_node dùng scalar_one_or_none),
@@ -22,24 +24,20 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
-#include <DHT.h>
 #include "config.h"
 #include "espnow-relay.h"
 #include "slave-watch.h"
 #include "ir-io.h"
 #include "ir-store.h"
-#ifdef HAS_DISPLAY
 // Bo QR Box Advance Touch Screen: màn 2.8" chạy trên TÁC VỤ RIÊNG Ở LÕI 0.
 // Thiết kế giao diện + lý do phải tách lõi: ../../Interface/README.md và ui.h.
 // loop() dưới đây không vẽ một pixel nào — nó chỉ đổ số liệu sang và rút lệnh về.
 #include "ui/ui.h"
-#endif
 
 // Broker EMQX tự host trên VPS chạy plaintext 1883 (MQTT_TLS=false trong
 // docker-compose), nên dùng WiFiClient thường — KHÔNG phải WiFiClientSecure.
 static WiFiClient   net;
 static PubSubClient mqtt(net);
-static DHT          dht(DHT_PIN, DHT_TYPE);
 
 /// PubSubClient mặc định chỉ có bộ đệm 256 byte và ÂM THẦM VỨT mọi gói lớn hơn.
 /// Lệnh IR mang `ir_raw` vài trăm số -> vài KB JSON, và gói learn node gửi lên
@@ -73,6 +71,13 @@ static int  learnTemp = -1;
 // §8.3). Giao diện nói đúng chuyện đó thay vì hứa hão.
 static uint32_t lastCmdMs = 0;
 static bool     overrideLocal = false;
+
+// Bảng "chế độ nào đã có mã IR trong NVS", dùng để làm mờ nút chưa học trên màn.
+// PHẢI cache: tra thẳng NVS trong pushUiModel() là 18 khoá MỖI VÒNG loop(), và
+// mỗi khoá TRƯỢT lại khiến thư viện Preferences in một dòng ERROR — trên bo chưa
+// học mã nào thì log serial bị nhấn chìm hoàn toàn, đúng lúc cần log nhất để tìm
+// lỗi lắp đặt. Bảng chỉ đổi khi học được mã mới, nên tính lại đúng lúc đó.
+static bool     aliasDirty = true;   // true = phải quét lại NVS ở lần đẩy kế tiếp
 
 // Số đo ngoài trời và trạng thái máy lạnh gần nhất — CHỈ để hiển thị. Giữ riêng
 // chứ không đọc ké `pending`: pending.mode được điền ngay khi bóc gói, kể cả
@@ -262,6 +267,7 @@ static void takeCommand(JsonDocument &doc) {
         // theo UUID của server, node không có bảng tra ngược. Xem ir-store.h.
         if (pending.mode[0]) {
           IrStore::saveAlias(pending.mode, aliasTemp(pending.mode, pending.setpoint), codeId);
+          aliasDirty = true;   // bảng "đã có mã" đổi -> màn phải tính lại (xem pushUiModel)
         }
       }
     }
@@ -372,18 +378,8 @@ static void connectMqtt() {
 void setup() {
   Serial.begin(115200);
   delay(300);
-  // Tên bo lấy theo đích biên dịch, KHÔNG viết cứng: cùng mã nguồn này build
-  // cho hai bo, mà log ghi sai bo là thứ đánh lừa đúng lúc đang tìm lỗi.
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
-  const char *board = "ESP32-S3";
-#elif defined(CONFIG_IDF_TARGET_ESP32)
-  const char *board = "ESP32 DevKit V1";
-#else
-  const char *board = "ESP32 (khong ro bien the)";
-#endif
-  Serial.printf("\n== Aircon · %s · TRONG NHA (indoor + master + IR) ==\n", board);
+  Serial.println("\n== Aircon · QR Box Advance Touch · TRONG NHA (indoor + master + IR) ==");
 
-#ifdef HAS_DISPLAY
   // Dựng màn TRƯỚC WiFi, có chủ đích: tác vụ giao diện chạy ở lõi 0 nên nó vẫn
   // vẽ bình thường suốt lúc connectWifi()/connectMqtt() đang chặn lõi 1 hàng
   // chục giây. Người đi lắp nhìn thấy "MAT KET NOI" nhấp nháy — tức là node
@@ -392,9 +388,6 @@ void setup() {
   // Bo này KHÔNG có DHT: GPIO4 đã là I2C SCL. Nhiệt/ẩm đo bằng SHT3x trên chính
   // bus I2C đó, do tác vụ UI đọc hộ (Interface/README.md §3.1).
   Ui::begin();
-#else
-  dht.begin();
-#endif
   IrIo::begin(IR_TX_PIN, IR_RX_PIN);
   if (!IrStore::begin()) {
     // Không chặn khởi động: node vẫn chạy được, chỉ là mọi lệnh phải kèm ir_raw.
@@ -427,7 +420,6 @@ void setup() {
 
 static unsigned long lastPub = 0;
 
-#ifdef HAS_DISPLAY
 // --- Cầu nối sang tác vụ giao diện ------------------------------------------
 // Hai chiều, cả hai đều không chặn:
 //   UI -> loop(): Ui::pollCommand()  (người dùng vừa bấm GUI / TU DONG)
@@ -498,12 +490,23 @@ static void pushUiModel() {
   m.overrideLocal = overrideLocal;
   m.lastCmdSec    = lastCmdMs ? (millis() - lastCmdMs) / 1000 : 0;
 
-  for (uint8_t i = 0; i < 15; i++) {
-    if (IrStore::hasAlias("COOL", 16 + i)) m.coolMask |= (uint16_t)(1u << i);
+  // Quét NVS đúng một lần rồi giữ lại — xem ghi chú ở `aliasDirty`.
+  static uint16_t coolMask = 0;
+  static bool     hasDry = false, hasFan = false, hasOff = false;
+  if (aliasDirty) {
+    coolMask = 0;
+    for (uint8_t i = 0; i < 15; i++) {
+      if (IrStore::hasAlias("COOL", 16 + i)) coolMask |= (uint16_t)(1u << i);
+    }
+    hasDry = IrStore::hasAlias("DRY", -1);
+    hasFan = IrStore::hasAlias("FAN", -1);
+    hasOff = IrStore::hasAlias("OFF", -1);
+    aliasDirty = false;
   }
-  m.hasDry = IrStore::hasAlias("DRY", -1);
-  m.hasFan = IrStore::hasAlias("FAN", -1);
-  m.hasOff = IrStore::hasAlias("OFF", -1);
+  m.coolMask = coolMask;
+  m.hasDry   = hasDry;
+  m.hasFan   = hasFan;
+  m.hasOff   = hasOff;
 
   m.learning = IrIo::learning();
   copyStr(m.learnLabel, sizeof(m.learnLabel), learnLabel);
@@ -514,18 +517,24 @@ static void pushUiModel() {
   m.fw          = FW_VERSION;
   Ui::publish(m);
 }
-#endif  // HAS_DISPLAY
 
 void loop() {
   connectWifi();
   if (!mqtt.connected()) connectMqtt();
   mqtt.loop();
 
-#ifdef HAS_DISPLAY
+  // Rút lệnh người dùng bấm MỖI VÒNG (nút phải phản hồi ngay), nhưng ảnh chụp
+  // trạng thái chỉ đẩy sang giao diện theo nhịp 200ms — đúng nhịp vẽ lại của màn
+  // (Interface/README.md §7.4), mắt không phân biệt nhanh hơn. Đẩy mỗi vòng chỉ
+  // tốn công vô ích: mỗi lần đẩy kéo theo cả loạt WiFi.RSSI()/millis()/memcpy.
   Ui::Command panelCmd;
   while (Ui::pollCommand(panelCmd)) runPanelCommand(panelCmd);
-  pushUiModel();
-#endif
+
+  static unsigned long lastUiPush = 0;
+  if (millis() - lastUiPush >= 200) {
+    lastUiPush = millis();
+    pushUiModel();
+  }
 
   // Thi hành lệnh Ở ĐÂY chứ không trong callback: xem ghi chú ở struct pending.
   if (pending.hasFrame) {
@@ -559,27 +568,14 @@ void loop() {
   unsigned long now = millis();
   if (lastPub != 0 && now - lastPub < TELEMETRY_MS) return;  // chưa tới nhịp
 
-  float t, h;
-#ifdef HAS_DISPLAY
   // Cảm biến nằm trên bus I2C do tác vụ UI sở hữu (nó đo mỗi 2s). Ở đây chỉ
   // lấy số đã đo sẵn — KHÔNG delay(): số mới sẽ có ở vòng sau, mà lõi 1 còn
   // phải chạy mqtt.loop() và rút hàng đợi ESP-NOW.
+  float t, h;
   if (!Ui::readIndoor(t, h)) {
     Serial.println("Chua co so do SHT3x — kiem tra day I2C tren J1");
     return;
   }
-#else
-  t = dht.readTemperature();
-  h = dht.readHumidity();
-  if (isnan(t) || isnan(h)) {
-    // DHT22 có chu kỳ lấy mẫu tối thiểu 2s; thử lại đúng 2s là sát ngưỡng nên
-    // dễ hỏng liên tiếp. Chờ 3s để cảm biến có cơ hội hồi.
-    // NaN kéo dài = lỗi phần cứng (dây lỏng/mất nguồn), KHÔNG gửi số bịa.
-    Serial.println("Doc cam bien loi (NaN) — kiem tra day/nguon DHT");
-    delay(3000);
-    return;
-  }
-#endif
   lastPub = now;
 
   JsonDocument doc;

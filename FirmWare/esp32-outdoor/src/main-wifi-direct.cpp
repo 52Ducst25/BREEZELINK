@@ -1,27 +1,30 @@
 // ============================================================================
-//  Aircon — ESP8266 · node NGOÀI TRỜI (outdoor) · firmware TEST
+//  Aircon — ESP32 · node NGOÀI TRỜI (outdoor) · bản DỰ PHÒNG (WiFi + MQTT thẳng)
 // ----------------------------------------------------------------------------
-//  Đọc DHT11 rồi đẩy telemetry {t,h,ts,rssi,fw} lên topic
-//  bl/{ORG_ID}/{DEVICE_UUID}/telemetry qua MQTTS (EMQX Serverless, TLS 8883).
+//  Đọc DHT rồi đẩy telemetry {t,h,ts,rssi,fw} lên topic
+//  bl/{ORG_ID}/{DEVICE_UUID}/telemetry qua MQTT plaintext 1883 (EMQX tự host).
 //  Node này là "outdoor" -> app/web hiện là "Ngoài trời".
 //
-//  Giống bản ESP32-S3 trong nhà về hợp đồng backend (topic/payload/client-id/
-//  LWT). Khác: dùng ESP8266WiFi + BearSSL WiFiClientSecure.
+//  Giống node trong nhà về hợp đồng backend (topic/payload/client-id/LWT).
 //
-//  Chạy thật, node ngoài trời sẽ gửi về node master (ESP32) qua ESP-NOW thay vì
-//  tự lên MQTT — nhưng để TEST nhanh, bản này nối WiFi/MQTT thẳng. (../README.md)
+//  CHẠY THẬT thì dùng bản ESP-NOW (main-espnow-slave.cpp): node ngoài trời gửi
+//  về node trong nhà, không tự lên mạng. Bản này giữ làm ĐƯỜNG LÙI khi ESP-NOW
+//  trục trặc — nó không phụ thuộc node trong nhà nên tách được lỗi rất nhanh:
+//  nếu bản này lên số mà bản ESP-NOW không, lỗi nằm ở khâu ESP-NOW chứ không
+//  phải cảm biến hay backend.
+//      pio run -e esp32-wifi -t upload
 // ============================================================================
 #include <Arduino.h>
-#include <ESP8266WiFi.h>
+#include <WiFi.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include <DHT.h>
 #include "config.h"
 
-// Broker chạy plaintext 1883 -> WiFiClient thường (không BearSSL/TLS), nhẹ RAM.
+// Broker chạy plaintext 1883 -> WiFiClient thường (không TLS), nhẹ RAM.
 static WiFiClient   net;
 static PubSubClient mqtt(net);
-static DHT                       dht(DHT_PIN, DHT_TYPE);
+static DHT          dht(DHT_PIN, DHT_TYPE);
 
 static String tTelemetry, tStatus, tCmd;
 static void buildTopics() {
@@ -63,7 +66,7 @@ static void connectMqtt() {
 void setup() {
   Serial.begin(115200);
   delay(300);
-  Serial.println("\n== Aircon TEST · ESP8266 · NGOAI TROI (outdoor) ==");
+  Serial.println("\n== Aircon · ESP32 · NGOAI TROI (WiFi + MQTT thang) ==");
   dht.begin();
   buildTopics();
   connectWifi();

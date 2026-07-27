@@ -1,6 +1,6 @@
 #pragma once
 // ============================================================================
-//  Aircon — ESP32 DevKit V1  ·  node TRONG NHÀ (indoor) + MASTER + IR
+//  Aircon — QR Box Advance Touch Screen  ·  node TRONG NHÀ (indoor) + MASTER + IR
 //  BẢN MẪU — copy thành `config.h` rồi điền. (config.h bị gitignore vì chứa
 //  mật khẩu WiFi + token MQTT thật.)
 // ============================================================================
@@ -12,8 +12,7 @@
 //    backend chỉ chấp nhận DUY NHẤT 1 node node_type=indoor cho mỗi org
 //    (telemetry_service.get_device_by_org_and_node dùng scalar_one_or_none).
 //    Tạo thêm một hàng device "indoor" thứ hai sẽ làm worker ném
-//    MultipleResultsFound và toàn bộ luồng điều khiển tự động đứng. Node này
-//    THAY THẾ node ESP32-S3 cũ, nên nó phải mang chính UUID đó.
+//    MultipleResultsFound và toàn bộ luồng điều khiển tự động đứng.
 // ============================================================================
 
 // -------- 1) WiFi --------
@@ -35,33 +34,18 @@
 #define FW_VERSION     "indoor-1.0"
 
 // ============================================================================
-//  Phần cứng — sơ đồ chân đầy đủ ở ../README.md §6
+//  Phần cứng — bo QR Box Advance Touch Screen
+// ----------------------------------------------------------------------------
+//  Cách đọc ngược sơ đồ chân từ schematic + thiết kế giao diện:
+//  ../../Interface/README.md
+//
+//  CHÂN IR KHÔNG KHAI Ở ĐÂY. `IR_TX_PIN` (17) và `IR_RX_PIN` (5) nằm trong
+//  build_flags của platformio.ini, cùng chỗ với các cờ TFT_* — vì cả hai nhóm
+//  đều phải có mặt lúc biên dịch THƯ VIỆN, không chỉ lúc biên dịch src/.
+//
+//  KHÔNG có DHT trên bo này: GPIO4 đã là I2C SCL, và bo dùng hết sạch GPIO.
+//  Nhiệt/ẩm đo bằng SHT3x (I2C 0x44) — xem Interface/README.md §3.1.
 // ============================================================================
-//  Cảm biến DHT:  VCC -> 3V3 | GND -> GND | DATA -> GPIO4
-//  (Loại 4 chân rời: thêm điện trở 10k giữa DATA và 3V3.)
-//  Bọc #ifndef để platformio.ini ghi đè chân theo từng BO mà không phải sửa file
-//  này: cùng một mã nguồn chạy được cả ESP32 DevKit V1 lẫn ESP32-S3, vốn có sơ
-//  đồ chân khác nhau (xem phần build_flags của env esp32-s3).
-#ifndef DHT_PIN
-#define DHT_PIN        4
-#endif
-//  DHT22/AM2302 hay DHT11 — ĐẶT ĐÚNG LOẠI. Đặt sai vẫn đọc được (checksum pass)
-//  nhưng ra số vô lý: DHT22 mà khai DHT11 sẽ cho ~1.8°C / ~23%.
-#define DHT_TYPE       DHT22
-
-//  Mắt THU hồng ngoại (module "IR Receiver", chân OUT) -> GPIO27
-//    VCC -> 3V3 (KHÔNG dùng 5V: chân OUT sẽ đẩy 5V vào GPIO 3.3V) | GND -> GND
-#ifndef IR_RX_PIN
-#define IR_RX_PIN      27
-#endif
-//  LED PHÁT hồng ngoại (module "IR Transmitter", chân DAT) -> GPIO26
-//    VCC -> 3V3 | GND -> GND
-#ifndef IR_TX_PIN
-#define IR_TX_PIN      26
-#endif
-//  Chọn 26/27 vì chúng không phải chân strapping và không bị ràng buộc lúc boot
-//  (khác GPIO0/2/5/12/15). Đổi chân thì tránh: GPIO6-11 (nối flash), GPIO34-39
-//  (chỉ vào, không phát được).
 
 //  Thời gian chờ người dùng bấm remote khi vào chế độ HỌC (ms).
 //  30s: đủ để đi từ chỗ đặt node tới chỗ cầm remote, chưa lâu tới mức người
@@ -71,23 +55,12 @@
 //  Chu kỳ gửi số liệu (ms). 15s cho dễ theo dõi khi test; 30000 khi chạy thật.
 #define TELEMETRY_MS   15000UL
 
-// ============================================================================
-//  Bo QR Box Advance Touch Screen (env `qrbox-touch`) — chỉ dùng khi HAS_DISPLAY
 // ----------------------------------------------------------------------------
-//  Thiết kế giao diện + cách đọc ngược sơ đồ chân: ../../Interface/README.md
-//  Chân TFT (MOSI/SCK/CS/DC/RST) khai trong platformio.ini vì TFT_eSPI đọc
-//  chúng lúc BIÊN DỊCH THƯ VIỆN, không đọc file này.
-// ============================================================================
-#ifdef HAS_DISPLAY
-
-//  Bus I2C dùng chung: cảm ứng màn (0x38/0x5D/0x15) + DS1307 (0x68).
+//  Bus I2C dùng chung: cảm ứng màn (0x38/0x5D/0x15) + DS1307 (0x68) + SHT3x (0x44).
 //  ĐỪNG nâng lên 400kHz — DS1307 chỉ chịu 100kHz, xem Interface/README.md §2.1.
-#ifndef I2C_SCL_PIN
+// ----------------------------------------------------------------------------
 #define I2C_SCL_PIN        4
-#endif
-#ifndef I2C_SDA_PIN
 #define I2C_SDA_PIN        16
-#endif
 #define TOUCH_RST_PIN      25
 #define TOUCH_INT_PIN      33
 
@@ -95,12 +68,16 @@
 #define LCD_BACKLIGHT_PIN  27
 #define BUZZER_PIN         13
 
-//  OE của TXS0104. Hai chân IR đi qua bộ dịch mức này ra cổng P3, nên không
-//  kéo lên HIGH thì IR câm hoàn toàn. Ui::begin() đặt trong setup() — KHÔNG
-//  được kéo lên bằng trở ngoài (GPIO12 = MTDI, HIGH lúc reset là bo không boot).
+//  OE của TXS0104 (bộ dịch mức cho UART_1 ra cổng P3). IR KHÔNG đi qua IC này:
+//  cả hai chân IR nằm trên footprint module 4G không hàn (GPIO17/GPIO5, 3.3V
+//  thẳng), nên IR chạy được kể cả khi bỏ dòng này.
+//  Vẫn PHẢI đặt trong setup() chứ không kéo bằng trở ngoài: GPIO12 = MTDI, HIGH
+//  lúc reset thì ROM chọn mức flash 1.8V và bo không boot. Trên bo này R7 10k
+//  kéo GPIO12 XUỐNG GND — đúng chuẩn (đã đối chiếu schematic).
 #define EN_LEVEL_SHIFT_PIN 12
 
-//  1 hoặc 3 = nằm ngang 320x240. Đổi sang 3 nếu màn bị lộn ngược 180 độ.
+//  1 hoặc 3 = nằm ngang 320x240 (panel gốc là 240x320 dọc, xoay bằng phần mềm).
+//  Bo này dùng 1 — đã đo trên bo thật: 3 cho ra hình ĐÚNG NHƯNG LỘN NGƯỢC 180 độ.
 #define TFT_ROTATION       1
 
 //  Xoay/lật toạ độ cảm ứng về hệ của TFT. Mỗi lô module dán tấm cảm ứng lệch
@@ -113,5 +90,3 @@
 //  Việt Nam UTC+7, không có giờ mùa hè — dấu trừ trong "ICT-7" là đúng chuẩn
 //  POSIX (nó ghi độ lệch cần CỘNG vào giờ địa phương để ra UTC).
 #define TZ_INFO            "ICT-7"
-
-#endif  // HAS_DISPLAY

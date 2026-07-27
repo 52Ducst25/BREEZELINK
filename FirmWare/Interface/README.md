@@ -24,7 +24,7 @@ Touch Screen*, rev 1.2, 9 trang.
 | Khối | Linh kiện | Ghi chú |
 |---|---|---|
 | MCU | **ESP32‑WROOM‑32E‑N8** | 8 MB flash, **không PSRAM** |
-| Màn hình | **ILI9341 2.8″ (GMT028‑03)**, SPI 4 dây | J2 18 chân, **không nối MISO** |
+| Màn hình | **YT280S030 2.8″ 240×320**, SPI 4 dây | J2 18 chân, **không nối MISO** · chip **ST7789V** — xem cảnh báo §2.2 |
 | Cảm ứng | Điện dung, **I²C** (J1 6 chân: SCL/SDA/INT/RST) | chip nằm trên module màn |
 | RTC | **DS1307Z** + pin VBAT + thạch anh 32.768 kHz | cùng bus I²C với cảm ứng |
 | Còi | MLT‑8530 qua Q7 BSS138 | GPIO13 |
@@ -47,15 +47,15 @@ vào P3, mạch AUTO BOOT (Q1/Q2 + DTR/RTS) tự đưa vào chế độ nạp nh
 |---|---|---|---|
 | 0 | `ESP_BOOT` | strapping, mạch auto‑boot | |
 | 1 / 3 | `UART_0_TX/RX` | Serial debug → P3 | log firmware ra đây |
-| 2 | `UART_1_RX` | UART1 qua TXS0104 → P3 | strapping · **mức 5 V ở đầu ngoài** |
+| 2 | `UART_1_RX` | UART1 qua TXS0104 → P3 | strapping · mức 5 V ở đầu ngoài · **không dùng** |
 | 4 | `TOUCH_SCREEN_SCL` | **I²C SCL** (cảm ứng + DS1307) | R2 kéo lên 10k |
-| 5 | `UART_2_TX` → A7680C RX | strapping · R6 kéo lên 100k | |
+| 5 | `UART_2_TX` → A7680C RX | strapping · R6 kéo lên 100k | **IR thu** (§3.1) — dùng được vì không hàn module 4G |
 | 12 | `EN_LEVEL_SHIFT` | OE của TXS0104 | **strapping MTDI — phải LOW lúc boot** |
 | 13 | `BUZZER` | còi | |
 | 14 | `SIM_PWD_CNT` | bật/tắt module 4G (Q4) | R11 kéo **xuống** 10k |
-| 15 | `UART_1_TX` | UART1 qua TXS0104 → P3 | strapping · mức 5 V ở đầu ngoài |
+| 15 | `UART_1_TX` | UART1 qua TXS0104 → P3 | strapping · mức 5 V ở đầu ngoài · **không dùng** |
 | 16 | `TOUCH_SCREEN_SDA` | **I²C SDA** | R3 kéo lên 10k |
-| 17 | `UART_2_RX` ← A7680C TX | R5 kéo lên 100k | |
+| 17 | `UART_2_RX` ← A7680C TX | R5 kéo lên 100k | **IR phát** (§3.1) — dùng được vì không hàn module 4G |
 | 18 | `LCD_MOSI` | **TFT MOSI** | |
 | 19 | `LCD_CS` | **TFT CS** | |
 | 21 | `LCD_A0` | **TFT DC** | |
@@ -82,6 +82,25 @@ vào P3, mạch AUTO BOOT (Q1/Q2 + DTR/RTS) tự đưa vào chế độ nạp nh
    đọc ra giờ rác *không báo lỗi* — checksum BCD vẫn hợp lệ.
 2. **Địa chỉ 0x38 đã bị chiếm** nếu module cảm ứng dùng FT6236. Đừng cắm thêm
    AHT20 (cũng 0x38) vào bus này — xem §3.
+   *(Bo thực tế đo được là **GT911**, nằm ở 0x5D/0x14 — nhưng vẫn giữ SHT3x ở
+   0x44 vì mỗi lô module cảm ứng một chip khác nhau, không đánh cược vào 0x38.)*
+
+### 2.2 Chip màn là ST7789V, KHÔNG phải ILI9341 như schematic ghi
+
+Schematic (trang 6) ghi linh kiện là `ILI9341SP4`, nhưng module YT280S030 được
+nhà sản xuất bán với **hai tuỳ chọn chip — ILI9341 *hoặc* ST7789V**
+([eya-display.com/yt280s030](https://www.eya-display.com/yt280s030/)) và bo này
+lắp bản **ST7789V**. Firmware phải khai `-D ST7789_DRIVER=1`.
+
+Khai nhầm `ILI9341_DRIVER` **rất dễ chẩn đoán sai**, vì màn không chết hẳn: hai
+chip dùng chung nhiều lệnh nên `fillScreen`/`fillRect` vẫn ra đúng màu, chỉ chữ
+và hình vẽ là nhiễu/xé. Triệu chứng đó trông y hệt nhiễu SPI hoặc tranh chấp đa
+lõi, và đã từng làm mất nhiều giờ đi tìm nhầm hướng.
+
+**Cách phân biệt trong 1 lần nạp:** bật `-D LCD_SELFTEST=1`. Nó vẽ hình mốc bằng
+lệnh đơn giản rồi đóng băng, *ngay trong `setup()` ở lõi 1, trước khi tác vụ giao
+diện lõi 0 chạy*. Mốc sạch mà khung giao diện vẽ ngay sau đó lại vỡ → loại hẳn
+nghi vấn đa lõi và nhiễu đường truyền, chỉ còn khả năng sai driver.
 
 ---
 
@@ -97,29 +116,33 @@ Firmware indoor cần 3 chân mà bo này đã dùng hết:
 
 ### 3.1 Phương án đã chọn
 
-**IR → cổng P3 (EXTERNAL UART), qua TXS0104.**
-`UART_1_TX` = GPIO15 → **IR phát**, `UART_1_RX` = GPIO2 → **IR thu**. Đây là hai
-chân duy nhất được đưa ra header 2.54 mm, có sẵn +5 V/GND ngay cạnh, và đi qua
-bộ dịch mức 3.3 V↔5 V nên module IR chạy 5 V (tầm phát xa hơn hẳn 3.3 V).
-TXS0104 đạt 24 Mbps ở chế độ đẩy‑kéo nên sóng mang 38 kHz (chu kỳ 26 µs) không
-thành vấn đề.
+**Cả hai chân IR mượn của module 4G A7680C — module mà dự án này không dùng
+(§1) nên không hàn lên bo, hai chân của nó bỏ không:**
 
-Ba việc bắt buộc kèm theo:
+```
+IR phát -> GPIO17 = UART_2_RX  (nối chân TX của A7680C), R5 kéo lên 100 kΩ
+IR thu  -> GPIO5  = UART_2_TX  (nối chân RX của A7680C), R6 kéo lên 100 kΩ
+```
 
-- **`EN_LEVEL_SHIFT` (GPIO12) phải kéo lên HIGH sau khi boot** thì TXS0104 mới
-  thông. Nhưng GPIO12 là **MTDI**: nếu nó HIGH lúc reset, ROM bootloader chọn
-  mức flash 1.8 V và bo **không boot**. Vì vậy `Ui::begin()` chỉ được đặt GPIO12
-  HIGH *trong `setup()`*, và tuyệt đối không cấu hình pull‑up ngoài trên chân đó.
-- GPIO2/GPIO15 cũng là strapping. TXS0104 có điện trở kéo lên yếu ~10 kΩ ở cả
-  hai phía; GPIO15 bị kéo lên là **đúng** yêu cầu boot, GPIO2 bị kéo lên là
-  **sai** (GPIO2 phải LOW/thả nổi lúc boot). Cách xử lý: giữ GPIO12 = LOW cho
-  tới hết `setup()` như trên → lúc reset TXS0104 đang ở chế độ trở kháng cao,
-  không kéo GPIO2 lên. Đây chính là lý do thứ tự khởi tạo trong `setup()` không
-  được đảo.
-- IR thu là ngõ ra cực máng hở, IR phát là ngõ vào — **hướng tín hiệu ngược
-  nhau**, mà TXS0104 tự dò hướng theo cạnh đầu tiên. Chạy được, nhưng nếu thấy
-  khung IR học vào bị méo thì nối thẳng mắt thu vào GPIO2 (bỏ qua bộ dịch mức,
-  cấp mắt thu bằng 3.3 V) — đây là đường lùi đã tính trước.
+Cả hai chạy **3.3 V thẳng**: đường `UART_2` **không** đi qua TXS0104, nên IR
+không phụ thuộc `EN_LEVEL_SHIFT` — đây là lý do chính chọn cặp chân này thay vì
+cặp `UART_1` (GPIO15/GPIO2) ra cổng P3 như bản trước tài liệu từng ghi. Đổi lại
+không có tầm phát xa như đi 5 V, và **không chân nào ra header**: phải hàn dây
+thẳng vào pad chân module trên bo.
+
+**ĐIỀU KIỆN BẮT BUỘC: không hàn module A7680C lên bo.** Hàn vào là hai chân có
+hai chủ, IR câm và module 4G cũng không chạy.
+
+Ràng buộc lúc boot:
+
+- GPIO5 là **chân strapping** (chọn timing SDIO slave), phải HIGH lúc reset —
+  R6 100 kΩ kéo lên sẵn, và ngõ ra mắt thu IR ở trạng thái nghỉ cũng là HIGH,
+  nên đúng yêu cầu. GPIO17 không phải chân strapping.
+- **`EN_LEVEL_SHIFT` (GPIO12) vẫn phải kéo HIGH trong `setup()`** cho cổng
+  `UART_1` ra P3, nhưng **IR không còn cần nó**. GPIO12 là **MTDI**: HIGH lúc
+  reset thì ROM chọn mức flash 1.8 V và bo **không boot** — nên tuyệt đối không
+  kéo lên bằng trở ngoài. Trên bo này **R7 10 kΩ kéo GPIO12 XUỐNG GND**, đúng
+  chuẩn (đã đối chiếu schematic trang 5).
 
 **DHT → bỏ, thay bằng cảm biến I²C.**
 Không còn chân thứ ba cho DHT, và DHT là giao thức một dây hai chiều — ép qua
@@ -138,17 +161,18 @@ TXS0104 rất dễ hỏng theo kiểu khó tìm. Bus I²C sẵn có (GPIO4/16) �
 SDA, chân 1 = 3V3, chân 6 = GND) hoặc từ chân DS1307. Đây là **sửa phần cứng**,
 không tránh được — cần nói rõ với người lắp.
 
-> Nếu bắt buộc giữ DHT: chân duy nhất còn dùng được là **GPIO17** (`UART_2_RX`,
-> trở kéo lên 100 kΩ) với điều kiện **không hàn module 4G A7680C**. Phải hàn vào
-> pad của module, không có header. Vẫn phải thêm trở kéo 4.7 kΩ vì 100 kΩ quá
-> yếu cho DHT.
+> GPIO17 (`UART_2_RX`, chân TX của A7680C) giờ đã dùng cho **IR phát** (§3.1),
+> nên không còn là phương án dự phòng cho DHT nữa — giữ DHT thì bắt buộc phải
+> qua đường I²C (SHT3x) như trên.
 
 ### 3.2 Bảng chân mới cho node indoor trên bo này
 
 ```
-IR phát   -> GPIO15  (P3 chân UART_1_TX, mức 5V)
-IR thu    -> GPIO2   (P3 chân UART_1_RX, mức 5V)
+IR phát   -> GPIO17  (chân TX của A7680C — hàn thẳng vào pad, 3.3V)   ┐ KHÔNG hàn
+IR thu    -> GPIO5   (chân RX của A7680C — hàn thẳng vào pad, 3.3V)   ┘ module 4G
 EN dịch mức -> GPIO12 (đặt HIGH trong setup(), KHÔNG kéo lên bằng trở ngoài)
+             — chỉ cho UART_1 ra P3; IR KHÔNG đi qua nó
+Màn hình  -> ST7789V, MOSI 18 / SCK 22 / CS 19 / A0(DC) 21 / RST 23, xoay ngang (rotation 1)
 Nhiệt/ẩm  -> SHT3x trên I²C 0x44 (SCL GPIO4 / SDA GPIO16, 100 kHz)
 ```
 
@@ -192,26 +216,44 @@ Ba luật nội dung, kế thừa nguyên văn từ app:
 | `warning` | `#F5A623` | `0xF524` |
 | `thermalCold` | `#3AA0FF` | `0x3D1F` |
 
-### 4.3 Chữ — và giới hạn tiếng Việt
+### 4.3 Chữ — tiếng Việt CÓ DẤU bằng font VLW
 
-Font GFX của TFT_eSPI **chỉ có ASCII**. `LÀM LẠNH` sẽ ra ô vuông hoặc mất dấu.
+Font GFX của TFT_eSPI (`FreeSansBold12pt7b`…) đánh chỉ số theo **một byte**, chỉ
+phủ ASCII `0x20`–`0x7E`. Viết `LÀM LẠNH` bằng font GFX sẽ ra ô vuông hoặc rụng
+dấu. Vì vậy màn hình dùng **font VLW** (smooth font, đánh chỉ số theo mã
+Unicode) — bản trước của tài liệu này chốt "viết không dấu cho rẻ", nay đã đổi.
 
-Bản này viết **tiếng Việt không dấu** trên màn (`LAM LANH`, `TRONG NHA`), đúng
-kiểu log serial của firmware sẵn có. Chọn thế vì nó đọc được ngay, không tốn
-flash, và không giả vờ hỗ trợ Unicode.
+Font **nhúng thẳng vào flash** dưới dạng mảng `PROGMEM`, không để trong SPIFFS:
+`tft.loadFont(const uint8_t*)` đọc được từ flash, nên không phải chia phân vùng
+SPIFFS và không phải nhớ chạy thêm `pio run -t uploadfs` mỗi lần nạp — đúng loại
+bước phụ mà người đi lắp sẽ quên, và quên thì màn trắng trơn không báo lỗi gì.
 
-Muốn có dấu thì nạp font **VLW** (`SMOOTH_FONT`) chứa đủ glyph tiếng Việt vào
-SPIFFS rồi `tft.loadFont()`. Chi phí: ~40–80 KB SPIFFS + một bước build nữa.
-Ghi lại đây để lần sau không phải điều tra lại.
+Sinh lại font: `python tools/make_vlw.py` (cần Pillow). Script đọc TTF Arial của
+Windows, rasterise từng glyph rồi ghi ra `src/ui/fonts/*.h`. Chỉ phải chạy lại
+khi đổi cỡ chữ hoặc đổi bộ ký tự.
 
-Cỡ chữ dùng:
+> **BẪY LỚN NHẤT:** khi đã `loadFont()` thì `setFreeFont()` **và** `setTextFont()`
+> đều **bị bỏ qua** — không trộn được VLW với font GFX trong cùng một khung hình.
+> Nên toàn bộ phân cấp cỡ chữ phải dựng lại bằng VLW, và mọi chuỗi đưa lên màn
+> phải là UTF-8 (`drawString` tự giải mã qua `decodeUTF8`).
 
-| Vai trò | Font |
-|---|---|
-| Số lớn (nhiệt độ, setpoint) | `FreeSansBold24pt7b` |
-| Tiêu đề, nhãn nút | `FreeSansBold12pt7b` |
-| Nhãn/giá trị phụ | `FreeSans9pt7b` |
-| Thanh trạng thái, chú thích | Font 1 (GLCD 6×8) |
+| Vai trò | Font VLW | Nguồn | Bộ ký tự |
+|---|---|---|---|
+| Số lớn (nhiệt độ, setpoint) | `VietFontBig` 34px | Arial Bold | chỉ chữ số + `°C` (18 glyph) |
+| Tiêu đề, nhãn nút | `VietFontLabel` 17px | Arial Bold | đủ 230 glyph |
+| Nhãn phụ, thanh trạng thái | `VietFontSmall` 13px | Arial | đủ 230 glyph |
+
+Font số lớn **cố ý không có glyph tiếng Việt** — nó chỉ hiện nhiệt độ nên cắt
+xuống 18 glyph làm nó nhẹ đi ~15 lần. Tổng cả ba cỡ: **~70 KB flash**.
+
+Bộ 230 glyph = ASCII in được + `°` + **134 ký tự tiếng Việt dựng sẵn**. Cố ý
+KHÔNG cắt bớt theo "những chữ giao diện đang dùng": thêm một dòng chữ mới sau
+này mà thiếu glyph thì chữ **biến mất trên màn trong khi build vẫn xanh** — lỗi
+im lặng, rất khó lần ra.
+
+Đổi cỡ chữ có chi phí thật (một lượt `malloc` + đọc lại bảng 230 glyph từ
+flash), nên `Theme::useFont()` bỏ qua khi cỡ không đổi. Nhờ giao diện chỉ vẽ lại
+những trường **đổi giá trị**, phần lớn khung hình không đổi font lần nào.
 
 ### 4.4 Vì sao KHÔNG nhúng ảnh nền như bản Lopaka
 
@@ -520,7 +562,10 @@ khác biệt giữa các bo chỉ là sơ đồ chân.
 | Triệu chứng | Nguyên nhân thường gặp |
 |---|---|
 | Trắng tinh, không gì hiện | Đèn nền OK nhưng SPI chết → kiểm tra `TFT_MOSI=18` `TFT_SCLK=22` (không phải chân VSPI mặc định) |
+| **Nền/khối màu đúng nhưng CHỮ và hình vẽ nhiễu/xé** | **Sai driver** — phải là `ST7789_DRIVER`, không phải `ILI9341_DRIVER` (§2.2). Đây KHÔNG phải nhiễu SPI: hạ tần số bao nhiêu cũng không hết |
 | Sọc/nhiễu khi vẽ nhanh | 40 MHz qua ma trận GPIO là sát trần → hạ `SPI_FREQUENCY` xuống 27 MHz |
+| Hình đúng nhưng lộn ngược 180° | Đổi `TFT_ROTATION` giữa 1 và 3 (cả hai đều là ngang 320×240) |
+| **Lặp `rst:0x3 (SW_RESET)` mỗi ~28 ms, không in nổi dòng log nào** | KHÔNG phải chết phần cứng. Bảng phân vùng vượt mốc 4 MB — dùng `huge_app.csv`, đừng dùng `default_8MB.csv` (xem `platformio.ini`) |
 | Tối om | Chưa đặt PWM đèn nền, hoặc `DO SANG` = 0 |
 | Chạm lệch trục | Đổi `TOUCH_SWAP_XY` / `TOUCH_INVERT_X` / `TOUCH_INVERT_Y` trong `config.h` |
 | Cảm ứng không nhận | `Touch::chip()` in ra lúc boot; `NONE` = sai địa chỉ hoặc chưa nhả RST (GPIO25) |
@@ -530,10 +575,12 @@ khác biệt giữa các bo chỉ là sơ đồ chân.
 
 ## 10. Còn lại phải làm
 
-- [ ] **Đấu dây** SHT3x vào J1 (chân 1 = 3V3, 2 = SCL, 3 = SDA, 6 = GND) và hai
-      module IR vào P3 — *driver và firmware đã xong, đây là việc phần cứng*
+- [ ] **Đấu dây** SHT3x vào J1 (chân 1 = 3V3, 2 = SCL, 3 = SDA, 6 = GND), module
+      IR thu vào P3, và module IR phát hàn trực tiếp vào pad TX của A7680C
+      (GPIO17, §3.1 — **không hàn module 4G** lên bo) — *driver và firmware đã
+      xong, đây là việc phần cứng*
 - [ ] Chỉnh `TOUCH_SWAP_XY` / `TOUCH_INVERT_*` sau khi chạm thử trên bo thật (§9.1)
 - [ ] Topic `override` phía backend (§8.3)
-- [ ] Font VLW tiếng Việt có dấu (§4.3)
+- [x] ~~Font VLW tiếng Việt có dấu~~ — xong, xem §4.3 và `tools/make_vlw.py`
 - [ ] Đo lại SW1/SW2 trên bo: schematic ghi "INTERNAL BUTTON" nhưng dây đi vào
       khối `PULSE OUT CONFIG`, chưa chắc là nút bấm cho người dùng

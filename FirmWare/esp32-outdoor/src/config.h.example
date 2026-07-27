@@ -1,37 +1,43 @@
 #pragma once
 // ============================================================================
-//  Aircon — ESP32-S3  ·  node MASTER / TRONG NHÀ (indoor)
+//  Aircon — ESP32 DevKit V1  ·  node NGOÀI TRỜI (outdoor)
 //  BẢN MẪU — copy thành `config.h` rồi điền. (config.h bị gitignore vì chứa
 //  mật khẩu WiFi + token MQTT thật.)
 // ============================================================================
-//  Lấy ORG_ID / DEVICE_UUID / MQTT_PASSWORD ở đâu?
-//    Web admin -> Khách hàng -> mở node (Trong nhà) -> mục "Nạp firmware".
-//    MQTT_USERNAME luôn = DEVICE_UUID.
+//  Lấy giá trị ở: Web admin -> Khách hàng -> mở node (Ngoài trời) -> "Nạp firmware".
+//  DEVICE_UUID/MQTT_PASSWORD khác node trong nhà; ORG_ID + MQTT_HOST thì giống.
 // ============================================================================
 
 // -------- 1) WiFi --------
+//  Env `esp32-espnow` KHÔNG đăng nhập WiFi — nó chỉ QUÉT để biết router đang
+//  phát ở kênh nào rồi bám theo (ESP-NOW bắt buộc hai bên cùng kênh). Nên với
+//  env đó chỉ WIFI_SSID là có tác dụng, WIFI_PASSWORD để nguyên cũng chạy.
+//  Env `esp32-wifi` (dự phòng) thì cần cả hai.
 #define WIFI_SSID      "TEN_WIFI"
 #define WIFI_PASSWORD  "MAT_KHAU_WIFI"
 
 // -------- 2) MQTT (EMQX tự host trên VPS — plaintext 1883, KHÔNG TLS) --------
-//  LƯU Ý: panel web ghi MQTT_HOST = "emqx" — đó là tên service nội bộ Docker,
-//  ESP không phân giải được. Phải dùng IP/domain công khai của server.
+//  CHỈ env `esp32-wifi` dùng tới. Panel web ghi MQTT_HOST = "emqx" (tên service
+//  nội bộ Docker) — ESP phải dùng IP/domain công khai của server.
 #define MQTT_HOST      "IP_CONG_KHAI_SERVER"
 #define MQTT_PORT      1883
-//  Broker đã bật authentication (built-in DB): user = DEVICE_UUID, pass = token.
-#define MQTT_USERNAME  "DAN_DEVICE_UUID"
-#define MQTT_PASSWORD  "DAN_MQTT_PASSWORD"
+#define MQTT_USERNAME  "DAN_DEVICE_UUID_NGOAI_TROI"
+#define MQTT_PASSWORD  "DAN_MQTT_PASSWORD_NGOAI_TROI"
 
 // -------- 3) Định danh node (khớp hàng devices trên web) --------
+//  DEVICE_UUID dùng cho CẢ HAI env: bản ESP-NOW gửi kèm uuid này trong gói tin
+//  để node trong nhà biết publish vào topic nào mà không cần bảng MAC->uuid.
 #define ORG_ID         "DAN_ORG_ID"
-#define DEVICE_UUID    "DAN_DEVICE_UUID"
-#define FW_VERSION     "test-1.0"
+#define DEVICE_UUID    "DAN_DEVICE_UUID_NGOAI_TROI"
+#define FW_VERSION     "outdoor-1.0"
 
 // ============================================================================
 //  Phần cứng — cắm cảm biến theo ../README.md
 // ============================================================================
-//  Cảm biến:  VCC -> 3V3   |   GND -> GND   |   DATA -> GPIO4
+//  Cảm biến DHT:  VCC -> 3V3 | GND -> GND | DATA -> GPIO4
 //  (Loại 4 chân rời: thêm điện trở 10k giữa DATA và 3V3.)
+//  GPIO4 không phải chân strapping, an toàn lúc boot. Đổi chân thì tránh
+//  GPIO6-11 (nối flash) và GPIO34-39 (chỉ vào, DHT cần hai chiều).
 #define DHT_PIN        4
 //  DHT22/AM2302 hay DHT11 — ĐẶT ĐÚNG LOẠI. Đặt sai vẫn đọc được (checksum pass)
 //  nhưng ra số vô lý: DHT22 mà khai DHT11 sẽ cho ~1.8°C / ~23%.

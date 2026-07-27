@@ -4,9 +4,8 @@
 // ============================================================================
 //  Ngoại vi rời của bo QR Box Advance: đèn nền, còi, đồng hồ DS1307.
 // ----------------------------------------------------------------------------
-//  Gom vào một chỗ vì cả ba đều là "phần cứng riêng của bo màn hình" — bo ESP32
-//  DevKit không có cái nào. Nhờ vậy toàn bộ phần này nằm gọn sau #ifdef
-//  HAS_DISPLAY và mã nguồn vẫn build được cho hai bo cũ.
+//  Gom vào một chỗ vì cả ba đều là ngoại vi rời của bo, không liên quan gì tới
+//  logic điều hoà — tách ra thì ui.cpp chỉ còn phần vẽ và chạm.
 //
 //  DS1307 nằm chung bus I2C với cảm ứng, nên Touch::begin() phải chạy TRƯỚC
 //  (nó là nơi gọi Wire.begin + ghim 100kHz).

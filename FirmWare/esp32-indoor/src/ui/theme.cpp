@@ -1,6 +1,29 @@
 #include "theme.h"
+#include "fonts/vietfontsmall.h"
+#include "fonts/vietfontlabel.h"
+#include "fonts/vietfontbig.h"
 
 namespace Theme {
+
+// 0xFF = "chưa nạp font nào", để lần useFont() đầu tiên luôn nạp thật.
+static uint8_t curFont = 0xFF;
+
+void useFont(TFT_eSPI &g, FontId f) {
+  if (f == curFont) return;
+  // loadFont() tự gọi unloadFont() cho font cũ (Smooth_font.cpp), không cần
+  // giải phóng thủ công — làm thêm chỉ tổ giải phóng hai lần.
+  switch (f) {
+    case F_SMALL: g.loadFont(VietFontSmall); break;
+    case F_LABEL: g.loadFont(VietFontLabel); break;
+    case F_BIG:   g.loadFont(VietFontBig);   break;
+  }
+  curFont = f;
+}
+
+void fontBegin(TFT_eSPI &g) {
+  curFont = 0xFF;
+  useFont(g, F_SMALL);
+}
 
 uint16_t thermalColor(float c) {
   if (isnan(c)) return whiteDim;      // không có số -> màu "không biết", không phải màu lạnh
@@ -48,7 +71,7 @@ void button(TFT_eSPI &g, const Rect &r, const char *label, bool active, bool ena
   const uint16_t fg     = !enabled ? whiteDim : white;
 
   chamferRect(g, r, bg, bd);
-  g.setFreeFont(&FreeSansBold12pt7b);
+  useFont(g, F_LABEL);
   g.setTextColor(fg, bg);
   g.setTextDatum(MC_DATUM);
   g.drawString(label, r.x + r.w / 2, r.y + r.h / 2 + 1);
@@ -56,9 +79,11 @@ void button(TFT_eSPI &g, const Rect &r, const char *label, bool active, bool ena
 }
 
 void badge(TFT_eSPI &g, int16_t x, int16_t y, const char *text, uint16_t color) {
-  g.setTextFont(1);
-  g.setTextSize(1);
-  const int16_t w = (int16_t)strlen(text) * 6 + 12;
+  useFont(g, F_SMALL);
+  // Đo bề rộng THẬT bằng textWidth() thay vì nhân 6px/ký tự như bản dùng font
+  // GLCD: VLW là font tỉ lệ (chữ "i" hẹp hơn "M"), mà chuỗi tiếng Việt còn có
+  // dấu — đoán bằng công thức thì huy hiệu lúc thừa lúc cụt mất chữ.
+  const int16_t w = (int16_t)g.textWidth(text) + 12;
   const Rect r = {x, y, w, 16};
   chamferRect(g, r, carbonPanel, color, 3);
   g.setTextColor(color, carbonPanel);

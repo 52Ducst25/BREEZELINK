@@ -63,7 +63,7 @@ bool readIndoor(float &tempC, float &humidity) {
 void reply(const char *msg) {
   if (!replyQ) return;
   Reply r;
-  strncpy(r.msg, msg ? msg : "DA GUI LENH", sizeof(r.msg) - 1);
+  strncpy(r.msg, msg ? msg : "Đã gửi lệnh", sizeof(r.msg) - 1);
   r.msg[sizeof(r.msg) - 1] = '\0';
   xQueueSend(replyQ, &r, 0);
 }
@@ -72,10 +72,10 @@ void reply(const char *msg) {
 //  Từ đây trở xuống: CHỈ tác vụ UI chạm vào. Không cần khoá.
 // ===========================================================================
 enum Screen : uint8_t { S_HOME = 0, S_CONTROL, S_INFO, S_SETTINGS };
-static const char *NAV_LABEL[4] = {"TRANG CHU", "DIEU KHIEN", "THONG TIN", "CAI DAT"};
+static const char *NAV_LABEL[4] = {"TRANG CHỦ", "ĐIỀU KHIỂN", "THÔNG TIN", "CÀI ĐẶT"};
 
 static const char *MODE_WIRE[4]  = {"COOL", "DRY", "FAN", "OFF"};
-static const char *MODE_LABEL[4] = {"LANH", "KHO", "QUAT", "TAT"};
+static const char *MODE_LABEL[4] = {"LẠNH", "KHÔ", "QUẠT", "TẮT"};
 
 static Screen screen = S_HOME;
 static bool   needStatic = true;
@@ -132,18 +132,6 @@ static const uint32_t REPAINT_MS = 200;   // mắt không phân biệt nhanh hơ
 //  Tiện ích vẽ
 // ===========================================================================
 
-/// Ký hiệu độ C: font GFX chỉ có ASCII 0x20..0x7E nên không có ký tự "°".
-/// Vẽ tay một vòng tròn nhỏ rẻ hơn nhiều so với nhúng cả một font Unicode.
-static void degreeC(int16_t x, int16_t y, uint16_t color, uint16_t bg) {
-  tft.fillRect(x, y, 14, 12, bg);
-  tft.drawCircle(x + 2, y + 3, 2, color);
-  tft.setTextFont(1);
-  tft.setTextSize(1);
-  tft.setTextColor(color, bg);
-  tft.setTextDatum(TL_DATUM);
-  tft.drawString("C", x + 7, y + 2);
-}
-
 /// "28.4" hoặc "--" khi thiếu số. KHÔNG bao giờ trả "0.0": bịa số đo là kiểu
 /// sai tệ nhất ở đây (xem ghi chú trong models/comfort_preview.dart).
 static void fmt1(float v, char *out, size_t n) {
@@ -156,10 +144,9 @@ static void fmtInt(float v, char *out, size_t n, const char *suffix) {
   else          snprintf(out, n, "%d%s", (int)lroundf(v), suffix);
 }
 
-static void text(const char *s, const GFXfont *font, int16_t x, int16_t y,
+static void text(const char *s, FontId font, int16_t x, int16_t y,
                  uint8_t datum, uint16_t fg, uint16_t bg, uint16_t pad) {
-  if (font) tft.setFreeFont(font);
-  else      { tft.setTextFont(1); tft.setTextSize(1); }
+  useFont(tft, font);
   tft.setTextDatum(datum);
   tft.setTextColor(fg, bg);
   // setTextPadding xoá chữ cũ NGAY TRONG lượt vẽ chữ mới. Đây là lý do bản này
@@ -175,6 +162,16 @@ static void dot(int16_t x, int16_t y, uint16_t color) {
   tft.fillCircle(x, y, 4, color);
 }
 
+/// Ký hiệu "°C".
+///
+/// Bản trước phải VẼ TAY một vòng tròn nhỏ rồi ghép chữ "C" bên cạnh, vì font
+/// GFX chỉ có ASCII 0x20..0x7E, không có ký tự "°". Nay font VLW đã chứa nó
+/// (xem tools/make_vlw.py) nên in thẳng — hết cảnh vòng tròn lệch tâm so với
+/// chữ ở mỗi cỡ chữ khác nhau.
+static void degreeC(int16_t x, int16_t y, uint16_t color, uint16_t bg) {
+  text("°C", F_SMALL, x, y, TL_DATUM, color, bg, 20);
+}
+
 // ===========================================================================
 //  Thanh trạng thái + thanh điều hướng
 // ===========================================================================
@@ -182,7 +179,7 @@ static void drawStatusStatic() {
   tft.fillRect(0, 0, SCREEN_W, STATUS_H, carbon);
   tft.drawFastHLine(0, STATUS_H - 1, SCREEN_W, carbonLine);
   tft.fillRect(6, 7, 8, 8, ice);
-  text("AIRCON", nullptr, 20, 8, TL_DATUM, white, carbon, 0);
+  text("AIRCON", F_SMALL, 20, 8, TL_DATUM, white, carbon, 0);
 }
 
 static void drawStatusDynamic(const Model &m) {
@@ -201,7 +198,7 @@ static void drawStatusDynamic(const Model &m) {
     char buf[8];
     if (ok) snprintf(buf, sizeof(buf), "%02u:%02u", hh, mm);
     else    snprintf(buf, sizeof(buf), "--:--");   // chưa đặt giờ -> nói thật
-    text(buf, nullptr, 314, 8, TR_DATUM, white, carbon, 40);
+    text(buf, F_SMALL, 314, 8, TR_DATUM, white, carbon, 40);
     drawn.clockHH = hh; drawn.clockMM = mm;
   }
 }
@@ -211,7 +208,7 @@ static void drawNav() {
     const bool on = (screen == i);
     tft.fillRect(NAV_W * i, NAV_Y, NAV_W, NAV_H, on ? ice : carbon);
     tft.drawFastVLine(NAV_W * i, NAV_Y, NAV_H, carbonLine);
-    text(NAV_LABEL[i], nullptr, NAV_W * i + NAV_W / 2, NAV_Y + NAV_H / 2,
+    text(NAV_LABEL[i], F_SMALL, NAV_W * i + NAV_W / 2, NAV_Y + NAV_H / 2,
          MC_DATUM, on ? white : whiteDim, on ? ice : carbon, NAV_W - 4);
   }
   tft.drawFastHLine(0, NAV_Y - 1, SCREEN_W, carbonLine);
@@ -229,10 +226,10 @@ static void homeStatic() {
   panel(tft, R_CARD_IN);
   panel(tft, R_CARD_OUT);
   panel(tft, R_CARD_AC);
-  text("TRONG NHA",  nullptr, R_CARD_IN.x  + 10, R_CARD_IN.y  + 8, TL_DATUM, whiteDim, carbonPanel, 0);
-  text("NGOAI TROI", nullptr, R_CARD_OUT.x + 10, R_CARD_OUT.y + 8, TL_DATUM, whiteDim, carbonPanel, 0);
-  text("DO AM", nullptr, R_CARD_IN.x  + 10, R_CARD_IN.y  + 78, TL_DATUM, whiteDim, carbonPanel, 0);
-  text("DO AM", nullptr, R_CARD_OUT.x + 10, R_CARD_OUT.y + 78, TL_DATUM, whiteDim, carbonPanel, 0);
+  text("TRONG NHÀ", F_SMALL, R_CARD_IN.x  + 10, R_CARD_IN.y  + 8, TL_DATUM, whiteDim, carbonPanel, 0);
+  text("NGOÀI TRỜI", F_SMALL, R_CARD_OUT.x + 10, R_CARD_OUT.y + 8, TL_DATUM, whiteDim, carbonPanel, 0);
+  text("ĐỘ ẨM", F_SMALL, R_CARD_IN.x  + 10, R_CARD_IN.y  + 78, TL_DATUM, whiteDim, carbonPanel, 0);
+  text("ĐỘ ẨM", F_SMALL, R_CARD_OUT.x + 10, R_CARD_OUT.y + 78, TL_DATUM, whiteDim, carbonPanel, 0);
 }
 
 static void homeCard(const Rect &r, float t, float h) {
@@ -240,12 +237,12 @@ static void homeCard(const Rect &r, float t, float h) {
   fmt1(t, buf, sizeof(buf));
   // Màu theo GIÁ TRỊ chứ không theo "trong nhà / ngoài trời" — cùng luật với
   // thang thermal* của app: màu nói Ý NGHĨA của số đo, không nói nguồn số đo.
-  text(buf, &FreeSansBold24pt7b, r.x + 66, r.y + 44, MC_DATUM,
+  text(buf, F_BIG, r.x + 66, r.y + 44, MC_DATUM,
        thermalColor(t), carbonPanel, 108);
   degreeC(r.x + 126, r.y + 30, whiteDim, carbonPanel);
 
   fmtInt(h, buf, sizeof(buf), " %");
-  text(buf, &FreeSans9pt7b, r.x + r.w - 10, r.y + 84, BR_DATUM, white, carbonPanel, 70);
+  text(buf, F_SMALL, r.x + r.w - 10, r.y + 84, BR_DATUM, white, carbonPanel, 70);
 }
 
 static void homeDynamic(const Model &m) {
@@ -261,19 +258,19 @@ static void homeDynamic(const Model &m) {
 
   if (strcmp(m.mode, drawn.mode) != 0 || m.setpoint != drawn.setpoint ||
       m.overrideLocal != drawn.overrideLocal || m.lastCmdSec != drawn.lastCmdSec) {
-    const char *label = "CHUA CO LENH";
+    const char *label = "CHƯA CÓ LỆNH";
     for (uint8_t i = 0; i < 4; i++) if (strcmp(m.mode, MODE_WIRE[i]) == 0) label = MODE_LABEL[i];
-    text(label, &FreeSansBold12pt7b, R_CARD_AC.x + 12, R_CARD_AC.y + 26,
+    text(label, F_LABEL, R_CARD_AC.x + 12, R_CARD_AC.y + 26,
          TL_DATUM, white, carbonPanel, 140);
 
     char buf[8];
     if (m.setpoint >= 0) snprintf(buf, sizeof(buf), "%d", m.setpoint);
     else                 snprintf(buf, sizeof(buf), "--");
-    text(buf, &FreeSansBold24pt7b, 204, R_CARD_AC.y + 26, MC_DATUM, white, carbonPanel, 80);
+    text(buf, F_BIG, 204, R_CARD_AC.y + 26, MC_DATUM, white, carbonPanel, 80);
 
     tft.fillRect(248, R_CARD_AC.y + 12, 58, 18, carbonPanel);
     badge(tft, 248, R_CARD_AC.y + 12,
-          m.overrideLocal ? "GHI DE" : "TU DONG",
+          m.overrideLocal ? "GHI ĐÈ" : "TỰ ĐỘNG",
           m.overrideLocal ? warning : ice);
 
     char line[48];
@@ -289,7 +286,7 @@ static void homeDynamic(const Model &m) {
     } else {
       snprintf(line, sizeof(line), "lenh cuoi %lu phut truoc", (unsigned long)(m.lastCmdSec / 60));
     }
-    text(line, nullptr, R_CARD_AC.x + 12, R_CARD_AC.y + 58, TL_DATUM, whiteDim, carbonPanel, 250);
+    text(line, F_SMALL, R_CARD_AC.x + 12, R_CARD_AC.y + 58, TL_DATUM, whiteDim, carbonPanel, 250);
   }
 }
 
@@ -312,19 +309,19 @@ static void controlStatic() {
   chamferRect(tft, R_MINUS,  carbonPanel, carbonLineHi);
   chamferRect(tft, R_PLUS,   carbonPanel, carbonLineHi);
   panel(tft, R_SETBOX);
-  text("-", &FreeSansBold24pt7b, R_MINUS.x + R_MINUS.w / 2, R_MINUS.y + R_MINUS.h / 2,
+  text("-", F_BIG, R_MINUS.x + R_MINUS.w / 2, R_MINUS.y + R_MINUS.h / 2,
        MC_DATUM, white, carbonPanel, 0);
-  text("+", &FreeSansBold24pt7b, R_PLUS.x + R_PLUS.w / 2, R_PLUS.y + R_PLUS.h / 2,
+  text("+", F_BIG, R_PLUS.x + R_PLUS.w / 2, R_PLUS.y + R_PLUS.h / 2,
        MC_DATUM, white, carbonPanel, 0);
-  button(tft, R_SEND, "GUI", false);
-  button(tft, R_AUTO, "TU DONG", false);
+  button(tft, R_SEND, "GỬI", false);
+  button(tft, R_AUTO, "TỰ ĐỘNG", false);
 }
 
 static void controlDynamic(const Model &m) {
   if (draftSetpoint != drawn.draftSetpoint) {
     char buf[8];
     snprintf(buf, sizeof(buf), "%d", draftSetpoint);
-    text(buf, &FreeSansBold24pt7b, R_SETBOX.x + R_SETBOX.w / 2 - 10,
+    text(buf, F_BIG, R_SETBOX.x + R_SETBOX.w / 2 - 10,
          R_SETBOX.y + R_SETBOX.h / 2, MC_DATUM, white, carbonPanel, 100);
     degreeC(R_SETBOX.x + R_SETBOX.w - 34, R_SETBOX.y + 26, whiteDim, carbonPanel);
   }
@@ -339,14 +336,14 @@ static void controlDynamic(const Model &m) {
 // ===========================================================================
 //  THONG TIN
 // ===========================================================================
-static const char *INFO_LABEL[8] = {"WIFI", "IP", "SONG", "MQTT",
-                                    "ESP-NOW", "NGOAI TROI", "MA IR", "FW"};
+static const char *INFO_LABEL[8] = {"WIFI", "IP", "SÓNG", "MQTT",
+                                    "ESP-NOW", "NGOÀI TRỜI", "MÃ IR", "FW"};
 static const int16_t INFO_Y0 = 30, INFO_STEP = 21;
 
 static void infoStatic() {
   clearContent();
   for (uint8_t i = 0; i < 8; i++) {
-    text(INFO_LABEL[i], &FreeSans9pt7b, 14, INFO_Y0 + INFO_STEP * i,
+    text(INFO_LABEL[i], F_SMALL, 14, INFO_Y0 + INFO_STEP * i,
          TL_DATUM, whiteDim, carbon, 0);
   }
 }
@@ -354,19 +351,19 @@ static void infoStatic() {
 static void infoDynamic(const Model &m) {
   char v[40];
   auto row = [&](uint8_t i, const char *s, uint16_t color) {
-    text(s, &FreeSans9pt7b, 306, INFO_Y0 + INFO_STEP * i, TR_DATUM, color, carbon, 200);
+    text(s, F_SMALL, 306, INFO_Y0 + INFO_STEP * i, TR_DATUM, color, carbon, 200);
   };
 
-  row(0, m.wifiUp ? (m.ssid[0] ? m.ssid : "OK") : "MAT KET NOI", m.wifiUp ? white : error);
+  row(0, m.wifiUp ? (m.ssid[0] ? m.ssid : "OK") : "MẤT KẾT NỐI", m.wifiUp ? white : error);
   row(1, m.ip[0] ? m.ip : "--", white);
   snprintf(v, sizeof(v), "%d dBm", m.rssi);
   row(2, m.wifiUp ? v : "--", m.rssi > -70 ? success : warning);
-  row(3, m.mqttUp ? "DA NOI" : "MAT KET NOI", m.mqttUp ? success : error);
+  row(3, m.mqttUp ? "ĐÃ NỐI" : "MẤT KẾT NỐI", m.mqttUp ? success : error);
   snprintf(v, sizeof(v), "nhan %lu / bo %lu",
            (unsigned long)m.espnowRx, (unsigned long)m.espnowDrop);
   row(4, v, white);
   if (m.espnowRx == 0)   snprintf(v, sizeof(v), "chua nghe thay");
-  else if (!m.outOnline) snprintf(v, sizeof(v), "MAT (%lus)", (unsigned long)m.outAgeSec);
+  else if (!m.outOnline) snprintf(v, sizeof(v), "MẤT (%lus)", (unsigned long)m.outAgeSec);
   else                   snprintf(v, sizeof(v), "%lus truoc", (unsigned long)m.outAgeSec);
   row(5, v, m.outOnline ? white : warning);
   snprintf(v, sizeof(v), "%u ma", m.irCodeCount);
@@ -375,7 +372,7 @@ static void infoDynamic(const Model &m) {
   row(7, v, white);
 
   snprintf(v, sizeof(v), "MAC %s  ·  KENH %u", m.mac, m.channel);
-  text(v, nullptr, 14, 192, TL_DATUM, whiteDim, carbon, 292);
+  text(v, F_SMALL, 14, 192, TL_DATUM, whiteDim, carbon, 292);
 }
 
 // ===========================================================================
@@ -389,28 +386,28 @@ static const Rect R_REBOOT   = {216, 166, 92, 40};
 
 static void settingsStatic() {
   clearContent();
-  const char *labels[4] = {"DO SANG", "AM BAO", "DONG BO GIO", "KHOI DONG LAI"};
+  const char *labels[4] = {"ĐỘ SÁNG", "ÂM BÁO", "ĐỒNG BỘ GIỜ", "KHỞI ĐỘNG LẠI"};
   for (uint8_t i = 0; i < 4; i++) {
     const Rect r = settingRow(i);
     panel(tft, r);
-    text(labels[i], &FreeSans9pt7b, r.x + 12, r.y + r.h / 2, ML_DATUM, white, carbonPanel, 0);
+    text(labels[i], F_SMALL, r.x + 12, r.y + r.h / 2, ML_DATUM, white, carbonPanel, 0);
   }
   chamferRect(tft, R_BL_MINUS, carbonUp, carbonLineHi, 4);
   chamferRect(tft, R_BL_PLUS,  carbonUp, carbonLineHi, 4);
-  text("-", &FreeSansBold12pt7b, R_BL_MINUS.x + 25, R_BL_MINUS.y + 21, MC_DATUM, white, carbonUp, 0);
-  text("+", &FreeSansBold12pt7b, R_BL_PLUS.x  + 25, R_BL_PLUS.y  + 21, MC_DATUM, white, carbonUp, 0);
-  button(tft, R_NTP,    "CHAY", false);
-  button(tft, R_REBOOT, "CHAY", false);
+  text("-", F_LABEL, R_BL_MINUS.x + 25, R_BL_MINUS.y + 21, MC_DATUM, white, carbonUp, 0);
+  text("+", F_LABEL, R_BL_PLUS.x  + 25, R_BL_PLUS.y  + 21, MC_DATUM, white, carbonUp, 0);
+  button(tft, R_NTP,    "CHẠY", false);
+  button(tft, R_REBOOT, "CHẠY", false);
 }
 
 static void settingsDynamic() {
   if (brightFull != drawn.backlight) {
     char v[8];
     snprintf(v, sizeof(v), "%u%%", brightFull);
-    text(v, &FreeSans9pt7b, 175, settingRow(0).y + 20, MR_DATUM, iceText, carbonPanel, 60);
+    text(v, F_SMALL, 175, settingRow(0).y + 20, MR_DATUM, iceText, carbonPanel, 60);
   }
   if (BoardIo::buzzerEnabled() != drawn.buzzer) {
-    button(tft, R_BUZZ, BoardIo::buzzerEnabled() ? "BAT" : "TAT", BoardIo::buzzerEnabled());
+    button(tft, R_BUZZ, BoardIo::buzzerEnabled() ? "BẬT" : "TẮT", BoardIo::buzzerEnabled());
   }
 }
 
@@ -420,14 +417,14 @@ static void settingsDynamic() {
 static void learnStatic() {
   clearContent();
   chamferRect(tft, R_LEARN, carbonPanel, ice, 10);
-  text("DANG HOC REMOTE", &FreeSansBold12pt7b, SCREEN_W / 2, R_LEARN.y + 24,
+  text("ĐANG HỌC REMOTE", F_LABEL, SCREEN_W / 2, R_LEARN.y + 24,
        MC_DATUM, iceText, carbonPanel, 0);
-  text("Huong remote vao mat thu, bam nut", nullptr, SCREEN_W / 2, R_LEARN.y + 106,
+  text("Hướng remote vào mắt thu, bấm nút", F_SMALL, SCREEN_W / 2, R_LEARN.y + 106,
        MC_DATUM, whiteDim, carbonPanel, 0);
 }
 
 static void learnDynamic(const Model &m) {
-  text(m.learnLabel[0] ? m.learnLabel : "?", &FreeSansBold24pt7b, SCREEN_W / 2,
+  text(m.learnLabel[0] ? m.learnLabel : "?", F_BIG, SCREEN_W / 2,
        R_LEARN.y + 66, MC_DATUM, white, carbonPanel, 250);
 
   const int16_t bx = R_LEARN.x + 24, by = R_LEARN.y + 126, bw = R_LEARN.w - 96;
@@ -440,7 +437,7 @@ static void learnDynamic(const Model &m) {
 
   char v[8];
   snprintf(v, sizeof(v), "%lus", (unsigned long)left);
-  text(v, &FreeSans9pt7b, R_LEARN.x + R_LEARN.w - 16, by + 7, MR_DATUM, white, carbonPanel, 50);
+  text(v, F_SMALL, R_LEARN.x + R_LEARN.w - 16, by + 7, MR_DATUM, white, carbonPanel, 50);
 }
 
 static void showToast(const char *msg) {
@@ -450,7 +447,7 @@ static void showToast(const char *msg) {
 
   const Rect r = {40, 88, 240, 64};
   chamferRect(tft, r, carbonUp, warning, 8);
-  text(toastMsg, &FreeSans9pt7b, SCREEN_W / 2, 120, MC_DATUM, white, carbonUp, 220);
+  text(toastMsg, F_SMALL, SCREEN_W / 2, 120, MC_DATUM, white, carbonUp, 220);
 }
 
 // ===========================================================================
@@ -502,27 +499,27 @@ static void handleTap(int16_t x, int16_t y, const Model &m) {
       if (R_MINUS.contains(x, y) && draftSetpoint > 16) draftSetpoint--;
       else if (R_PLUS.contains(x, y) && draftSetpoint < 30) draftSetpoint++;
       else if (R_SEND.contains(x, y)) {
-        pressFlash(R_SEND, "GUI");
+        pressFlash(R_SEND, "GỬI");
         if (!modeEnabled(draftMode, draftSetpoint, m)) {
-          showToast("CHUA HOC MA - vao app de hoc");
+          showToast("CHƯA HỌC MÃ — vào app để học");
         } else {
           // KHÔNG bắn IR ở đây: IR phải chạy trên lõi 1 cùng loop(), nếu không
           // sóng mang 38kHz bị xen giữa và khung phát ra sai (xem ui.h §2).
           Command c{Command::MANUAL, {0}, draftSetpoint};
           strncpy(c.mode, MODE_WIRE[draftMode], sizeof(c.mode) - 1);
-          if (xQueueSend(cmdQ, &c, 0) == pdTRUE) showToast("DANG GUI...");
+          if (xQueueSend(cmdQ, &c, 0) == pdTRUE) showToast("Đang gửi...");
           else                                   showToast("BAN, THU LAI");
         }
       } else if (R_AUTO.contains(x, y)) {
-        pressFlash(R_AUTO, "TU DONG");
+        pressFlash(R_AUTO, "TỰ ĐỘNG");
         Command c{Command::AUTO, {0}, -1};
         xQueueSend(cmdQ, &c, 0);
-        showToast("DA TRA VE TU DONG");
+        showToast("Đã trả về TỰ ĐỘNG");
       } else {
         for (uint8_t i = 0; i < 4; i++) {
           if (modeRect(i).contains(x, y)) {
             if (modeEnabled(i, draftSetpoint, m)) draftMode = i;
-            else showToast("CHUA HOC MA - vao app de hoc");
+            else showToast("CHƯA HỌC MÃ — vào app để học");
             break;
           }
         }
@@ -542,13 +539,13 @@ static void handleTap(int16_t x, int16_t y, const Model &m) {
       } else if (R_BUZZ.contains(x, y)) {
         BoardIo::buzzerEnable(!BoardIo::buzzerEnabled());
       } else if (R_NTP.contains(x, y)) {
-        pressFlash(R_NTP, "CHAY");
+        pressFlash(R_NTP, "CHẠY");
         BoardIo::ntpBegin();
         ntpDeadline = millis() + 10000;
-        showToast("DANG LAY GIO...");
+        showToast("Đang lấy giờ...");
       } else if (R_REBOOT.contains(x, y)) {
-        pressFlash(R_REBOOT, "CHAY");
-        showToast("DANG KHOI DONG LAI");
+        pressFlash(R_REBOOT, "CHẠY");
+        showToast("Đang khởi động lại");
         vTaskDelay(pdMS_TO_TICKS(600));
         ESP.restart();
       }
@@ -617,8 +614,8 @@ static void uiLoop(void *) {
 
     // --- 3. Đồng bộ giờ NTP, từng bước, không chặn ------------------------
     if (ntpDeadline) {
-      if (BoardIo::ntpPoll())        { ntpDeadline = 0; showToast("DA DONG BO GIO"); }
-      else if (millis() > ntpDeadline) { ntpDeadline = 0; showToast("KHONG LAY DUOC GIO"); }
+      if (BoardIo::ntpPoll())        { ntpDeadline = 0; showToast("Đã đồng bộ giờ"); }
+      else if (millis() > ntpDeadline) { ntpDeadline = 0; showToast("Không lấy được giờ"); }
     }
 
     // --- 4. Chạm ----------------------------------------------------------
@@ -689,10 +686,12 @@ static void uiLoop(void *) {
 }
 
 bool begin() {
-  // TXS0104 chỉ thông khi OE = HIGH, và hai chân IR đi qua nó (cổng P3). PHẢI
-  // đặt ở đây, trong setup(), chứ không phải bằng trở kéo ngoài: GPIO12 là MTDI
-  // — HIGH lúc reset thì ROM chọn mức flash 1.8V và bo không boot được nữa.
-  // Xem ../../Interface/README.md §3.1.
+  // Mở TXS0104 (OE = HIGH) cho cổng UART_1 ra P3. IR KHÔNG còn đi qua IC này —
+  // cả hai chân IR nay nằm trên footprint module 4G không hàn (GPIO17/GPIO5,
+  // 3.3V thẳng), nên IR chạy được kể cả khi bỏ dòng này.
+  // Vẫn PHẢI đặt trong setup() chứ không kéo bằng trở ngoài: GPIO12 là MTDI —
+  // HIGH lúc reset thì ROM chọn mức flash 1.8V và bo không boot được nữa.
+  // (Trên bo này R7 10k kéo GPIO12 XUỐNG GND, đúng chuẩn — xem Interface/README.md §3.1.)
   pinMode(EN_LEVEL_SHIFT_PIN, OUTPUT);
   digitalWrite(EN_LEVEL_SHIFT_PIN, HIGH);
 
@@ -701,6 +700,23 @@ bool begin() {
   tft.fillScreen(carbon);
   tft.setTextWrap(false);
 
+#ifdef LCD_SELFTEST
+  // Hình mốc vẽ NGAY tại đây — ở lõi 1, trước khi tác vụ giao diện (lõi 0) khởi
+  // động. Mục đích tách bạch hai tầng khi màn ra nhiễu: nếu hình này SẠCH thì
+  // init + SPI + xoay màn đều đúng và lỗi nằm trong code vẽ của tác vụ UI; nếu
+  // hình này đã nhiễu thì lỗi nằm ngay ở init/SPI. Bật bằng -D LCD_SELFTEST.
+  tft.fillScreen(TFT_BLACK);
+  tft.fillRect(0, 0, tft.width(), 20, TFT_RED);      // mép TRÊN
+  tft.fillRect(0, 0, 20, tft.height(), TFT_GREEN);   // mép TRÁI
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setTextSize(3);
+  tft.setCursor(40, tft.height() / 2 - 12);
+  tft.print("INIT OK");
+  Serial.println("LCD: dang giu hinh moc chan doan 6s (do TRE N, xanh TRAI)...");
+  delay(6000);
+  tft.fillScreen(carbon);
+#endif
+
   BoardIo::backlightBegin(LCD_BACKLIGHT_PIN);
   BoardIo::backlightSet(brightFull);
   BoardIo::buzzerBegin(BUZZER_PIN);
@@ -708,8 +724,17 @@ bool begin() {
   // Touch::begin gọi Wire.begin + ghim 100kHz -> phải chạy TRƯỚC mọi thứ khác
   // trên bus (SHT3x, DS1307).
   const bool touchOk = Touch::begin(I2C_SDA_PIN, I2C_SCL_PIN, TOUCH_RST_PIN, TOUCH_INT_PIN);
-  Serial.printf("LCD: ILI9341 320x240 · cam ung: %s%s\n", Touch::chipName(),
+  // In KÍCH THƯỚC THẬT sau setRotation, không viết cứng "320x240": nếu xoay màn
+  // không ăn (sai driver, sai TFT_WIDTH/HEIGHT) thì đây là chỗ DUY NHẤT nói ra
+  // sự thật. Ra 320x240 = đang nằm ngang, đúng lưới mà toàn bộ giao diện vẽ
+  // theo; ra 240x320 = màn còn đứng, mọi thứ sẽ tràn mép phải và vỡ hình.
+  Serial.printf("LCD: ST7789 %dx%d (rotation %d) · cam ung: %s%s\n",
+                tft.width(), tft.height(), TFT_ROTATION, Touch::chipName(),
                 touchOk ? "" : "  (KHONG BAM DUOC — kiem tra J1)");
+  if (tft.width() < tft.height()) {
+    Serial.println("LCD: DANG O CHE DO DUNG — giao dien ve theo 320x240 nen se vo hinh. "
+                   "Doi TFT_ROTATION trong config.h (1 hoac 3 = nam ngang).");
+  }
 
   if (BoardIo::sht3xBegin()) {
     Serial.println("Cam bien: SHT3x @0x44 tren I2C");
@@ -719,6 +744,15 @@ bool begin() {
 
   drawStatusStatic();
   drawNav();
+
+#ifdef LCD_SELFTEST
+  // Chốt thứ hai: đóng băng khung tĩnh do CHÍNH code giao diện vẽ, vẫn ở lõi 1
+  // và tác vụ UI lõi 0 CHƯA chạy. Cặp hai chốt này là thứ đã tìm ra lỗi driver:
+  // mốc trên (vẽ bằng lệnh đơn giản) SẠCH mà khung này VỠ => loại được cả nghi
+  // vấn đa lõi lẫn nghi vấn nhiễu SPI, chỉ còn lại khả năng sai driver.
+  Serial.println("LCD: giu KHUNG TINH cua giao dien 8s (tac vu UI chua chay)...");
+  delay(8000);
+#endif
 
   modelMx = xSemaphoreCreateMutex();
   cmdQ    = xQueueCreate(4, sizeof(Command));
