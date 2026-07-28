@@ -35,10 +35,20 @@ New-Item -ItemType Directory -Force -Path $fontDir | Out-Null
 #   0x102-3    Ă ă   |  0x110-1  Đ đ   |  0x128-9  Ĩ ĩ   |  0x168-9  Ũ ũ
 #   0x1A0-1    Ơ ơ   |  0x1AF-B0 Ư ư
 #   0x1EA0-EF9 toàn bộ tổ hợp dấu hỏi/ngã/nặng — phần LỚN NHẤT và không thể bỏ
+#  0xB7 va 0x2014 THIEU O BAN DAU va lam man hinh hien o vuong. Bai hoc: dai
+#  ky tu phai bam theo CHUOI THUC TE trong ui-screens.cpp, khong phai theo mot
+#  danh sach "chac la du". LVGL chi bao ra khi da bat LV_USE_LOG — truoc do no
+#  im lang ve o trong, va o vuong thi de bi doc nham thanh loi font tieng Viet.
+#    0xB7    ·  cham giua      -> "MAC %s · KENH %u", "nhan %lu · bo %lu"
+#    0x2013  –  gach ngang n   -> khoang gia tri "16 - 30"
+#    0x2014  —  gach ngang dai -> "CHUA HOC MA — VAO APP DE HOC"
+#    0x2026  …  ba cham        -> "DANG LAY GIO..."
 $viet = @(
-  '-r','0x20-0x7F','-r','0xB0','-r','0xC0-0xFF','-r','0x102-0x103','-r','0x110-0x111',
+  '-r','0x20-0x7F','-r','0xB0','-r','0xB7','-r','0xC0-0xFF',
+  '-r','0x102-0x103','-r','0x110-0x111',
   '-r','0x128-0x129','-r','0x168-0x169','-r','0x1A0-0x1A1','-r','0x1AF-0x1B0',
-  '-r','0x1EA0-0x1EF9','-r','0x2022'
+  '-r','0x1EA0-0x1EF9',
+  '-r','0x2013-0x2014','-r','0x2022','-r','0x2026'
 )
 $num = @('-r','0x20','-r','0x25','-r','0x2B','-r','0x2D-0x2E','-r','0x30-0x39','-r','0x43','-r','0xB0')
 

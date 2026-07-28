@@ -1,4 +1,4 @@
-#include "ui-screens.h"
+﻿#include "ui-screens.h"
 #include "theme.h"
 #include <stdio.h>
 #include <string.h>
@@ -110,7 +110,7 @@ void buildChrome() {
   lv_obj_set_pos(gStatusBar, 0, 0);
   lv_obj_set_size(gStatusBar, SCREEN_W, STATUS_H);
   lv_obj_set_style_bg_color(gStatusBar, bgSecondary(), 0);
-  lv_obj_set_style_bg_opa(gStatusBar, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_opa(gStatusBar, 216, 0);   // kính mờ như thẻ
   lv_obj_set_style_border_color(gStatusBar, borderSubtle(), 0);
   lv_obj_set_style_border_width(gStatusBar, 1, 0);
   lv_obj_set_style_border_side(gStatusBar, LV_BORDER_SIDE_BOTTOM, 0);
@@ -136,7 +136,7 @@ void buildChrome() {
   lv_obj_set_pos(gNav, 0, NAV_Y);
   lv_obj_set_size(gNav, SCREEN_W, NAV_H);
   lv_obj_set_style_bg_color(gNav, bgSecondary(), 0);
-  lv_obj_set_style_bg_opa(gNav, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_opa(gNav, 216, 0);         // kính mờ như thẻ
   lv_obj_set_style_border_color(gNav, borderSubtle(), 0);
   lv_obj_set_style_border_width(gNav, 1, 0);
   lv_obj_set_style_border_side(gNav, LV_BORDER_SIDE_TOP, 0);

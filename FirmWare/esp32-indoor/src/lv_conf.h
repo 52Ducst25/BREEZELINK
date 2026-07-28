@@ -1,4 +1,4 @@
-// Guard PHẢI là `LV_CONF_H` chứ không phải `#pragma once`: lv_conf_internal.h
+﻿// Guard PHẢI là `LV_CONF_H` chứ không phải `#pragma once`: lv_conf_internal.h
 // kiểm tra đúng tên macro này để biết file cấu hình đã được nạp hay chưa. Dùng
 // pragma once thì LVGL vẫn build nhưng in cảnh báo "Possible failure to include
 // lv_conf.h" mỗi lần dịch — và ta sẽ không biết cấu hình có thật sự vào không.
@@ -62,7 +62,7 @@
 //  nói chuyện I2C 100 kHz, đọc dày hơn không tốn gì đáng kể.
 //
 //  VẼ 30 -> 20 ms: 50 khung/giây. Nhanh hơn nữa là vô ích — SPI 27 MHz đẩy hết
-//  màn đã mất ~57 ms, nên đây không phải chỗ nghẽn; chỉ cần đủ để LVGL không
+//  màn đã mất ~46 ms (76.800 điểm × 16 bit ÷ 27 MHz), nên đây không phải chỗ nghẽn; chỉ cần đủ để LVGL không
 //  gộp nhiều thay đổi vào một khung rồi giật một nhịp.
 #define LV_DISP_DEF_REFR_PERIOD  20
 #define LV_INDEV_DEF_READ_PERIOD 15

@@ -111,49 +111,65 @@ void pressFeedback(lv_obj_t *btn) {
 }
 
 void init() {
-  // Nền màn: MÀU PHẲNG. Đã bỏ ảnh nền 12.png, và đây là quyết định về HIỆU NĂNG
-  // chứ không phải khẩu vị thẩm mỹ:
+  // Nền màn: ẢNH nền công nghệ tối, phía dưới là màu phẳng cùng tông.
   //
-  // Với ảnh nền, mỗi lần bấm một nút là LVGL phải dựng lại vùng đó theo thứ tự
-  // đọc ảnh RGB565 từ flash -> trộn alpha nền thẻ -> trộn alpha viền -> chạy
-  // callback vẽ 2 tam giác + 2 đường vát -> trộn alpha nền nút -> vẽ chữ. Sáu
-  // lớp cho một cái nhấn. Trên tấm SPI 27 MHz thì mắt NHÌN THẤY từng dải quét —
-  // đó chính là cái "nhấp nháy khi bấm".
+  // ĐÃ TỪNG BỎ ẢNH NÀY ĐI, VÀ ĐÓ LÀ MỘT PHÁN ĐOÁN SAI — ghi lại để đừng lặp:
+  // tôi quy tội "nhấp nháy khi bấm" cho việc phải dựng 6 lớp trộn alpha mỗi lần
+  // vẽ lại. Thủ phạm thật hoá ra nằm chỗ khác hẳn: thiếu tft.dmaWait() nên MỌI
+  // lượt truyền DMA bị endWrite() cắt ngang, cộng với TFT_RGB_ORDER chưa khai
+  // nên R/B hoán vị. Lúc tôi kết luận về hiệu năng thì đường vẽ đang hỏng: bộ
+  // đệm 20 dòng, pushColors chặn CPU, buttonSelect invalidate 5 lần/giây vô ích.
+  // Đo trên một hệ đang hỏng rồi kết luận là cách chắc chắn nhất để sửa nhầm chỗ.
   //
-  // Nền phẳng + thẻ đặc: mỗi lần bấm chỉ còn tô một hình chữ nhật. Ảnh nền vẫn
-  // nằm trong src/ui/images/ nếu sau này đổi sang tấm màn nhanh hơn (RGB song
-  // song, hoặc chip có PSRAM) — chỉ cần bật lại một dòng.
+  // Điều kiện giờ đã khác: bộ đệm 48 dòng + DMA, và các nút chỉ vẽ lại khi thật
+  // sự đổi trạng thái. Nếu vẫn giật thì hạ độ trong suốt của sCard lên
+  // LV_OPA_COVER trước — rẻ hơn nhiều so với bỏ hẳn ảnh nền.
+  //
+  // Dùng bg_img_src của style chứ KHÔNG tạo một lv_img phủ toàn màn: ảnh nền
+  // thuộc lớp vẽ nền, không sinh thêm đối tượng, không dính vào thứ tự z, và
+  // không bị con nào vô tình che. Ảnh nằm trong flash — LVGL đọc thẳng.
   lv_style_init(&sScreen);
   lv_style_set_bg_color(&sScreen, bgPrimary());
   lv_style_set_bg_opa(&sScreen, LV_OPA_COVER);
+  lv_style_set_bg_img_src(&sScreen, &img_bg_tech);
   lv_style_set_border_width(&sScreen, 0);
   lv_style_set_radius(&sScreen, 0);
   lv_style_set_pad_all(&sScreen, 0);
 
-  // Thẻ ĐỤC HOÀN TOÀN. Bản trước để 216/255 cho ảnh nền lộ qua ("kính mờ") —
-  // đẹp trên ảnh dựng, nhưng mỗi điểm ảnh phải trộn alpha lúc chạy, và nó nằm
-  // đúng trên đường vẽ lại khi bấm nút. Nền đã phẳng thì trong suốt cũng chẳng
-  // lộ ra gì để nhìn, nên đây là bỏ chi phí mà không mất gì.
+  // Thẻ KÍNH MỜ: nền tối trong suốt một phần để ảnh nền lộ qua, viền sáng hơn.
   //
-  // Độ tương phản với nền màn giờ do MÀU tạo ra (#0B1119 nền so với #18212E
-  // thẻ), không nhờ lớp phủ. Cách này còn đọc rõ hơn ở góc nhìn xiên — tấm TFT
-  // rẻ tiền bị nhạt màu khi nhìn chéo, mà lớp alpha thì nhạt trước tiên.
+  // VÌ SAO KHÔNG BLUR THẬT: LVGL 8.3 không có backdrop-filter, và làm mờ nền
+  // lúc chạy trên ESP32 không PSRAM đòi đọc ngược khung hình rồi tích chập —
+  // quá đắt cho nhịp vẽ 20 ms.
+  //
+  // MÀ CŨNG KHÔNG CẦN: ảnh nền (12.png) vốn là gradient mềm, gần như không có
+  // chi tiết nhỏ. Làm mờ một thứ đã mờ sẵn thì mắt không phân biệt được — hiệu
+  // ứng "kính" đến từ ĐỘ TRONG SUỐT + VIỀN SÁNG, không phải từ blur. Đổi sang
+  // ảnh nền nhiều chi tiết (ảnh chụp phòng) thì mới cần sinh sẵn bản đã blur
+  // lúc build và đặt vào trong từng thẻ bằng lv_img_set_offset_x/y.
+  //
+  // 216/255 ≈ 85%: đủ đục để chữ 12 px vẫn đọc rõ, vẫn thấy được vân nền phía
+  // sau. Hạ xuống ~60% thì trông "kính" hơn nhưng chữ nhỏ bắt đầu khó đọc —
+  // đây là bảng điều khiển, không phải hình nền. Đây cũng là NÚM VẶN đầu tiên
+  // cần chỉnh nếu màn bị giật: nâng lên LV_OPA_COVER là bỏ hẳn phép trộn alpha
+  // mà vẫn giữ được ảnh nền ở các khe hở giữa thẻ.
   lv_style_init(&sCard);
   lv_style_set_bg_color(&sCard, bgSecondary());
-  lv_style_set_bg_opa(&sCard, LV_OPA_COVER);
+  lv_style_set_bg_opa(&sCard, 216);
   lv_style_set_border_color(&sCard, borderDefault());
+  lv_style_set_border_opa(&sCard, 180);
   lv_style_set_border_width(&sCard, 1);
   lv_style_set_radius(&sCard, 0);          // KHÔNG BO TRÒN — chữ ký hệ thiết kế
   lv_style_set_pad_all(&sCard, 0);
   lv_style_set_text_color(&sCard, textPrimary());
   lv_style_set_text_font(&sCard, fontBody());
 
-  // Nút thường: nền sáng hơn thẻ một bậc + viền 2 px (kiosk.css --border-width-md).
-  // Chỗ bấm được phải TỰ NÓ nói ra là bấm được, và trên panel treo tường thì
-  // phải nói được từ khoảng cách đứng — nên tách bằng cả màu nền lẫn độ dày viền.
+  // Nút thường: cũng kính mờ như thẻ nhưng ĐỤC HƠN (232 so với 216) và viền dày
+  // 2 px (kiosk.css --border-width-md). Cùng độ trong suốt với thẻ thì mắt không
+  // tách được đâu là chỗ bấm được — nút phải nổi lên khỏi mặt kính.
   lv_style_init(&sBtn);
   lv_style_set_bg_color(&sBtn, bgElevated());
-  lv_style_set_bg_opa(&sBtn, LV_OPA_COVER);
+  lv_style_set_bg_opa(&sBtn, 232);
   lv_style_set_border_color(&sBtn, borderDefault());
   lv_style_set_border_width(&sBtn, 2);
   lv_style_set_radius(&sBtn, 0);
@@ -192,9 +208,11 @@ void init() {
 
   // Nút mờ: chưa học mã IR. Vẫn thấy được, chỉ là bấm không ăn. Trong suốt hơn
   // hẳn phần còn lại — đó chính là tín hiệu "chưa dùng được".
+  // Nút mờ (chưa học mã IR): trong suốt hơn hẳn phần còn lại — chính độ trong
+  // đó là tín hiệu "chưa dùng được", không cần thêm chữ nào.
   lv_style_init(&sBtnOff);
   lv_style_set_bg_color(&sBtnOff, bgSubtle());
-  lv_style_set_bg_opa(&sBtnOff, LV_OPA_COVER);
+  lv_style_set_bg_opa(&sBtnOff, 140);
   lv_style_set_border_color(&sBtnOff, borderSubtle());
   lv_style_set_text_color(&sBtnOff, textMuted());
 

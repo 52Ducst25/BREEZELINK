@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <Arduino.h>   // isnan() và kiểu cơ bản — lvgl.h không kéo theo math.h
 #include <lvgl.h>
 
@@ -219,7 +219,7 @@ void skeletonShow(lv_obj_t *sk, bool show);
 ///
 /// [dist] CỐ Ý NGẮN (28 px, không phải cả màn) và [ms] cố ý nhanh. Đây là ràng
 /// buộc của phần cứng chứ không phải khẩu vị: SPI 27 MHz đẩy hết 320×240 mất
-/// ~57 ms, nên một cú trượt cả trang chỉ kịp vài khung hình và ra giật cục —
+/// ~46 ms (76.800 điểm × 16 bit ÷ 27 MHz), nên một cú trượt cả trang chỉ kịp vài khung hình và ra giật cục —
 /// tức là làm hiệu ứng cho mượt lại thành kém mượt hơn không có. Trượt ngắn thì
 /// vùng phải vẽ lại nhỏ, khung hình kịp, và mắt đọc ra là "khớp vào vị trí".
 ///
