@@ -5,11 +5,18 @@
 
 namespace BoardIo {
 
-// LEDC kênh 4 và 5, KHÔNG phải 0/1: IRremoteESP8266 chiếm kênh thấp cho sóng
+// LEDC kênh 4 và 6, KHÔNG phải 0/1: IRremoteESP8266 chiếm kênh thấp cho sóng
 // mang 38kHz trên ESP32. Đè lên nhau thì đèn nền nhấp nháy đúng lúc bắn IR —
 // một lỗi chỉ xuất hiện khi điều khiển máy lạnh, rất mất công tìm.
+//
+// VÌ SAO 6 CHỨ KHÔNG PHẢI 5: trên ESP32 mỗi TIMER dùng chung cho HAI kênh liền
+// nhau — Arduino tính timer = (kênh / 2) % 4. Vậy kênh 4 và 5 CÙNG timer 2.
+// Buzzer gọi ledcSetup(2700 Hz) là đặt lại timer đó, kéo tần số đèn nền từ
+// 5 kHz tụt xuống 2.7 kHz — mỗi lần bấm nút là đèn nền đổi tần số. Kênh 6 nằm
+// ở timer 3, tách hẳn. Vẫn cao hơn dải IR nên giữ nguyên ý đồ ban đầu.
+//   kênh 4 -> timer 2      kênh 5 -> timer 2 (ĐỤNG)      kênh 6 -> timer 3
 static const uint8_t LEDC_BL   = 4;
-static const uint8_t LEDC_BUZZ = 5;
+static const uint8_t LEDC_BUZZ = 6;
 
 static uint8_t blPin = 255, buzzPin = 255;
 static uint8_t blPercent = 70;
@@ -65,9 +72,34 @@ void buzzerBegin(uint8_t pin) {
   digitalWrite(buzzPin, LOW);
 }
 
+/// Ngắt tiếng NGAY LẬP TỨC. Tách ra vì có hai đường dẫn tới đây và trước đây
+/// chỉ một đường làm đúng.
+static void silence() {
+  if (buzzPin == 255) return;
+  pwmWrite(buzzPin, LEDC_BUZZ, 0);
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+  ledcDetach(buzzPin);
+  pinMode(buzzPin, OUTPUT);
+  digitalWrite(buzzPin, LOW);
+#endif
+}
+
 void buzzerEnable(bool on) {
   buzzOn = on;
-  if (!on) buzzUntil = 0;
+  if (!on) {
+    // PHẢI tắt PWM tại chỗ, không được chỉ xoá hẹn giờ.
+    //
+    // LỖI CŨ, đáng nhớ vì nó tự phá chính mình: hàm này chỉ đặt buzzUntil = 0.
+    // Mà buzzerTick() mở đầu bằng `if (buzzUntil == 0) return;` — nên xoá hẹn
+    // giờ chính là VÔ HIỆU HOÁ CÁI THỨ CÓ NHIỆM VỤ TẮT CÒI. Bấm ÂM BÁO -> TẮT
+    // đúng lúc tiếng bíp xác nhận đang kêu, và còi kêu mãi không dừng.
+    //
+    // Thứ tự trong onSetting() làm lỗi này chắc chắn xảy ra chứ không phải hoạ
+    // hoằn: beep() chạy TRƯỚC, buzzerEnable(false) chạy SAU — luôn luôn còn một
+    // tiếng bíp đang dở khi lệnh tắt tới.
+    buzzUntil = 0;
+    silence();
+  }
 }
 
 bool buzzerEnabled() { return buzzOn; }
@@ -75,7 +107,13 @@ bool buzzerEnabled() { return buzzOn; }
 void beep(uint16_t ms, uint16_t freq) {
   if (!buzzOn || buzzPin == 255) return;
   pwmAttach(buzzPin, LEDC_BUZZ, freq, 8);
-  pwmWrite(buzzPin, LEDC_BUZZ, 128);    // 50% cho biên độ lớn nhất
+  // 90/255 ≈ 35% chứ KHÔNG phải 128 (=50%, biên độ lớn nhất).
+  //
+  // Còi này gắn ngay sau tấm mặt panel treo tường, cách tai người bấm chừng
+  // 30 cm — mức to nhất là chói. Với còi từ, biên độ đi theo độ rộng xung, nên
+  // hạ từ 50% xuống 35% là bớt khoảng một phần ba độ to mà vẫn nghe rõ trong
+  // phòng có điều hoà đang chạy.
+  pwmWrite(buzzPin, LEDC_BUZZ, 90);
   buzzUntil = millis() + ms;
 }
 

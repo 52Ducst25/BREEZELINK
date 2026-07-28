@@ -338,12 +338,68 @@ static void publishState() {
 // ---------------------------------------------------------------------------
 //  Kết nối
 // ---------------------------------------------------------------------------
+// Quét và in ra những mạng NHÌN THẤY được khi không vào được mạng đã cấu hình.
+//
+// Vòng lặp cũ chỉ in dấu chấm mãi mãi. Dấu chấm không phân biệt được ba nguyên
+// nhân hoàn toàn khác nhau, mà cách xử lý thì khác hẳn nhau:
+//   - không thấy SSID  -> sai tên, hoặc router phát 5 GHz (ESP32 chỉ bắt
+//                         2.4 GHz — đây là ca hay gặp nhất khi lắp tại nhà dân)
+//   - thấy nhưng yếu   -> đặt node sai chỗ
+//   - thấy và mạnh     -> sai mật khẩu
+// Người đi lắp đứng trước tủ điện cần biết NGAY là nên đổi tên mạng, dời node,
+// hay gõ lại mật khẩu.
+// Không đưa vào config.h: đây là hằng số của firmware, không phải thứ đổi theo
+// từng nơi lắp. 20 s đủ cho router chậm bắt tay xong, mà vẫn không bắt người
+// đứng đợi quá lâu mới thấy được lý do.
+constexpr uint32_t WIFI_ATTEMPT_MS = 20000UL;
+
+static void wifiDiagnose() {
+  Serial.printf("\n  Khong vao duoc \"%s\". Quet xem xung quanh co gi:\n", WIFI_SSID);
+  // Dừng hẳn lần kết nối đang dở: quét trong lúc đang bắt tay cho kết quả thiếu.
+  WiFi.disconnect(true);
+  delay(100);
+
+  const int n = WiFi.scanNetworks();
+  if (n <= 0) {
+    Serial.println("  (khong thay mang 2.4 GHz nao — kiem tra anten hoac cho dat node)");
+    return;
+  }
+  bool found = false;
+  for (int i = 0; i < n; i++) {
+    const bool me = (WiFi.SSID(i) == String(WIFI_SSID));
+    found = found || me;
+    Serial.printf("  %-22s kenh %2d  %4d dBm  %-11s%s\n",
+                  WiFi.SSID(i).c_str(), WiFi.channel(i), (int)WiFi.RSSI(i),
+                  WiFi.encryptionType(i) == WIFI_AUTH_OPEN ? "mo" : "co mat khau",
+                  me ? "  <== DANG TIM MANG NAY" : "");
+  }
+  if (!found) {
+    Serial.printf("  => KHONG CO \"%s\" trong danh sach. ESP32 chi bat duoc 2.4 GHz;\n"
+                  "     neu router tach bang 5 GHz ra ten rieng thi phai dien ten\n"
+                  "     cua bang 2.4 GHz vao WIFI_SSID trong src/config.h.\n", WIFI_SSID);
+  } else {
+    Serial.println("  => Thay mang, van khong vao: gan nhu chac chan SAI MAT KHAU.");
+  }
+  WiFi.scanDelete();
+}
+
 static void connectWifi() {
   if (WiFi.status() == WL_CONNECTED) return;
-  Serial.printf("WiFi -> \"%s\" ", WIFI_SSID);
   WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  while (WiFi.status() != WL_CONNECTED) { delay(500); Serial.print("."); }
+
+  // Vẫn chặn tới khi vào được mạng — không có mạng thì node chẳng làm được gì —
+  // nhưng cứ 20 giây lại nói ra MỘT LÝ DO thay vì rải dấu chấm im lặng.
+  for (uint8_t attempt = 1;; attempt++) {
+    Serial.printf("WiFi -> \"%s\" (lan %u) ", WIFI_SSID, attempt);
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    const uint32_t deadline = millis() + WIFI_ATTEMPT_MS;
+    while (WiFi.status() != WL_CONNECTED && (int32_t)(millis() - deadline) < 0) {
+      delay(500);
+      Serial.print(".");
+    }
+    if (WiFi.status() == WL_CONNECTED) break;
+    wifiDiagnose();
+  }
 
   // BẮT BUỘC cho node master: tắt tiết kiệm điện WiFi.
   // ESP32 mặc định bật modem sleep khi đã vào mạng — radio ngủ giữa các beacon.
@@ -436,13 +492,28 @@ static void runPanelCommand(const Ui::Command &c) {
     return;
   }
 
+  // Ghi nhận quyền điều khiển TRƯỚC khi thử bắn mã, không phải sau.
+  //
+  // Trước đây dòng này nằm ở cuối hàm, sau nhánh thoát sớm "chưa có mã". Hậu
+  // quả: node chưa học mã nào thì bấm THỦ CÔNG không bao giờ đổi được trạng
+  // thái — nút TỰ ĐỘNG sáng vĩnh viễn và người dùng kết luận là hỏng.
+  //
+  // Tách hai chuyện vốn khác nhau ra:
+  //   AI ĐANG CẦM LÁI   -> đổi ngay khi người dùng bấm; đây là Ý ĐỊNH của họ và
+  //                        nó có thật bất kể mã IR có hay không.
+  //   CÓ BẮN ĐƯỢC KHÔNG -> báo riêng bằng toast ở dưới.
+  // Gộp hai thứ này làm một là lý do một nút vừa-là-hành-động vừa-là-đèn-báo trở
+  // nên không bấm được.
+  //
+  // Vẫn TRUNG THỰC: màn hình nói "GHI ĐÈ" kèm "máy chủ sẽ giành lại quyền ở chu
+  // kỳ sau" — cả hai đều đúng ngay cả khi mã IR chưa học.
+  overrideLocal = true;
+
   const uint16_t n = IrStore::loadAlias(c.mode, aliasTemp(c.mode, c.setpoint),
                                         irBuf, IrIo::RAW_MAX);
   if (n == 0) {
-    // Giao diện đã làm mờ nút này rồi, nên tới được đây là hiếm (mã bị xoá
-    // giữa chừng). Vẫn báo, không im lặng.
     Serial.printf("[panel] %s %d: chua co ma trong NVS\n", c.mode, c.setpoint);
-    Ui::reply("CHUA HOC MA - vao app de hoc");
+    Ui::reply("CHƯA HỌC MÃ — vào app để học");
     return;
   }
 
@@ -461,7 +532,7 @@ static void runPanelCommand(const Ui::Command &c) {
   publishState();
 
   overrideLocal = true;
-  Ui::reply("DA GUI - may chu se gianh lai quyen");
+  Ui::reply("ĐÃ GỬI — máy chủ sẽ giành lại quyền");
 }
 
 /// Dựng ảnh chụp cho màn. Bitmask mã IR tính ở đây vì NVS thuộc quyền lõi 1.

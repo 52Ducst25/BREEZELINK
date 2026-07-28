@@ -1,4 +1,4 @@
-#include "ir-store.h"
+﻿#include "ir-store.h"
 #include <Preferences.h>
 #include <string.h>
 
@@ -28,6 +28,18 @@ static void makeKeys(const char *irCodeId, char *keyUuid, char *keyRaw) {
   snprintf(keyRaw, 12, "r%08x", h);
 }
 
+/// Đọc chuỗi, trả "" nếu khoá chưa tồn tại — KHÔNG in lỗi.
+///
+/// Phải bọc lại vì Preferences của Arduino-ESP32 coi "khoá không có" là LỖI và
+/// in ra một dòng [E] cho MỖI lần trượt. Mà trượt ở đây là chuyện bình thường:
+/// lúc khởi động, giao diện hỏi cả 15 mức nhiệt COOL + DRY + FAN + OFF xem cái
+/// nào đã học, nên máy chưa học gì là log phun ra 18 dòng đỏ. Hậu quả không chỉ
+/// xấu — nó chôn mất những dòng lỗi THẬT, và làm người dùng tưởng bo hỏng.
+static String getStr(const char *key) {
+  if (!prefs.isKey(key)) return String();
+  return prefs.getString(key, "");
+}
+
 bool begin() {
   ready = prefs.begin("aircon-ir", false /*read-write*/);
   return ready;
@@ -46,7 +58,7 @@ bool save(const char *irCodeId, const uint16_t *raw, uint16_t len) {
   }
   char keyUuid[12], keyRaw[12];
   makeKeys(irCodeId, keyUuid, keyRaw);
-  const bool isNew = (prefs.getString(keyUuid, "") != irCodeId);
+  const bool isNew = (getStr(keyUuid) != irCodeId);
 
   // Ghi mảng TRƯỚC, ghi uuid SAU: uuid là thứ load() dùng để xác nhận "mã này
   // có thật". Ghi ngược lại, mà mất điện đúng giữa chừng, thì lần đọc sau thấy
@@ -76,7 +88,7 @@ bool saveAlias(const char *mode, int temp, const char *irCodeId) {
   }
   char key[16];
   makeAliasKey(mode, temp, key, sizeof(key));
-  if (prefs.getString(key, "") == irCodeId) return true;   // khỏi mòn flash vô ích
+  if (getStr(key) == irCodeId) return true;   // khỏi mòn flash vô ích
   return prefs.putString(key, irCodeId) > 0;
 }
 
@@ -84,7 +96,7 @@ bool hasAlias(const char *mode, int temp) {
   if (!ready || mode == nullptr || mode[0] == '\0') return false;
   char key[16];
   makeAliasKey(mode, temp, key, sizeof(key));
-  const String id = prefs.getString(key, "");
+  const String id = getStr(key);
   if (id.length() == 0) return false;
 
   // Bí danh trỏ tới id, nhưng mảng thời gian mới là thứ phát được. Hai thứ có
@@ -92,14 +104,14 @@ bool hasAlias(const char *mode, int temp) {
   // trên màn mới phản ánh đúng "bấm vào có ra lệnh không".
   char keyUuid[12], keyRaw[12];
   makeKeys(id.c_str(), keyUuid, keyRaw);
-  return prefs.getString(keyUuid, "") == id && prefs.getBytesLength(keyRaw) > 0;
+  return getStr(keyUuid) == id && prefs.getBytesLength(keyRaw) > 0;
 }
 
 uint16_t loadAlias(const char *mode, int temp, uint16_t *out, uint16_t maxLen) {
   if (!ready || mode == nullptr || mode[0] == '\0' || out == nullptr) return 0;
   char key[16];
   makeAliasKey(mode, temp, key, sizeof(key));
-  const String id = prefs.getString(key, "");
+  const String id = getStr(key);
   if (id.length() == 0) return 0;
   return load(id.c_str(), out, maxLen);
 }
@@ -110,7 +122,7 @@ uint16_t load(const char *irCodeId, uint16_t *out, uint16_t maxLen) {
   char keyUuid[12], keyRaw[12];
   makeKeys(irCodeId, keyUuid, keyRaw);
 
-  if (prefs.getString(keyUuid, "") != irCodeId) return 0;   // chưa lưu, hoặc đụng băm
+  if (getStr(keyUuid) != irCodeId) return 0;   // chưa lưu, hoặc đụng băm
 
   size_t bytes = prefs.getBytesLength(keyRaw);
   if (bytes == 0 || bytes % sizeof(uint16_t) != 0) return 0;
