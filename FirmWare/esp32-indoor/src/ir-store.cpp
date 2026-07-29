@@ -1,5 +1,6 @@
 ﻿#include "ir-store.h"
 #include <Preferences.h>
+#include <nvs.h>
 #include <string.h>
 
 namespace IrStore {
@@ -42,6 +43,18 @@ static String getStr(const char *key) {
 
 bool begin() {
   ready = prefs.begin("aircon-ir", false /*read-write*/);
+
+  // In sức chứa NGAY Ở BOOT. Phân vùng NVS chỉ 20 KB (huge_app.csv: nvs 0x5000)
+  // mà một khung điều hoà ~600 byte, nên "đầy" là kết cục có thật chứ không phải
+  // giả thuyết — và khi đầy thì save() trả false, MÃ MỚI BỊ MẤT trong lúc mọi
+  // thứ khác vẫn chạy bình thường. Không có con số này thì triệu chứng duy nhất
+  // là "học xong mà nút vẫn mờ", rất dễ đổ oan cho mắt thu hay cho backend.
+  nvs_stats_t st;
+  if (nvs_get_stats(nullptr, &st) == ESP_OK) {
+    Serial.printf("NVS: dung %u/%u o (con %u) · dang giu %u ma IR\n",
+                  (unsigned)st.used_entries, (unsigned)st.total_entries,
+                  (unsigned)st.free_entries, (unsigned)count());
+  }
   return ready;
 }
 
@@ -82,14 +95,55 @@ uint16_t count() {
   return ready ? prefs.getUShort("cnt", 0) : 0;
 }
 
+/// Tiền tố của id do CHÍNH NODE sinh khi tự học, phân biệt với UUID của backend.
+/// UUID không bao giờ bắt đầu bằng chuỗi này (nó chỉ gồm hex và dấu gạch), nên
+/// so tiền tố là đủ để nhận ra.
+static const char *const LOCAL_PREFIX = "local-";
+
+/// Xoá cả hai khoá của một mã và trừ bộ đếm. Chỉ dùng để dọn mã TẠM — mã của
+/// backend thì upsert_learned_code giữ nguyên UUID khi học lại nên ghi đè tại
+/// chỗ, không sinh rác.
+static void removeBlob(const char *irCodeId) {
+  char keyUuid[12], keyRaw[12];
+  makeKeys(irCodeId, keyUuid, keyRaw);
+  if (!prefs.isKey(keyUuid)) return;
+  prefs.remove(keyRaw);
+  prefs.remove(keyUuid);
+  const uint16_t c = prefs.getUShort("cnt", 0);
+  if (c > 0) prefs.putUShort("cnt", (uint16_t)(c - 1));
+}
+
 bool saveAlias(const char *mode, int temp, const char *irCodeId) {
   if (!ready || mode == nullptr || mode[0] == '\0' || irCodeId == nullptr || irCodeId[0] == '\0') {
     return false;
   }
   char key[16];
   makeAliasKey(mode, temp, key, sizeof(key));
-  if (getStr(key) == irCodeId) return true;   // khỏi mòn flash vô ích
-  return prefs.putString(key, irCodeId) > 0;
+  const String old = getStr(key);
+  if (old == irCodeId) return true;   // khỏi mòn flash vô ích
+  if (prefs.putString(key, irCodeId) == 0) return false;
+
+  // Bí danh vừa rời khỏi một mã TẠM -> mã đó thành mồ côi, không ai trỏ tới nữa.
+  // Dọn ngay: NVS ở đây chỉ có 20 KB (0x5000) mà một khung điều hoà đã ~600 byte,
+  // giữ cả bản tạm lẫn bản thật cho 18 tổ hợp bắt buộc là tràn. Tràn NVS thì
+  // save() trả false và mã MỚI bị mất — hỏng ở phía khó ngờ nhất.
+  if (old.length() > 0 && old.startsWith(LOCAL_PREFIX)) removeBlob(old.c_str());
+  return true;
+}
+
+/// Id tạm: "local-" + mode + nhiệt độ. Chỉ dùng làm GIÁ TRỊ (bị băm lại thành
+/// khoá), nên không vướng giới hạn 15 ký tự của tên khoá NVS.
+static void makeLocalId(const char *mode, int temp, char *out, size_t n) {
+  if (temp >= 0) snprintf(out, n, "%s%s-%d", LOCAL_PREFIX, mode, temp);
+  else           snprintf(out, n, "%s%s", LOCAL_PREFIX, mode);
+}
+
+bool saveLearned(const char *mode, int temp, const uint16_t *raw, uint16_t len) {
+  if (!ready || mode == nullptr || mode[0] == '\0') return false;
+  char id[32];
+  makeLocalId(mode, temp, id, sizeof(id));
+  if (!save(id, raw, len)) return false;
+  return saveAlias(mode, temp, id);
 }
 
 bool hasAlias(const char *mode, int temp) {

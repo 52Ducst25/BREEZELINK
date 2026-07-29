@@ -1,0 +1,35 @@
+# Bang phan vung rieng cho node indoor. Khac huge_app.csv dung MOT diem:
+# NVS 0x5000 (20 KB) -> 0x10000 (64 KB).
+#
+# CHU Y: file nay PHAI THUAN ASCII, khong dau. PlatformIO doc no bang cp1252
+# (builder/main.py::_parse_partitions), gap byte UTF-8 la nem UnicodeDecodeError
+# va build dut ngay tu buoc doc cau hinh.
+#
+# VI SAO PHAI NOI: kho ma IR nam trong NVS, moi khung dieu hoa ~600 byte nen
+# chiem ~25 "o" NVS. Ban 20 KB chi co 630 o -> do tren bo that: giu 13 ma da het
+# 491 o, con 139. Ma giao dien ho tro 18 to hop (COOL 16..30 + DRY + FAN + OFF),
+# lai con co luc ton tai song song ban tam "local-" (node tu hoc) va ban that cua
+# backend cho cung mot to hop. Day NVS thi save() tra false va MA MOI BI MAT
+# trong khi moi thu khac van chay - trieu chung duy nhat la "hoc xong ma nut van
+# mo", rat de do oan cho mat thu hoac cho backend.
+# 64 KB = 2016 o, du thoai mai ke ca khi moi to hop deu co hai ban.
+#
+# GIU NGUYEN OFFSET 0x9000 CUA NVS - bat buoc. Doi offset la toan bo ma IR da
+# hoc MAT SACH. Chi noi kich thuoc ve phia sau, nen 5 trang du lieu cu
+# (0x9000..0xE000) van nguyen ven va NVS doc lai duoc binh thuong.
+#
+# App doi tu 0x10000 sang 0x20000 (phan vung app phai can theo 64 KB). Khong sao:
+# esptool doc bang nay de biet ghi vao dau. Firmware hien dung 1.32 MB nen
+# 2.75 MB van con thua hon gap doi.
+#
+# DUNG cho tong vuot 4 MB du module la WROOM-32E-N8 (8 MB): board
+# esp32doit-devkit-v1 khai board_upload.flash_size = 4MB va ESPTOOL DOC CHINH
+# KHOA DO de ghi header anh. Phan vung nam ngoai 4 MB thi bootloader bo cuoc
+# TRONG IM LANG - lap rst:0x3 moi ~28ms, khong in noi mot dong log. Da mat nhieu
+# gio vi cai bay nay mot lan roi, xem chu thich trong platformio.ini.
+# O day: 0x20000 + 0x2C0000 = 0x2E0000 = 2.94 MB, con xa moc 4 MB.
+#
+# Name,     Type, SubType, Offset,   Size,      Flags
+nvs,        data, nvs,     0x9000,   0x10000,
+phy_init,   data, phy,     0x19000,  0x1000,
+factory,    app,  factory, 0x20000,  0x2C0000,

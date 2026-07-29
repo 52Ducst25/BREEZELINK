@@ -240,6 +240,23 @@ static void publishLearned(const uint16_t *raw, uint16_t len) {
     // DRY/FAN/OFF không có nhiệt độ -> BỎ HẲN khoá "temp". Backend coi thiếu
     // temp là mã cố định (upsert_learned_code); gửi -1 sẽ lưu thành nhiệt độ rác.
     if (learnTemp >= 0) doc["temp"] = learnTemp;
+
+    // GIỮ LUÔN MỘT BẢN Ở NODE, đừng chỉ đẩy lên cloud. Không có dòng này thì
+    // người dùng vừa dạy mã ngay trên panel mà chính panel vẫn báo "CHƯA HỌC MÃ"
+    // và nút chế độ vẫn mờ — phải chờ vòng lặp comfort trên server tình cờ gửi
+    // xuống một lệnh cho đúng tổ hợp đó thì mới bấm được. Trên bảng điều khiển
+    // treo tường, khoảng chờ không giải thích được đó bị đọc là hỏng.
+    //
+    // Làm TRƯỚC khi publish, có chủ đích: mất mạng vẫn học và điều khiển tại chỗ
+    // được. Backend sẽ nhận mã ở lần học sau, còn máy lạnh thì chạy ngay.
+    const int t = aliasTemp(learnLabel, learnTemp);
+    if (IrStore::saveLearned(learnLabel, t, raw, len)) {
+      aliasDirty = true;      // bảng "đã có mã" đổi -> màn phải tính lại
+      Serial.printf("[learn] da luu vao NVS: %s%s%d — panel dung duoc ngay\n",
+                    learnLabel, t >= 0 ? " " : "", t >= 0 ? t : 0);
+    } else {
+      Serial.println("[learn] KHONG luu duoc vao NVS — panel se van bao chua hoc ma");
+    }
   } else {
     doc["action"] = learnLabel;
   }

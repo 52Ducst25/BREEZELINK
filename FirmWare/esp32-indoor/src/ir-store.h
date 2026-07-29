@@ -43,14 +43,36 @@ uint16_t count();
 //  `setpoint` + `ir_code_id`. Lưu thêm một khoá "aCOOL26" -> id là node tự dựng
 //  được bảng tra ngược mà backend không phải đổi gì.
 //
-//  HỆ QUẢ PHẢI NÓI THẬT TRÊN GIAO DIỆN: panel chỉ điều khiển được những tổ hợp
-//  mà server ĐÃ TỪNG gửi ít nhất một lần. Bo vừa nạp firmware thì mọi nút chế
-//  độ đều mờ cho tới khi vòng lặp comfort chạy vài chu kỳ — đó là lý do màn
-//  ĐIỀU KHIỂN bắt buộc có trạng thái "mờ + giải thích", không có phím chết.
+//  HAI NGUỒN ĐIỀN VÀO BẢNG NÀY, và phải có cả hai:
+//    1. Backend gửi lệnh kèm `ir_raw` -> save() + saveAlias() với UUID thật.
+//    2. Node tự học được mã -> saveLearned() với id tạm (xem bên dưới).
+//  Chỉ có nguồn 1 thì panel không dùng được chính mã nó vừa dạy, phải chờ server
+//  tình cờ gửi xuống một lệnh cho đúng tổ hợp đó — nhìn y như hỏng.
+//
+//  Tổ hợp nào CHƯA có mã từ nguồn nào thì nút vẫn mờ, và màn ĐIỀU KHIỂN bắt
+//  buộc nói rõ lý do — không có phím chết.
 //
 //  [temp] < 0 nghĩa là mã cố định không kèm nhiệt độ (DRY/FAN/OFF).
 // ---------------------------------------------------------------------------
 bool saveAlias(const char *mode, int temp, const char *irCodeId);
+
+/// Lưu mã VỪA HỌC ĐƯỢC ngay tại node, dưới một id tạm do node tự sinh.
+///
+/// VÌ SAO CẦN: lúc học xong, node mới chỉ ĐẨY mảng thời gian lên cloud —
+/// `ir_code_id` là UUID do backend sinh nên node chưa biết. Nếu chỉ dựa vào
+/// đường `save()` ở trên (chạy khi backend gửi lệnh kèm `ir_raw`) thì có một
+/// khoảng trống rất khó chịu: **người dùng vừa dạy mã ngay trên panel, mà chính
+/// panel đó vẫn báo "CHƯA HỌC MÃ" và mọi nút chế độ vẫn mờ** — cho tới khi vòng
+/// lặp comfort trên server tình cờ gửi xuống một lệnh cho đúng tổ hợp đó. Trên
+/// một bảng điều khiển treo tường thì đó bị đọc là hỏng, không phải là "đang chờ".
+///
+/// Id tạm mang tiền tố riêng để phân biệt với UUID thật. Khi backend gửi lệnh
+/// thật cho cùng tổ hợp, `saveAlias()` trỏ bí danh sang UUID đó và DỌN LUÔN mảng
+/// tạm — nếu không, mỗi mã chiếm chỗ hai lần và phân vùng NVS 20 KB không đủ cho
+/// 18 tổ hợp bắt buộc (COOL 16..30 + DRY + FAN + OFF).
+///
+/// [temp] < 0 cho mã cố định (DRY/FAN/OFF), giống quy ước của saveAlias().
+bool saveLearned(const char *mode, int temp, const uint16_t *raw, uint16_t len);
 
 /// true nếu có mã cho tổ hợp này (dùng để làm mờ nút chưa học).
 bool hasAlias(const char *mode, int temp);
