@@ -280,7 +280,7 @@ void refreshControl() {
   // dùng biết trước chứ không phải bấm rồi mới thấy thông báo lỗi.
   bool anyCode = false;
   for (uint8_t i = 0; i < 4; i++) anyCode = anyCode || gModeOk[i];
-  if (!anyCode)               setText(gLimitLbl, "CHƯA HỌC MÃ - VÀO APP ĐỂ HỌC");
+  if (!anyCode)               setText(gLimitLbl, "CHƯA HỌC MÃ — VÀO APP ĐỂ HỌC");
   else if (!gModeOk[gPendMode]) setText(gLimitLbl, "CHẾ ĐỘ NÀY CHƯA HỌC MÃ");
   else if (gPendMode == 0)      setText(gLimitLbl, "GIỚI HẠN 16 - 30");
   else                          setText(gLimitLbl, "");
@@ -297,7 +297,7 @@ void onAdjust(lv_event_t *e) {
 void onMode(lv_event_t *e) {
   uint8_t i = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
   if (!gModeOk[i]) {          // "không phím chết": nói lý do thay vì im lặng
-    toast("CHƯA HỌC MÃ - VÀO APP ĐỂ HỌC", true);
+    toast("CHƯA HỌC MÃ — VÀO APP ĐỂ HỌC", true);
     return;
   }
   gPendMode = i;
@@ -589,12 +589,11 @@ void update(const Ui::Model &m) {
   setText(gInfoVal[2], b);
   setText(gInfoVal[3], m.mqttUp ? "ĐÃ NỐI" : "MẤT KẾT NỐI");
   lv_obj_set_style_text_color(gInfoVal[3], m.mqttUp ? ok() : err(), 0);
-  // DẤU PHÂN CÁCH LÀ "•" (U+2022) CHỨ KHÔNG PHẢI "·" (U+00B7). Font chỉ sinh
-  // U+2022 — tools/make_lvgl_fonts.ps1 ghi rõ điều đó ở dòng khai dải ký tự.
-  // Dùng nhầm thì LVGL không tìm ra glyph: chỗ đó hiện trống VÀ mỗi khung vẽ lại
-  // phun một dòng "glyph dsc. not found for U+B7" ra serial, đủ để chôn mọi log
-  // khác. Cùng lý do, đừng dùng "—" (U+2014) trong chuỗi lên màn — dùng "-".
-  snprintf(b, sizeof b, "nhận %lu • bỏ %lu",
+  // Mọi ký tự đặc biệt dùng ở đây (· – — … •) phải CÓ TRONG DẢI SINH FONT của
+  // tools/make_lvgl_fonts.ps1. Thiếu một cái là LVGL vẽ ô trống ở đúng chỗ đó VÀ
+  // mỗi khung vẽ lại phun "glyph dsc. not found for U+xxxx" ra serial, đủ để
+  // chôn mọi dòng log khác. Thêm ký tự mới vào chuỗi thì mở script kiểm dải.
+  snprintf(b, sizeof b, "nhận %lu · bỏ %lu",
            (unsigned long)m.espnowRx, (unsigned long)m.espnowDrop);
   setText(gInfoVal[4], b);
   if (m.outOnline) snprintf(b, sizeof b, "%lus trước", (unsigned long)m.outAgeSec);
@@ -605,7 +604,7 @@ void update(const Ui::Model &m) {
   snprintf(b, sizeof b, "%s - %luh%02lum", m.fw ? m.fw : "?",
            (unsigned long)(m.uptimeSec / 3600), (unsigned long)((m.uptimeSec % 3600) / 60));
   setText(gInfoVal[7], b);
-  snprintf(b, sizeof b, "MAC %s • KÊNH %u", m.mac[0] ? m.mac : "?", (unsigned)m.channel);
+  snprintf(b, sizeof b, "MAC %s · KÊNH %u", m.mac[0] ? m.mac : "?", (unsigned)m.channel);
   setText(gInfoFoot, b);
 
   // --- lớp phủ học remote ---
