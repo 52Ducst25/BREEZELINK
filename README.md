@@ -5,7 +5,7 @@ nhiệt độ/độ ẩm trong và ngoài nhà, một thuật toán comfort tín
 điện, và người dùng điều khiển máy lạnh qua ứng dụng điện thoại. Nhà quản trị (bên bán)
 quản lý khách hàng, thiết bị và phát hành bản cập nhật app qua một trang web riêng.
 
-Dự án gồm ba phần chạy chung một backend:
+Dự án gồm bốn phần chạy chung một backend:
 
 - **Web quản trị** (SSR, dành cho **nhà quản trị/bên bán**) — quản lý khách hàng, cấp mã
   kích hoạt, quản lý node, tinh chỉnh thuật toán, phát hành OTA.
@@ -13,6 +13,9 @@ Dự án gồm ba phần chạy chung một backend:
   điều khiển điều hoà, tự cập nhật qua OTA.
 - **API + Worker** (FastAPI + MQTT) — phục vụ cả web lẫn app từ **một tầng nghiệp vụ duy
   nhất**, nên số liệu trên web và trên app không bao giờ lệch nhau.
+- **Firmware ESP32** (2 node mỗi hộ) — node **trong nhà** mang màn cảm ứng 2.8", đo
+  nhiệt/ẩm, phát hồng ngoại điều khiển máy lạnh và làm cầu nối lên cloud; node **ngoài
+  trời** đo nhiệt/ẩm ngoài trời rồi bắn về qua ESP-NOW, không cần WiFi.
 
 ---
 
@@ -53,6 +56,21 @@ Dự án gồm ba phần chạy chung một backend:
 - **Số đo trực tiếp** — trong/ngoài nhà, biểu đồ lịch sử.
 - **Tự cập nhật OTA** — báo có bản mới, tải và cài trực tiếp.
 
+### Bảng điều khiển tại chỗ (node trong nhà)
+
+Màn cảm ứng 2.8" trên node trong nhà, dùng được cả khi mất mạng:
+
+- **Trang chủ** — nhiệt/ẩm trong nhà và ngoài trời, chế độ + nhiệt độ đặt hiện tại, huy
+  hiệu cho biết đang **TỰ ĐỘNG** hay **GHI ĐÈ**.
+- **Điều khiển** — chọn chế độ, chỉnh nhiệt độ, bắn hồng ngoại ngay tại chỗ. Tổ hợp chưa
+  học mã thì nút bị làm mờ, không có phím chết.
+- **Thông tin** — 8 dòng chẩn đoán: WiFi, IP, sóng, MQTT, đếm gói ESP-NOW, tuổi số đo
+  ngoài trời, số mã IR, phiên bản firmware.
+- **Cài đặt** — độ sáng (giữ để chạy nhanh), âm báo, khởi động lại, **danh sách mã IR đã
+  học** (xoá được từng mã), **nhật ký 8 lệnh gần nhất** từ máy chủ kèm kết quả thi hành.
+
+Mọi thao tác khó lùi đều hỏi lại bằng một hộp xác nhận nêu đích danh việc sắp làm.
+
 ### Điểm nổi bật kỹ thuật
 
 - **Một tầng nghiệp vụ, hai giao diện** — web SSR và app JSON dùng chung service, số liệu
@@ -69,8 +87,10 @@ Dự án gồm ba phần chạy chung một backend:
 
 ```mermaid
 flowchart LR
-  subgraph Edge["Phần cứng (nhà khách)"]
-    ESP["ESP32 · cảm biến T/RH<br/>+ phát IR điều khiển máy lạnh"]
+  subgraph Edge["Phần cứng (nhà khách) — 2 node"]
+    OUT["ESP32 NGOÀI TRỜI · slave<br/>DHT22 · không dùng WiFi"]
+    ESP["ESP32 TRONG NHÀ · master<br/>màn cảm ứng 2.8 inch<br/>cảm biến T/RH + phát/học IR"]
+    OUT -->|ESP-NOW broadcast| ESP
   end
 
   subgraph Cloud["Server (Docker)"]
@@ -94,10 +114,21 @@ flowchart LR
   APP["App Flutter<br/>(khách hàng)"] -->|HTTPS| CF
 ```
 
-**Luồng dữ liệu:** ESP32 đẩy số đo qua MQTT → worker cập nhật trạng thái (Redis) + lịch sử
-(Postgres) và tính nhiệt độ đặt → phát lệnh IR về ESP32. API phục vụ web + app; Redis
-pub/sub đẩy cập nhật realtime tới WebSocket. Cloudflare Tunnel là đường duy nhất từ
-internet vào — không cổng nào mở ra `0.0.0.0`.
+**Luồng dữ liệu:** node ngoài trời bắn số đo qua ESP-NOW về node trong nhà; node trong nhà
+đẩy cả hai bộ số lên MQTT → worker cập nhật trạng thái (Redis) + lịch sử (Postgres) và tính
+nhiệt độ đặt → phát lệnh IR về node trong nhà. API phục vụ web + app; Redis pub/sub đẩy cập
+nhật realtime tới WebSocket. Cloudflare Tunnel là đường duy nhất từ internet vào — không
+cổng nào mở ra `0.0.0.0`.
+
+**Vì sao node ngoài trời không tự nối WiFi:** nó chỉ cần gửi 43 byte mỗi 15 giây. ESP-NOW
+bỏ được toàn bộ bắt tay WiFi/DHCP/TCP nên tốn ít điện hơn hẳn (quan trọng nếu chạy pin), và
+node đó **không cần tài khoản MQTT riêng** — node trong nhà đứng tên publish hộ. Đổi lại,
+mất node trong nhà là mất luôn số ngoài trời; bản dự phòng tự nối WiFi vẫn còn trong repo
+(`pio run -e esp32-wifi`) để tách lỗi khi ESP-NOW trục trặc.
+
+**Vì sao node trong nhà nối MQTT trực tiếp:** lệnh từ backend mang `ir_raw` — mảng vài trăm
+mốc thời gian µs, cỡ vài KB. ESP-NOW giới hạn 250 byte/gói nên trung chuyển qua master sẽ
+phải tự viết giao thức chia mảnh; MQTT thì broker đã lo sẵn.
 
 ---
 
@@ -130,6 +161,8 @@ Chống dao động: `deadband` (vùng trễ quanh nhiệt độ đặt) + `dwel
 | CSDL / cache | PostgreSQL 15, Redis 7 |
 | IoT | MQTT (EMQX 5 / Mosquitto), paho-mqtt |
 | App | Flutter (Dart), Dio, package_info_plus, url_launcher |
+| Firmware | C++ (Arduino-ESP32), PlatformIO, LVGL 8 + TFT_eSPI, IRremoteESP8266, ESP-NOW |
+| Phần cứng | ESP32-WROOM-32 · màn ST7789 2.8" cảm ứng · DHT22/SHT3x · DS1307 · LED IR |
 | Hạ tầng | Docker Compose, Cloudflare Tunnel |
 | Web admin | SSR Jinja2 + design system "Titanium Command" (CSS thuần, không CDN) |
 
@@ -151,6 +184,14 @@ AirConditioner/
 │   ├── lib/screens/       #   Màn hình: auth, dashboard, control, devices…
 │   ├── lib/services/      #   API client, OTA, WebSocket…
 │   └── assets/icon/       #   Icon app
+├── FirmWare/              # Firmware ESP32 (PlatformIO)
+│   ├── esp32-indoor/      #   Node TRONG NHÀ: master + IR + màn cảm ứng
+│   │   ├── src/ui/        #     Giao diện LVGL (chạy trên lõi 0)
+│   │   ├── src/ir-*.{h,cpp}  #  Phát/học IR + kho mã trong NVS
+│   │   └── tools/         #     Sinh font/ảnh LVGL, đọc log serial
+│   ├── esp32-outdoor/     #   Node NGOÀI TRỜI: slave ESP-NOW (+ bản WiFi dự phòng)
+│   ├── shared/            #   Khuôn gói tin ESP-NOW dùng chung hai node
+│   └── Interface/         #   Thiết kế giao diện + sơ đồ chân (README riêng)
 ├── docker/                # Dockerfile + compose (local + vps)
 ├── scripts/               # deploy.sh, seed_demo.py
 ├── docs/                  # Tài liệu thiết kế
@@ -194,6 +235,46 @@ flutter build apk --release # -> build/app/outputs/flutter-apk/app-release.apk
 
 App mặc định trỏ tới `https://admin.vi-du.com` — đổi trong màn đăng nhập, hoặc sửa
 `_kDefaultBaseUrl` trong `lib/app/auth_gate.dart`.
+
+### 3. Firmware ESP32
+
+**Yêu cầu:** PlatformIO (CLI hoặc extension VS Code).
+
+`config.h` **không có trong repo** (bị `.gitignore` vì chứa mật khẩu WiFi + token MQTT của
+từng node). Lấy giá trị ở web quản trị → *Khách hàng* → mở node → mục **"Nạp firmware"**.
+
+```bash
+# Node trong nhà (bo QR Box Advance, USB-TTL cắm vào cổng P3)
+cd FirmWare/esp32-indoor
+cp src/config.h.example src/config.h        # rồi điền WiFi + ORG_ID/DEVICE_UUID/MQTT_PASSWORD
+pio run -e qrbox-touch -t upload --upload-port COMx
+
+# Node ngoài trời (ESP32 DevKit V1) — MẶC ĐỊNH là bản ESP-NOW
+cd FirmWare/esp32-outdoor
+cp src/config.h.example src/config.h
+pio run -e esp32-espnow -t upload --upload-port COMy
+```
+
+Bốn điều dễ mất thời gian nhất nếu không biết trước:
+
+- **Bo QR Box phải có nguồn riêng 9–24 VDC ở P2/P4.** Cắm mỗi USB-TTL vào P3 thì đủ để nạp
+  nhưng không nuôi nổi màn lúc chạy — bo reset lặp và rất dễ chẩn đoán nhầm thành lỗi
+  firmware. Phân biệt bằng mã reset: `POWERON_RESET` là nguồn, `SW_CPU_RESET` mới là phần mềm.
+- **`WIFI_SSID` phải là băng 2.4 GHz** và **giống hệt nhau ở cả hai node**. ESP32 không có
+  radio 5 GHz; còn node ngoài trời không đăng nhập WiFi mà chỉ *quét* đúng chuỗi tên này để
+  biết router đang ở kênh nào — ESP-NOW bắt buộc hai bên cùng kênh. Lệch tên là hỏng câm:
+  gói broadcast không có ACK nên không một dòng log nào báo lỗi.
+- **Mã IR sống trong NVS**, không mất khi nạp lại firmware (`pio run -t upload` không đụng
+  phân vùng NVS) — nhưng `erase_flash` thì mất sạch.
+- **Đừng chạy `pio pkg install`** để thêm thư viện: nó ghi đè `platformio.ini` và xoá hết
+  chú thích. Thêm tay vào `lib_deps` rồi để `pio run` tự tải.
+
+Xem log:
+
+```bash
+pio device monitor -p COMx -b 115200          # có RESET bo -> xem được log khởi động
+python tools/read_serial.py COMx 30           # KHÔNG reset -> giữ trạng thái tích luỹ khi truy lỗi
+```
 
 ---
 
@@ -261,6 +342,8 @@ khẩu trong script. Mỗi lần deploy gây gián đoạn ~30–40 giây (cloud
 - Bí mật thật (**token tunnel, JWT secret, mật khẩu DB, MQTT**) nằm trong `.env` /
   `docker/.env` — **được `.gitignore` loại khỏi repo**. Trong repo chỉ có `.env.example`
   là mẫu placeholder.
+- **`FirmWare/*/src/config.h` bị ignore** — mỗi node có mật khẩu WiFi của khách và một cặp
+  `DEVICE_UUID`/`MQTT_PASSWORD` riêng. Repo chỉ có `config.h.example` là mẫu rỗng.
 - APK, keystore ký app, khoá riêng đều bị ignore.
 - Trang quản trị **chỉ dành cho nhân viên** (`is_sysadmin`); khách hàng dùng app.
 - Xoá khách hàng yêu cầu gõ đúng tên để xác nhận (thao tác cascade, không hoàn tác).
