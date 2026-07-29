@@ -278,7 +278,53 @@ static void publishLearned(const uint16_t *raw, uint16_t len) {
 // ---------------------------------------------------------------------------
 static char lastReqId[24] = "";
 
+/// Gói "chỉ lưu, không phát" — máy chủ đẩy lại kho mã sau khi người dùng bấm
+/// XIN MÃ trên panel (ir_service.push_all_codes).
+///
+/// PHẢI TÁCH KHỎI takeCommand(): một gói cmd bình thường mang `ir_raw` nghĩa là
+/// "bắn khung này ra máy lạnh ngay". Đi qua đường đó thì một lượt đồng bộ ~18 mã
+/// biến thành 18 lần bấm remote liên tiếp — chế độ và nhiệt độ nhảy loạn rồi
+/// dừng ở đúng hàng cuối cùng trong danh sách.
+///
+/// Cũng KHÔNG ack: không có req_id, và không có hàng `commands` nào bên server
+/// chờ được đánh dấu.
+static void storeCode(JsonDocument &doc) {
+  const char *codeId = doc["ir_code_id"];
+  const char *mode   = doc["mode"] | "";
+  const int   setp   = doc["setpoint"] | -1;
+  JsonArray   irRaw  = doc["ir_raw"];
+
+  if (codeId == nullptr || irRaw.isNull() || mode[0] == '\0') {
+    Serial.println("[sync] goi store_only thieu truong — bo qua");
+    return;
+  }
+  if (irRaw.size() > IrIo::RAW_MAX) {
+    Serial.printf("[sync] ma %s dai %u moc > gioi han %u — bo qua\n",
+                  codeId, (unsigned)irRaw.size(), IrIo::RAW_MAX);
+    return;
+  }
+
+  uint16_t n = 0;
+  for (JsonVariant v : irRaw) irBuf[n++] = (uint16_t)v.as<uint32_t>();
+
+  if (!IrStore::save(codeId, irBuf, n)) {
+    Serial.printf("[sync] khong luu duoc %s — NVS day?\n", codeId);
+    Ui::reply("NVS ĐẦY — KHÔNG LƯU ĐƯỢC MÃ");
+    return;
+  }
+  IrStore::saveAlias(mode, aliasTemp(mode, setp), codeId);
+  aliasDirty = true;
+  Serial.printf("[sync] da nhan %s %d (%u moc)\n", mode, setp, n);
+}
+
 static void takeCommand(JsonDocument &doc) {
+  // Trước MỌI thứ khác: gói đồng bộ không phải là lệnh điều khiển, nó không đi
+  // qua pending/ack/chống-trùng và tuyệt đối không được bắn IR.
+  if (doc["store_only"] | false) {
+    storeCode(doc);
+    return;
+  }
+
   copyStr(pending.reqId, sizeof(pending.reqId), doc["req_id"]);
   copyStr(pending.mode,  sizeof(pending.mode),  doc["mode"]);
   pending.setpoint = doc["setpoint"] | -1;
@@ -615,6 +661,21 @@ static void runPanelCommand(const Ui::Command &c) {
   if (c.kind == Ui::Command::AUTO) {
     overrideLocal = false;
     Serial.println("[panel] tra quyen ve cho may chu");
+    return;
+  }
+
+  if (c.kind == Ui::Command::RESYNC) {
+    if (!mqtt.connected()) {
+      Ui::reply("MẤT KẾT NỐI MÁY CHỦ");
+      return;
+    }
+    // Cùng topic `state` với need_raw: đây vẫn là node nói về kho mã của chính
+    // nó, chỉ khác ở chỗ xin CẢ KHO thay vì một mã. Không retain — yêu cầu xảy
+    // ra một lần, retain thì mỗi lần node nối lại broker sẽ phát lại và máy chủ
+    // đẩy nguyên kho mã xuống một cách vô cớ.
+    const bool ok = mqtt.publish(tState.c_str(), "{\"resync\":true}", false);
+    Serial.printf("[panel] xin lai toan bo kho ma -> %s\n", ok ? "da gui" : "GUI LOI");
+    Ui::reply(ok ? "ĐANG XIN MÃ TỪ MÁY CHỦ..." : "GỬI YÊU CẦU THẤT BẠI");
     return;
   }
 

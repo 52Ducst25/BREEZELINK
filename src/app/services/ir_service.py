@@ -60,6 +60,53 @@ async def check_coverage(session: AsyncSession, org_id: uuid.UUID) -> list[str]:
     return missing
 
 
+async def push_all_codes(
+    client: aiomqtt.Client, session: AsyncSession, org_id: str, device_uuid: str
+) -> int:
+    """Re-send every learned code of an org down to one node. Returns how many.
+
+    Answers the panel's "XIN MÃ" button: restore this node's IR store from the
+    server. The node cannot ask for codes by id — it does not know the ids of
+    codes it is missing — so the whole set is pushed and the node overwrites in
+    place.
+
+    ``store_only`` is what makes this safe, and it is not optional. A normal
+    ``cmd`` carrying ``ir_raw`` tells the node to BLAST that frame at the air
+    conditioner; without the flag this loop would fire ~18 remote presses in a
+    row — mode and temperature swinging wildly, ending on whatever the last row
+    happened to be. With it, the node only writes NVS and stays silent.
+
+    The Redis cache is refreshed alongside each publish so the next real command
+    can go back to omitting the raw timing. Doing it here (not on ack) keeps the
+    two in step: the node has the code the moment it processes the message, and
+    a lost message leaves the cache claiming a code the node lacks — which the
+    ``need_raw`` path already repairs.
+    """
+    from app.services import redis_ir_cache  # cục bộ: tránh vòng import ở tầng module
+
+    codes = await list_codes(session, uuid.UUID(org_id))
+    topic = mqtt_naming.topic(org_id, device_uuid, "cmd")
+    sent = 0
+    for code in codes:
+        # Mã chỉ có `state_bytes` (đường thư viện theo hãng) chưa dùng tới ở
+        # firmware hiện tại — nó chỉ biết phát mảng thời gian thô.
+        if not code.raw_timing:
+            continue
+        raw = list(code.raw_timing)
+        payload = {
+            "store_only": True,
+            "ir_code_id": str(code.id),
+            "mode": code.mode.value,
+            "setpoint": int(code.temp),
+            "ir_raw": raw,
+            "reason": "resync",
+        }
+        await client.publish(topic, json.dumps(payload), qos=1, retain=False)
+        await redis_ir_cache.put_ir(str(code.id), {"raw_timing": raw})
+        sent += 1
+    return sent
+
+
 async def trigger_learn(
     client: aiomqtt.Client, org_id: str, device_uuid: str, mode: AcMode, temp: int | None
 ) -> None:

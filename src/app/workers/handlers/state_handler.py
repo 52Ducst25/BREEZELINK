@@ -17,6 +17,7 @@ from app.core.database import AsyncSessionLocal
 from app.core.tenant import set_current_org
 from app.services import (
     command_service,
+    ir_service,
     redis_ir_cache,
     redis_state_service,
     telemetry_service,
@@ -59,6 +60,19 @@ async def handle_state(client, topic: ParsedTopic, payload: dict) -> None:
                 "Node asked to re-send ir_code_id=%s org=%s uuid=%s (cache %s)",
                 need_raw, topic.org_id, topic.device_uuid,
                 "dropped" if dropped else "was already absent",
+            )
+
+        # Người dùng bấm "XIN MÃ" trên panel: đẩy lại TOÀN BỘ kho mã của org
+        # xuống node. Khác `need_raw` ở chỗ đó là sửa một mã lẻ khi phát hiện
+        # lệch, còn đây là khôi phục cả kho theo yêu cầu — node không thể tự hỏi
+        # theo id vì nó không biết id của những mã nó đang thiếu.
+        if payload.get("resync"):
+            sent = await ir_service.push_all_codes(
+                client, session, topic.org_id, topic.device_uuid
+            )
+            logger.info(
+                "Resync IR org=%s uuid=%s -> da day %d ma",
+                topic.org_id, topic.device_uuid, sent,
             )
 
         ack_req_id = payload.get("ack")

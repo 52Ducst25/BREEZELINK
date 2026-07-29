@@ -93,7 +93,8 @@ struct Model {
 /// quyền loop() ở lõi 1 (xem bảng chia sở hữu ở đầu file). Gọi IrStore từ lõi 0
 /// là hai lõi cùng mở một namespace Preferences — hỏng theo kiểu ngẫu nhiên.
 struct Command {
-  enum Kind : uint8_t { MANUAL, AUTO, DEL_CODE } kind;
+  /// RESYNC: xin máy chủ gửi lại toàn bộ kho mã IR. Không mang mode/setpoint.
+  enum Kind : uint8_t { MANUAL, AUTO, DEL_CODE, RESYNC } kind;
   char mode[8];
   /// MANUAL: nhiệt độ đặt. DEL_CODE: nhiệt độ của tổ hợp cần xoá, -1 cho mã cố
   /// định (DRY/FAN/OFF) — cùng quy ước với IrStore::removeAlias().

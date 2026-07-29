@@ -565,6 +565,15 @@ void doReboot(uint32_t) {
   if (gOnSetting) gOnSetting(REBOOT);
 }
 
+/// Xin máy chủ gửi lại toàn bộ kho mã. Không hỏi lại: việc này chỉ THÊM mã,
+/// không xoá gì, và mã trùng thì ghi đè tại chỗ — không có gì để mất.
+void onIrResync(lv_event_t *) {
+  if (!gOnCmd) return;
+  Ui::Command c{};
+  c.kind = Ui::Command::RESYNC;
+  gOnCmd(c);
+}
+
 void onRebootAsk(lv_event_t *) {
   // Nói ĐÚNG cái giá phải trả. "Bạn có chắc không?" không giúp ai quyết định
   // được; "mất kết nối ~20 giây" thì có — và nó cũng nói rõ đây là việc tự phục
@@ -759,6 +768,11 @@ void buildIrList() {
 
   gIrTitle = label(gIrOverlay, 16, 10, "MÃ IR ĐÃ HỌC", fontLabel(), accent());
   lv_obj_set_style_text_letter_space(gIrTitle, 2, 0);
+
+  // XIN MÃ đứng cạnh ĐÓNG vì đây là màn duy nhất câu hỏi "mã đâu mất rồi?" nảy
+  // ra — nhìn thấy tổ hợp bị khuyết rồi bấm ngay, không phải đi tìm ở màn khác.
+  lv_obj_t *bs = button(gIrOverlay, 156, 6, 74, 26, "XIN MÃ");
+  lv_obj_add_event_cb(bs, onIrResync, LV_EVENT_CLICKED, nullptr);
 
   lv_obj_t *bc = button(gIrOverlay, 236, 6, 68, 26, "ĐÓNG");
   lv_obj_add_event_cb(bc, onIrClose, LV_EVENT_CLICKED, nullptr);
