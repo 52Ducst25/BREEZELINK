@@ -76,3 +76,12 @@ ck.md
 .claude/settings.bak.json
 # python build artifacts
 *.egg-info/
+
+# Office: file khoa tam (~$...) va ban luu tu dong — sinh ra khi mo .pptx/.docx,
+# khong phai noi dung, va bi khoa nen git thao tac loi.
+#  Mau khong dua vao chu tieng Viet: ten file tu Windows co the o dang NFC hoac
+#  NFD, hai chuoi byte khac nhau -> mau go dau se truot mot trong hai. Bat theo
+#  dau ngoac vuong (Word/PowerPoint luon chen "[...]" vao ban luu tu dong).
+~$*
+*[[]*[]]*.pptx
+*[[]*[]]*.docx
