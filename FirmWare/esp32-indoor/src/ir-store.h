@@ -77,6 +77,23 @@ bool saveLearned(const char *mode, int temp, const uint16_t *raw, uint16_t len);
 /// true nếu có mã cho tổ hợp này (dùng để làm mờ nút chưa học).
 bool hasAlias(const char *mode, int temp);
 
+/// Xoá mã của một tổ hợp: bỏ cả bí danh lẫn mảng thời gian nó trỏ tới.
+///
+/// CHỈ XOÁ TRÊN NODE. Hàng `ir_codes` trong Postgres vẫn còn, nên đây là "quên
+/// đi để nạp lại" chứ không phải "xoá vĩnh viễn" — muốn xoá hẳn thì dùng app
+/// (DELETE /api/v1/ir/codes/{id}).
+///
+/// HỆ QUẢ PHẢI BIẾT: backend ghi nhớ "node đã có mã này" trong Redis
+/// (`bl:ircache:{id}`) và từ lệnh thứ hai trở đi chỉ gửi `ir_code_id` trần.
+/// Xoá xong mà không làm gì thêm thì lệnh kế tiếp cho tổ hợp này rơi vào nhánh
+/// "có id nhưng NVS rỗng" trong main.cpp và máy lạnh đứng im. Vì vậy nhánh đó
+/// publish `need_raw` để backend dọn cache và gửi lại mảng — hai nửa này phải
+/// đi cùng nhau, bỏ một nửa là tự tạo ra lỗi câm.
+///
+/// Trả false nếu tổ hợp vốn chưa có mã (không coi là lỗi, chỉ là không có gì
+/// để xoá).
+bool removeAlias(const char *mode, int temp);
+
 /// Tra bí danh rồi đọc luôn mảng thời gian. Trả 0 nếu chưa có.
 uint16_t loadAlias(const char *mode, int temp, uint16_t *out, uint16_t maxLen);
 

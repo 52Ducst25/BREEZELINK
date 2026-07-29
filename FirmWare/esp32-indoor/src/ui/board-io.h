@@ -51,11 +51,29 @@ struct Clock { uint8_t hh, mm, ss; };
 /// động (bit CH) — tức là chưa từng được đặt giờ. Không đoán bừa: giao diện
 /// hiện "--:--" còn hơn hiện 00:00 như thể đó là giờ thật.
 ///
-/// CHỈ CÒN CHIỀU ĐỌC. Node không đặt giờ nữa: nút "ĐỒNG BỘ GIỜ" cùng cặp
-/// ntpBegin()/ntpPoll() và clockWrite() đã bỏ. Hệ quả phải biết trước: DS1307
-/// phải được đặt giờ bằng công cụ khác (nó có pin nuôi riêng nên đặt một lần là
-/// giữ). Chưa từng đặt thì thanh trạng thái hiện "--:--" vĩnh viễn — đúng theo
-/// luật "thà không có số còn hơn số bịa", nhưng nhìn ra là đồng hồ hỏng.
 bool clockRead(Clock &out);
+
+/// Đặt giờ cho DS1307 (chế độ 24h, xoá bit CH để dao động chạy).
+///
+/// PHẢI gọi từ tác vụ UI — DS1307 nằm trên bus I2C mà tác vụ đó sở hữu.
+bool clockWrite(uint8_t hh, uint8_t mm, uint8_t ss);
+
+// --- Đồng bộ giờ qua NTP ---
+//
+//  ĐÃ QUAY LẠI, NHƯNG TỰ ĐỘNG. Bản trước có nút "ĐỒNG BỘ GIỜ" trong Cài đặt và
+//  nó bị gỡ ở 42332bc vì bắt người ta bấm tay là một việc vặt ai cũng quên. Gỡ
+//  cả đường đặt giờ thì lộ ra hệ quả tệ hơn: DS1307 có pin nuôi riêng nên một
+//  giá trị SAI cũng được giữ nguyên vĩnh viễn, mà bit CH đã xoá nên clockRead()
+//  vẫn báo hợp lệ — màn hình hiện một giờ sai một cách tự tin, và không có bất
+//  kỳ đường nào trong firmware sửa được nó.
+//
+//  Nên lần này không có nút: node tự đồng bộ khi có mạng, DS1307 lùi về đúng vai
+//  trò của nó là giữ giờ lúc mất mạng/mất điện.
+void ntpBegin();
+
+/// Hỏi đồng hồ hệ thống; nếu SNTP đã về thì ghi xuống DS1307.
+/// Trả false khi SNTP chưa có kết quả — KHÔNG chờ, gọi lại ở nhịp sau.
+/// Cũng phải gọi từ tác vụ UI (nó ghi I2C).
+bool ntpPoll();
 
 } // namespace BoardIo

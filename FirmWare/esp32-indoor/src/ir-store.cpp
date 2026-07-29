@@ -161,6 +161,22 @@ bool hasAlias(const char *mode, int temp) {
   return getStr(keyUuid) == id && prefs.getBytesLength(keyRaw) > 0;
 }
 
+bool removeAlias(const char *mode, int temp) {
+  if (!ready || mode == nullptr || mode[0] == '\0') return false;
+  char key[16];
+  makeAliasKey(mode, temp, key, sizeof(key));
+  const String id = getStr(key);
+  if (id.length() == 0) return false;   // vốn chưa học — không có gì để xoá
+
+  // Xoá MẢNG TRƯỚC, BÍ DANH SAU — ngược với thứ tự ghi của save(), và có lý do:
+  // mất điện giữa chừng ở đây thì còn lại một bí danh trỏ vào mảng rỗng, mà
+  // hasAlias() kiểm cả hai nên vẫn báo đúng "chưa có mã". Làm ngược lại thì
+  // mảng thành mồ côi, chiếm chỗ NVS mà không ai trỏ tới và không ai dọn nổi.
+  removeBlob(id.c_str());
+  prefs.remove(key);
+  return true;
+}
+
 uint16_t loadAlias(const char *mode, int temp, uint16_t *out, uint16_t maxLen) {
   if (!ready || mode == nullptr || mode[0] == '\0' || out == nullptr) return 0;
   char key[16];

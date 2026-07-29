@@ -136,6 +136,10 @@ static struct {
   bool     hasFrame;      // có khung IR chờ phát
   uint16_t frameLen;
   bool     needAck;       // có ack chờ gửi (kể cả khi không phát được gì)
+  // ir_code_id cần xin server gửi lại mảng, rỗng = không xin gì. Phải ĐẶT HÀNG
+  // như hasFrame/needAck chứ không publish thẳng trong callback — cùng đúng lý
+  // do ghi ở đầu struct này. 37 byte đủ cho UUID 36 ký tự + '\0'.
+  char     needRawId[40];
   char     reqId[24];
   char     mode[8];
   int      setpoint;
@@ -281,8 +285,18 @@ static void takeCommand(JsonDocument &doc) {
   pending.hasFrame = false;
   pending.frameLen = 0;
   pending.needAck  = false;
+  pending.needRawId[0] = '\0';
 
   const char *reason = doc["reason"] | "";
+
+  // Dựng sẵn dòng nhật ký cho màn hình. `reason` tới trong MỌI lệnh nhưng trước
+  // đây chỉ được in ra serial rồi vứt — nghĩa là muốn biết máy chủ vừa ra lệnh
+  // gì phải cắm USB-TTL vào bo treo trên tường. Bốn nhánh dưới điền nốt `result`
+  // rồi gửi sang tác vụ UI (chỉ đẩy hàng đợi, an toàn trong callback này).
+  Ui::CmdLog logEntry{};
+  copyStr(logEntry.mode,   sizeof(logEntry.mode),   pending.mode);
+  copyStr(logEntry.reason, sizeof(logEntry.reason), reason);
+  logEntry.setpoint = pending.setpoint;
 
   // MQTT QoS1 cho phép broker gửi LẠI cùng một lệnh nếu ack chưa kịp về. Phát
   // lại khung IR = bấm remote hai lần; với các nút xoay vòng (tốc độ quạt, đảo
@@ -291,6 +305,8 @@ static void takeCommand(JsonDocument &doc) {
   if (pending.reqId[0] && strcmp(pending.reqId, lastReqId) == 0) {
     Serial.printf("[cmd] %s da thi hanh roi — bo qua ban lap, ack lai\n", pending.reqId);
     pending.needAck = true;
+    logEntry.result = Ui::CmdLog::DUPLICATE;
+    Ui::logCommand(logEntry);
     return;
   }
 
@@ -330,7 +346,12 @@ static void takeCommand(JsonDocument &doc) {
       // lại. CỐ Ý không ack: lệnh chưa thi hành thì không được báo là xong, để
       // commands.acked_at trên web phản ánh đúng sự thật.
       Serial.printf("[cmd] ir_code_id=%s khong co trong NVS ma server khong gui kem ir_raw\n", codeId);
-      Serial.println("      -> xoa redis ir cache cua org de server gui lai (xem README §6)");
+      // Tự xin lại thay vì chờ người vào xoá Redis bằng tay. loop() mới publish
+      // (callback không được đụng mqtt.publish — xem đầu struct pending).
+      copyStr(pending.needRawId, sizeof(pending.needRawId), codeId);
+      Serial.println("      -> dang xin server gui lai mang thoi gian");
+      logEntry.result = Ui::CmdLog::NEED_RAW;
+      Ui::logCommand(logEntry);
       return;
     }
   } else {
@@ -338,6 +359,8 @@ static void takeCommand(JsonDocument &doc) {
     // "No learned IR code" ở phía server rồi.
     Serial.printf("[cmd] %s %s %d: khong co ir_raw lan ir_code_id — chua hoc ma nay\n",
                   pending.reqId, pending.mode, pending.setpoint);
+    logEntry.result = Ui::CmdLog::NO_CODE;
+    Ui::logCommand(logEntry);
     return;
   }
 
@@ -345,6 +368,12 @@ static void takeCommand(JsonDocument &doc) {
                 pending.reqId, pending.mode, pending.setpoint, reason, pending.frameLen);
   pending.hasFrame = true;
   pending.needAck  = true;
+  // Ghi SENT ngay ở đây dù việc bắn nằm ở loop(): hasFrame=true là cam kết chắc
+  // chắn — loop() không có nhánh nào bỏ qua nó. Chờ tới sau khi bắn mới ghi thì
+  // phải chuyền logEntry qua struct pending, thêm một trạng thái nữa chỉ để nói
+  // lại đúng điều đã biết.
+  logEntry.result = Ui::CmdLog::SENT;
+  Ui::logCommand(logEntry);
   // Máy chủ vừa ra lệnh -> nó đã giành lại quyền, huy hiệu trên màn trở về
   // "TU DONG". Đây chính là điều giao diện đã cảnh báo lúc người dùng ghi đè.
   lastCmdMs = millis();
@@ -383,6 +412,31 @@ static void publishState() {
   bool ok = mqtt.publish(tState.c_str(), (const uint8_t *)buf, n, true);
   Serial.printf("[state] ack=%s mode=%s setpoint=%d -> %s\n",
                 pending.reqId, pending.mode, pending.setpoint, ok ? "da gui" : "GUI LOI");
+}
+
+/// Xin server gửi lại mảng thời gian của một ir_code_id mà node không còn giữ.
+///
+/// VÌ SAO CẦN: backend chỉ đính `ir_raw` cho LẦN ĐẦU mỗi mã, sau đó tin rằng node
+/// còn giữ trong NVS (`command_publisher._resolve_ir_raw` + `bl:ircache:{id}`).
+/// Hai bên lệch nhau bất cứ khi nào NVS mất mà DB thì không: `erase_flash`, thay
+/// bo dùng lại DEVICE_UUID, hoặc người dùng vừa bấm XOÁ trong màn Cài đặt. Trước
+/// đây nhánh đó chỉ in log rồi đứng im — máy lạnh câm mà log server sạch sẽ, kiểu
+/// hỏng tốn nhiều thời gian nhất để tìm.
+///
+/// KHÔNG RETAIN. Đây là một yêu cầu xảy ra một lần, không phải trạng thái. Retain
+/// thì broker phát lại nó sau mỗi lần node nối lại, và backend sẽ dọn cache rồi
+/// gửi lại mảng vài KB một cách vô cớ, mãi mãi.
+static void publishNeedRaw(const char *codeId) {
+  JsonDocument doc;
+  doc["need_raw"] = codeId;
+  // Kèm req_id để bên server đối chiếu được đúng lệnh nào đã trượt. Lệnh đó CỐ Ý
+  // không được ack (xem onCmdPacket) nên `commands.ack_ts` vẫn rỗng — đây là thứ
+  // giải thích vì sao.
+  if (pending.reqId[0]) doc["req_id"] = pending.reqId;
+  char buf[96];
+  size_t n = serializeJson(doc, buf);
+  bool ok = mqtt.publish(tState.c_str(), (const uint8_t *)buf, n, false);
+  Serial.printf("[cmd] xin lai ma %s -> %s\n", codeId, ok ? "da gui" : "GUI LOI");
 }
 
 // ---------------------------------------------------------------------------
@@ -564,6 +618,24 @@ static void runPanelCommand(const Ui::Command &c) {
     return;
   }
 
+  if (c.kind == Ui::Command::DEL_CODE) {
+    // KHÔNG đụng overrideLocal: xoá một mã không phải là ra lệnh cho máy lạnh,
+    // nên nó không được đổi chuyện ai đang cầm lái.
+    const bool gone = IrStore::removeAlias(c.mode, c.setpoint);
+    if (gone) {
+      aliasDirty = true;   // bảng "đã có mã" đổi -> màn phải tính lại
+      Serial.printf("[panel] da xoa ma %s %d khoi NVS\n", c.mode, c.setpoint);
+      // Nói rõ đây là việc LÙI ĐƯỢC. Mã vẫn nằm trong Postgres; lệnh kế tiếp cho
+      // tổ hợp này rơi vào nhánh "có id, NVS rỗng" ở onCmdPacket() và nhánh đó
+      // xin server gửi lại mảng. Không nói thì người dùng tưởng vừa xoá vĩnh
+      // viễn và đi học lại bằng tay — thừa công.
+      Ui::reply("ĐÃ XOÁ — sẽ tự nạp lại từ máy chủ");
+    } else {
+      Ui::reply("TỔ HỢP NÀY CHƯA CÓ MÃ");
+    }
+    return;
+  }
+
   // Ghi nhận quyền điều khiển TRƯỚC khi thử bắn mã, không phải sau.
   //
   // Trước đây dòng này nằm ở cuối hàm, sau nhánh thoát sớm "chưa có mã". Hậu
@@ -717,6 +789,13 @@ void loop() {
   if (pending.needAck) {
     pending.needAck = false;
     publishState();
+  }
+  if (pending.needRawId[0]) {
+    publishNeedRaw(pending.needRawId);
+    // Xoá SAU khi gửi, và xoá dù gửi lỗi: mất mạng thì lệnh kế tiếp cho cùng tổ
+    // hợp lại rơi vào đúng nhánh đó và đặt hàng lại. Giữ lại để thử gửi mãi thì
+    // biến một yêu cầu một lần thành vòng lặp gửi mỗi vòng loop().
+    pending.needRawId[0] = '\0';
   }
 
   // Đang học thì chờ người dùng bấm remote.

@@ -44,7 +44,83 @@ const char *const kInfoRow[8] = {"WIFI", "IP", "SÓNG", "MQTT",
 lv_obj_t *gInfoVal[8], *gInfoFoot;
 
 // --- CAI DAT -----------------------------------------------------------------
-lv_obj_t *gBrightLbl, *gBuzzOn, *gBuzzOff;
+lv_obj_t *gBrightLbl, *gBuzzOn, *gBuzzOff, *gIrCountLbl;
+
+// --- MA IR DA HOC (lớp phủ) --------------------------------------------------
+//  18 tổ hợp: COOL 16..30 (15 mức) + DRY + FAN + OFF — đúng dải mà `coolMask`
+//  của Ui::Model mã hoá (bit i = COOL 16+i) và đúng bộ mã ir_service coi là bắt
+//  buộc. Dựng đủ 18 hàng MỘT LẦN rồi ẩn/hiện, không tạo/huỷ widget lúc chạy:
+//  lv_obj_del() giữa lúc tác vụ UI đang vẽ là cách chắc chắn nhất để hỏng cây
+//  widget, mà bố cục flex của LVGL 8 vốn đã tự bỏ qua các con đang HIDDEN.
+constexpr uint8_t IR_ROWS      = 18;
+constexpr uint8_t IR_COOL_MIN  = 16;   // bit 0 của coolMask
+constexpr uint8_t IR_COOL_N    = 15;   // COOL 16..30
+lv_obj_t *gIrOverlay, *gIrList, *gIrEmpty, *gIrTitle;
+lv_obj_t *gIrRow[IR_ROWS], *gIrRowLbl[IR_ROWS];
+bool      gIrShown[IR_ROWS] = {false};   // trạng thái đang hiện, để khỏi ghi lại vô ích
+uint16_t  gIrLastMask = 0xFFFF;          // ép lần cập nhật đầu tiên luôn chạy
+bool      gIrLastFixed[3] = {true, true, true};
+
+// --- Hộp xác nhận DÙNG CHUNG ------------------------------------------------
+//  MỘT hộp cho mọi việc cần hỏi lại (xoá mã, khởi động lại). Trước đây nó gắn
+//  cứng vào việc xoá mã; dựng thêm một hộp nữa cho nút khởi động lại là nhân đôi
+//  ~15 widget cho cùng một bố cục, trong khi heap đã đi từ 110 KB xuống 72 KB
+//  qua bốn lần thêm màn.
+//
+//  Câu hỏi, dòng phụ, chữ trên nút đồng ý và việc-sẽ-làm đều truyền vào lúc hỏi.
+using ConfirmFn = void (*)(uint32_t arg);
+lv_obj_t *gConfirm, *gConfirmLbl, *gConfirmNote, *gConfirmYesLbl;
+ConfirmFn gConfirmCb  = nullptr;
+uint32_t  gConfirmArg = 0;
+
+// --- NHAT KY LENH (lớp phủ) --------------------------------------------------
+//  8 lệnh gần nhất từ backend. Sống trong RAM, mất khi mất điện — đây là công cụ
+//  chẩn đoán tại chỗ ("vừa nãy máy chủ có ra lệnh không, node làm gì với nó"),
+//  không phải sổ lưu trữ. Lịch sử đầy đủ đã nằm trong bảng `commands` và
+//  `comfort_log` trên server, xem được ở web và app.
+constexpr uint8_t LOG_ROWS = 8;
+struct LogEntry {
+  bool     used;
+  bool     hasClock;
+  uint8_t  hh, mm;
+  uint32_t atSec;               // uptime giây lúc nhận — mốc cho "x phút trước"
+  char     what[24];            // "LẠNH 25°C"
+  char     reason[24];          // nguyên văn từ backend
+  Ui::CmdLog::Result result;
+};
+LogEntry  gLog[LOG_ROWS];
+lv_obj_t *gLogOverlay, *gLogList, *gLogEmpty;
+lv_obj_t *gLogRow[LOG_ROWS], *gLogTop[LOG_ROWS], *gLogSub[LOG_ROWS];
+uint32_t  gLogLastMin = 0xFFFFFFFF;   // phút đã vẽ, để làm mới mốc tương đối
+
+/// Hàng i -> (mode, temp). temp < 0 = mã cố định, khớp quy ước IrStore.
+void irComboAt(uint8_t i, const char *&mode, int &temp) {
+  if (i < IR_COOL_N) { mode = "COOL"; temp = IR_COOL_MIN + i; return; }
+  temp = -1;
+  mode = (i == IR_COOL_N) ? "DRY" : (i == IR_COOL_N + 1) ? "FAN" : "OFF";
+}
+
+/// Hàng i -> nhãn người đọc ("LẠNH 25°C", "KHÔ"...).
+///
+/// Một chỗ duy nhất vì chuỗi này xuất hiện ở HAI nơi — hàng trong danh sách và
+/// câu hỏi trong hộp xác nhận. Hai nơi mà tự dựng chuỗi riêng thì sẽ có ngày
+/// lệch nhau, mà đây đúng là chỗ không được lệch: hộp xác nhận tồn tại để người
+/// dùng đối chiếu xem mình có bấm nhầm hàng không.
+///
+/// Nhãn tiếng Việt như màn ĐIỀU KHIỂN, KHÔNG phải mã máy "COOL"/"DRY" — cùng một
+/// thứ mà gọi hai tên ở hai màn thì người dùng phải tự dịch.
+void irRowLabel(uint8_t i, char *out, size_t n) {
+  const char *mode;
+  int temp;
+  irComboAt(i, mode, temp);
+  if (temp >= 0) {
+    snprintf(out, n, "%s %d°C", kModeLabel[0], temp);
+  } else {
+    snprintf(out, n, "%s", (i == IR_COOL_N)       ? kModeLabel[1]
+                           : (i == IR_COOL_N + 1) ? kModeLabel[2]
+                                                  : kModeLabel[3]);
+  }
+}
 
 // --- HOC REMOTE (lớp phủ) ----------------------------------------------------
 lv_obj_t *gLearn, *gLearnLbl, *gLearnBar, *gLearnSec;
@@ -123,12 +199,18 @@ void buildChrome() {
   lv_obj_set_style_bg_color(brandBox, accent(), 0);
   lv_obj_set_style_bg_opa(brandBox, LV_OPA_COVER, 0);
 
-  lv_obj_t *brand = label(gStatusBar, 20, 4, "AIRCON", fontLabel(), accent());
+  lv_obj_t *brand = label(gStatusBar, 20, 4, "BREEZELINK", fontLabel(), accent());
   lv_obj_set_style_text_letter_space(brand, 1, 0);
 
-  gDotWifi  = dot(gStatusBar, 238, 7, textMuted());
-  gDotMqtt  = dot(gStatusBar, 252, 7, textMuted());
-  gLblClock = label(gStatusBar, 270, 4, "--:--", fontLabel(), textPrimary());
+  // Đồng hồ có giây nên rộng hơn trước ~18px ("14:32:07" so với "14:32"). Hai
+  // chấm trạng thái lùi trái nhường chỗ, và đồng hồ CĂN PHẢI trong một ô cố
+  // định thay vì neo trái: chuỗi đổi độ rộng mỗi khi nhảy giữa "--:--:--" và
+  // giờ thật, neo trái thì nó thò ra khỏi mép phải màn.
+  gDotWifi  = dot(gStatusBar, 214, 7, textMuted());
+  gDotMqtt  = dot(gStatusBar, 228, 7, textMuted());
+  gLblClock = label(gStatusBar, 240, 4, "--:--:--", fontLabel(), textPrimary());
+  lv_obj_set_width(gLblClock, 74);   // 240..314, chừa 6px mép như thanh bên trái
+  lv_obj_set_style_text_align(gLblClock, LV_TEXT_ALIGN_RIGHT, 0);
 
   // --- thanh điều hướng ---
   gNav = lv_obj_create(scr);
@@ -282,7 +364,6 @@ void refreshControl() {
   for (uint8_t i = 0; i < 4; i++) anyCode = anyCode || gModeOk[i];
   if (!anyCode)               setText(gLimitLbl, "CHƯA HỌC MÃ — VÀO APP ĐỂ HỌC");
   else if (!gModeOk[gPendMode]) setText(gLimitLbl, "CHẾ ĐỘ NÀY CHƯA HỌC MÃ");
-  else if (gPendMode == 0)      setText(gLimitLbl, "GIỚI HẠN 16 - 30");
   else                          setText(gLimitLbl, "");
 }
 
@@ -389,6 +470,186 @@ void onSetting(lv_event_t *e) {
   if (gOnSetting) gOnSetting((Setting)(uintptr_t)lv_event_get_user_data(e));
 }
 
+/// Mở/đóng lớp phủ danh sách mã. KHÔNG đi qua SettingFn: đây thuần tuý là
+/// hiện/ẩn widget, không đụng phần cứng nào, nên gửi sang ui.cpp rồi quay về chỉ
+/// thêm một vòng vô ích.
+void onIrOpen(lv_event_t *) {
+  if (!gIrOverlay) return;
+  lv_obj_clear_flag(gIrOverlay, LV_OBJ_FLAG_HIDDEN);
+  // KHÔNG move_foreground ở đây. Thứ tự dựng trong build() đã cho đúng z-order
+  // cần có (4 trang < danh sách < học remote), mà đẩy lên trên cùng sẽ phá đúng
+  // nửa sau: backend kích hoạt học trong lúc danh sách đang mở thì lớp phủ "bấm
+  // nút trên remote đi" bị che, và người dùng ngồi nhìn một bảng liệt kê không
+  // giải thích được vì sao máy đang chờ. Toast tự lo phần của nó (nó gọi
+  // move_foreground mỗi lần hiện), nên vẫn nổi lên trên danh sách như thường.
+  lv_obj_scroll_to_y(gIrList, 0, LV_ANIM_OFF);   // mở lại là về đầu danh sách
+}
+
+/// Gỡ hộp xác nhận và quên việc đang chờ. Gọi từ mọi lối thoát — đóng màn đứng
+/// sau nó, bấm huỷ, hoặc vừa xác nhận xong.
+void confirmDismiss() {
+  gConfirmCb = nullptr;
+  if (gConfirm) lv_obj_add_flag(gConfirm, LV_OBJ_FLAG_HIDDEN);
+}
+
+/// Hỏi lại trước khi làm một việc khó lùi.
+///
+/// [question] phải NÊU ĐÍCH DANH việc sắp làm ("XOÁ LẠNH 25°C ?"), không phải
+/// "Bạn có chắc không?": người dùng cần kiểm chứng mình có bấm đúng chỗ không,
+/// mà câu hỏi chung chung thì không trả lời được điều đó.
+/// [note] nói hậu quả — cái quyết định người ta bấm tiếp hay lùi.
+void confirmAsk(const char *question, const char *note, const char *yesLabel,
+                ConfirmFn cb, uint32_t arg) {
+  if (!gConfirm) return;
+  setText(gConfirmLbl, question);
+  setText(gConfirmNote, note);
+  setText(gConfirmYesLbl, yesLabel);
+  gConfirmCb  = cb;
+  gConfirmArg = arg;
+  lv_obj_clear_flag(gConfirm, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_move_foreground(gConfirm);
+}
+
+void onConfirmNo(lv_event_t *) { confirmDismiss(); }
+
+void onConfirmYes(lv_event_t *) {
+  // Chụp lại RỒI mới đóng: confirmDismiss() xoá gConfirmCb, nên đọc sau khi đóng
+  // là gọi vào nullptr. Đóng trước khi chạy việc để người dùng thấy hộp biến mất
+  // ngay, thay vì đứng nhìn nó trong lúc lõi 1 làm việc.
+  ConfirmFn cb  = gConfirmCb;
+  uint32_t  arg = gConfirmArg;
+  confirmDismiss();
+  if (cb) cb(arg);
+}
+
+void onIrClose(lv_event_t *) {
+  // Đóng danh sách phải huỷ luôn câu hỏi đang treo. Không làm thì lần mở sau
+  // hộp xác nhận hiện lại nguyên trạng, hỏi về một hàng người dùng đã quên —
+  // và một cú chạm vào XOÁ lúc đó là xoá thứ họ không hề định xoá.
+  confirmDismiss();
+  if (gIrOverlay) lv_obj_add_flag(gIrOverlay, LV_OBJ_FLAG_HIDDEN);
+}
+
+/// Việc thật sự chạy khi người dùng xác nhận xoá. Chỉ ĐẶT HÀNG — việc xoá là ghi
+/// NVS, mà NVS thuộc loop() ở lõi 1 (xem chú thích Ui::Command). Kết quả quay
+/// lại bằng toast qua reply().
+void doIrDelete(uint32_t arg) {
+  const uint8_t i = (uint8_t)arg;
+  if (i >= IR_ROWS || !gOnCmd) return;
+
+  const char *mode;
+  int temp;
+  irComboAt(i, mode, temp);
+
+  Ui::Command c{};
+  c.kind = Ui::Command::DEL_CODE;
+  snprintf(c.mode, sizeof c.mode, "%s", mode);
+  c.setpoint = temp;
+  gOnCmd(c);
+}
+
+/// Bấm XOÁ ở một hàng: chưa xoá gì, chỉ hỏi lại.
+void onIrDelete(lv_event_t *e) {
+  const uint8_t i = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
+  if (i >= IR_ROWS) return;
+
+  char name[32], q[48];
+  irRowLabel(i, name, sizeof name);
+  snprintf(q, sizeof q, "XOÁ %s ?", name);
+  confirmAsk(q, "Mã vẫn còn trên máy chủ và sẽ tự nạp lại", "XOÁ", doIrDelete, i);
+}
+
+/// Việc thật sự chạy khi xác nhận khởi động lại. ui.cpp mới là nơi gọi
+/// ESP.restart() — nó sở hữu phần cứng, còn file này chỉ lo hỏi và hiển thị.
+void doReboot(uint32_t) {
+  if (gOnSetting) gOnSetting(REBOOT);
+}
+
+void onRebootAsk(lv_event_t *) {
+  // Nói ĐÚNG cái giá phải trả. "Bạn có chắc không?" không giúp ai quyết định
+  // được; "mất kết nối ~20 giây" thì có — và nó cũng nói rõ đây là việc tự phục
+  // hồi, không phải thao tác nguy hiểm, để người ta khỏi ngại bấm khi cần thật.
+  confirmAsk("KHỞI ĐỘNG LẠI ?", "Mất kết nối khoảng 20 giây · mã IR không mất",
+             "KHỞI ĐỘNG", doReboot, 0);
+}
+
+// ---------------------------------------------------------------------------
+//  Nhật ký lệnh — vẽ lại
+// ---------------------------------------------------------------------------
+/// Kết quả -> câu chữ + màu. Đây là thứ log serial vốn có mà màn thì không, và
+/// cũng là câu hỏi người lắp cần trả lời khi máy lạnh không nhúc nhích: lệnh
+/// KHÔNG tới, hay tới rồi mà node không phát được?
+const char *logResultText(Ui::CmdLog::Result r) {
+  switch (r) {
+    case Ui::CmdLog::SENT:      return "đã phát";
+    case Ui::CmdLog::NO_CODE:   return "chưa học mã";
+    case Ui::CmdLog::NEED_RAW:  return "thiếu mã · đang xin lại";
+    default:                    return "bản lặp · bỏ qua";
+  }
+}
+
+lv_color_t logResultColor(Ui::CmdLog::Result r) {
+  switch (r) {
+    case Ui::CmdLog::SENT:      return ok();
+    case Ui::CmdLog::NO_CODE:   return err();
+    case Ui::CmdLog::NEED_RAW:  return warn();
+    default:                    return textMuted();
+  }
+}
+
+/// Mốc thời gian của một dòng. Có DS1307 thì "14:32"; chưa đặt giờ thì mốc
+/// TƯƠNG ĐỐI so với hiện tại. Không bao giờ bịa 00:00 — cùng luật với đồng hồ
+/// trên thanh trạng thái.
+void logStamp(const LogEntry &e, uint32_t nowSec, char *out, size_t n) {
+  if (e.hasClock) {
+    snprintf(out, n, "%02u:%02u", (unsigned)e.hh, (unsigned)e.mm);
+    return;
+  }
+  const uint32_t ago = (nowSec > e.atSec) ? (nowSec - e.atSec) : 0;
+  if (ago < 60)         snprintf(out, n, "vừa xong");
+  else if (ago < 3600)  snprintf(out, n, "%lu phút trước", (unsigned long)(ago / 60));
+  else                  snprintf(out, n, "%lu giờ trước", (unsigned long)(ago / 3600));
+}
+
+void renderLog(uint32_t nowSec) {
+  if (!gLogList) return;
+  uint8_t shown = 0;
+  char stamp[20], line[48];
+
+  for (uint8_t i = 0; i < LOG_ROWS; i++) {
+    if (!gLog[i].used) {
+      lv_obj_add_flag(gLogRow[i], LV_OBJ_FLAG_HIDDEN);
+      continue;
+    }
+    logStamp(gLog[i], nowSec, stamp, sizeof stamp);
+    snprintf(line, sizeof line, "%s · %s", stamp, gLog[i].what);
+    setText(gLogTop[i], line);
+
+    // Nguyên văn `reason` của backend đứng cạnh kết quả: nó nói lệnh này SINH RA
+    // TỪ ĐÂU (vòng lặp tự động, người bấm trong app, hay một nút rời), thứ mà
+    // mode/setpoint không phân biệt được.
+    snprintf(line, sizeof line, "%s · %s", gLog[i].reason, logResultText(gLog[i].result));
+    setText(gLogSub[i], line);
+    lv_obj_set_style_text_color(gLogSub[i], logResultColor(gLog[i].result), 0);
+
+    lv_obj_clear_flag(gLogRow[i], LV_OBJ_FLAG_HIDDEN);
+    shown++;
+  }
+
+  if (shown) lv_obj_add_flag(gLogEmpty, LV_OBJ_FLAG_HIDDEN);
+  else       lv_obj_clear_flag(gLogEmpty, LV_OBJ_FLAG_HIDDEN);
+}
+
+void onLogOpen(lv_event_t *) {
+  if (!gLogOverlay) return;
+  lv_obj_clear_flag(gLogOverlay, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_scroll_to_y(gLogList, 0, LV_ANIM_OFF);
+}
+
+void onLogClose(lv_event_t *) {
+  if (gLogOverlay) lv_obj_add_flag(gLogOverlay, LV_OBJ_FLAG_HIDDEN);
+}
+
 void buildSettings() {
   lv_obj_t *p = gPage[3];
 
@@ -416,7 +677,7 @@ void buildSettings() {
   lv_obj_add_event_cb(bu, onSetting, LV_EVENT_LONG_PRESSED_REPEAT, (void *)(uintptr_t)BRIGHT_UP);
 
   lv_obj_t *r1 = card(p, PAD, 50, 308, 40);
-  label(r1, 12, 12, "ÂM BÁO", fontBody(), textPrimary());
+  label(r1, 12, 12, "ÂM THANH", fontBody(), textPrimary());
   // KHÔNG dùng primary=true ở đây. `primary` gắn style nền xanh VĨNH VIỄN, mà
   // buttonSelect() chỉ thêm/bớt style "đang chọn" — nó không gỡ nổi style
   // primary, nên nút BẬT sáng mãi kể cả sau khi đã bấm TẮT.
@@ -435,10 +696,220 @@ void buildSettings() {
   // một mục chứ không phải là bố cục có chủ đích.
   lv_obj_t *r2 = card(p, PAD, 96, 308, 40);
   label(r2, 12, 12, "KHỞI ĐỘNG LẠI", fontBody(), textPrimary());
-  lv_obj_t *br = button(r2, 226, 6, 68, 28, "CHẠY");
+  // Biểu tượng thay chữ "CHẠY" — chữ đó nói hành động chung chung, còn mũi tên
+  // vòng lại thì nói đúng việc: khởi động lại.
+  //
+  // PHẢI ĐỔI FONT CỦA NHÃN sang Montserrat. Các glyph LV_SYMBOL_* nằm ở dải
+  // 0xF000+ và CHỈ có trong font dựng sẵn của LVGL; font Việt trong ui/fonts/
+  // sinh bằng lv_font_conv không có dải đó, nên để nguyên font mặc định của
+  // button() thì nút hiện Ô VUÔNG và mỗi khung vẽ lại phun một dòng
+  // "glyph dsc. not found for U+F021" ra serial — đủ để chôn mọi log khác.
+  // Cùng khuôn với 4 tab ở buildChrome().
+  //
+  // REFRESH chứ không phải POWER: POWER đã là biểu tượng của tab ĐIỀU KHIỂN,
+  // dùng lại ở đây thì cùng một hình mang hai nghĩa trên cùng một màn.
+  lv_obj_t *br = button(r2, 226, 6, 68, 28, LV_SYMBOL_REFRESH);
   lv_obj_set_style_border_color(br, err(), 0);
-  lv_obj_set_style_text_color(lv_obj_get_child(br, 0), err(), 0);
-  lv_obj_add_event_cb(br, onSetting, LV_EVENT_CLICKED, (void *)(uintptr_t)REBOOT);
+  lv_obj_t *brLbl = lv_obj_get_child(br, 0);
+  lv_obj_set_style_text_font(brLbl, &lv_font_montserrat_20, 0);
+  lv_obj_set_style_text_color(brLbl, err(), 0);
+  // Qua hộp xác nhận, KHÔNG gọi thẳng onSetting(REBOOT) nữa. Nút này nằm ngay
+  // dưới hai hàng bấm-là-xong (độ sáng, âm báo) trên một màn cảm ứng, nên chạm
+  // nhầm là chuyện có thật — và hậu quả ở đây là cả nhà mất điều khiển ~20 giây.
+  lv_obj_add_event_cb(br, onRebootAsk, LV_EVENT_CLICKED, nullptr);
+
+  // y=142 là chỗ KHỞI ĐỘNG LẠI từng nằm trước khi dời lên; hàng cuối vừa khít
+  // vùng nội dung (142 + 40 = 182 < CONTENT_H 180+2 mép card).
+  lv_obj_t *r3 = card(p, PAD, 142, 308, 40);
+  label(r3, 12, 12, "MÃ IR ĐÃ HỌC", fontBody(), textPrimary());
+  // Đếm ngay trên hàng, không bắt mở ra mới biết: người lắp cần trả lời "bo này
+  // đã học đủ chưa" trong một cái liếc, giống ô MÃ IR ở màn THÔNG TIN.
+  gIrCountLbl = label(r3, 190, 13, "0", fontTiny(), textMuted());
+  lv_obj_set_width(gIrCountLbl, 30);
+  lv_obj_set_style_text_align(gIrCountLbl, LV_TEXT_ALIGN_RIGHT, 0);
+  lv_obj_t *bl = button(r3, 226, 6, 68, 28, "XEM");
+  lv_obj_add_event_cb(bl, onIrOpen, LV_EVENT_CLICKED, nullptr);
+
+  // Hàng thứ 5 vượt quá vùng nội dung (188 + 40 = 228 > CONTENT_H 180), nên
+  // trang này — VÀ CHỈ TRANG NÀY — được cuộn dọc. Ba trang kia vẫn cố định:
+  // cho cuộn ở nơi không có gì để cuộn chỉ tạo ra cảm giác "trang bị xê dịch"
+  // mỗi khi vuốt trượt tay.
+  lv_obj_add_flag(p, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scroll_dir(p, LV_DIR_VER);
+
+  lv_obj_t *r4 = card(p, PAD, 188, 308, 40);
+  label(r4, 12, 12, "NHẬT KÝ LỆNH", fontBody(), textPrimary());
+  lv_obj_t *bg = button(r4, 226, 6, 68, 28, "XEM");
+  lv_obj_add_event_cb(bg, onLogOpen, LV_EVENT_CLICKED, nullptr);
+}
+
+// ---------------------------------------------------------------------------
+//  Lớp phủ — MA IR DA HOC
+// ---------------------------------------------------------------------------
+void buildIrList() {
+  lv_obj_t *scr = lv_scr_act();
+  gIrOverlay = lv_obj_create(scr);
+  lv_obj_remove_style_all(gIrOverlay);
+  lv_obj_set_pos(gIrOverlay, 0, 0);
+  lv_obj_set_size(gIrOverlay, SCREEN_W, SCREEN_H);
+  lv_obj_set_style_bg_color(gIrOverlay, bgPrimary(), 0);
+  lv_obj_set_style_bg_opa(gIrOverlay, LV_OPA_COVER, 0);
+  lv_obj_clear_flag(gIrOverlay, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_add_flag(gIrOverlay, LV_OBJ_FLAG_HIDDEN);
+
+  gIrTitle = label(gIrOverlay, 16, 10, "MÃ IR ĐÃ HỌC", fontLabel(), accent());
+  lv_obj_set_style_text_letter_space(gIrTitle, 2, 0);
+
+  lv_obj_t *bc = button(gIrOverlay, 236, 6, 68, 26, "ĐÓNG");
+  lv_obj_add_event_cb(bc, onIrClose, LV_EVENT_CLICKED, nullptr);
+
+  // Vùng cuộn. 18 hàng × 34 px = 612 px trong khung 166 px, nên cuộn là bắt buộc
+  // chứ không phải phòng xa. LV_DIR_VER thôi: cho phép cuộn ngang thì chỉ cần
+  // vuốt chéo một cái là danh sách trôi ngang và không có gì kéo nó về.
+  gIrList = lv_obj_create(gIrOverlay);
+  lv_obj_remove_style_all(gIrList);
+  lv_obj_set_pos(gIrList, 16, 38);
+  lv_obj_set_size(gIrList, 288, 166);
+  lv_obj_set_flex_flow(gIrList, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_style_pad_row(gIrList, 4, 0);
+  lv_obj_set_scroll_dir(gIrList, LV_DIR_VER);
+  lv_obj_add_flag(gIrList, LV_OBJ_FLAG_SCROLLABLE);
+
+  for (uint8_t i = 0; i < IR_ROWS; i++) {
+    lv_obj_t *row = lv_obj_create(gIrList);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_size(row, 272, 30);          // 288 trừ chỗ cho thanh cuộn
+    lv_obj_set_style_bg_color(row, bgSecondary(), 0);
+    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(row, borderSubtle(), 0);
+    lv_obj_set_style_border_width(row, 1, 0);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(row, LV_OBJ_FLAG_HIDDEN);   // update() mới quyết hàng nào hiện
+
+    gIrRowLbl[i] = label(row, 10, 8, "", fontBody(), textPrimary());
+
+    // Viền + chữ đỏ như nút KHỞI ĐỘNG LẠI: cùng một mức "việc này lấy đi thứ gì
+    // đó", nên phải trông giống nhau. Không có bước xác nhận — mã vẫn còn trong
+    // Postgres và tự nạp lại ở lệnh kế tiếp (xem IrStore::removeAlias), nên đây
+    // là việc lùi được, khác hẳn xoá mã trên app.
+    lv_obj_t *bd = button(row, 206, 3, 58, 24, "XOÁ");
+    lv_obj_set_style_border_color(bd, err(), 0);
+    lv_obj_set_style_text_color(lv_obj_get_child(bd, 0), err(), 0);
+    lv_obj_add_event_cb(bd, onIrDelete, LV_EVENT_CLICKED, (void *)(uintptr_t)i);
+
+    gIrRow[i] = row;
+  }
+
+  // Trạng thái rỗng nói việc PHẢI LÀM, không chỉ nói "trống". Học mã là bước bắt
+  // buộc trước khi auto-control chạy được, mà nó chỉ khởi động từ app.
+  gIrEmpty = label(gIrOverlay, 0, 104, "CHƯA HỌC MÃ NÀO\nVÀO APP ĐỂ HỌC REMOTE",
+                   fontTiny(), textMuted());
+  lv_obj_set_width(gIrEmpty, SCREEN_W);
+  lv_obj_set_style_text_align(gIrEmpty, LV_TEXT_ALIGN_CENTER, 0);
+
+}
+
+// ---------------------------------------------------------------------------
+//  Lớp phủ — HOP XAC NHAN (dùng chung)
+// ---------------------------------------------------------------------------
+void buildConfirm() {
+  // Con của MÀN HÌNH, không của một lớp phủ nào: nó phục vụ cả nút XOÁ trong
+  // danh sách mã lẫn nút KHỞI ĐỘNG LẠI ở màn Cài đặt, hai chỗ nằm ở hai tầng
+  // khác nhau. Đổi lại, mọi lối thoát phải tự gọi confirmDismiss() — onIrClose()
+  // làm việc đó.
+  lv_obj_t *scr = lv_scr_act();
+  gConfirm = lv_obj_create(scr);
+  lv_obj_remove_style_all(gConfirm);
+  lv_obj_set_pos(gConfirm, 0, 0);
+  lv_obj_set_size(gConfirm, SCREEN_W, SCREEN_H);
+  // Nền mờ phủ TOÀN màn, không chỉ quanh hộp. Hai việc cùng lúc: làm tối phần
+  // phía sau để mắt dồn vào câu hỏi, và CHẶN CHẠM — thiếu nó thì ngón tay trượt
+  // ra ngoài hộp vẫn bấm trúng nút nằm dưới, đúng cái tai nạn mà hộp này sinh ra
+  // để ngăn.
+  lv_obj_set_style_bg_color(gConfirm, bgPrimary(), 0);
+  lv_obj_set_style_bg_opa(gConfirm, 235, 0);
+  lv_obj_clear_flag(gConfirm, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_add_flag(gConfirm, LV_OBJ_FLAG_HIDDEN);
+
+  lv_obj_t *box = card(gConfirm, 26, 62, 268, 116);
+  lv_obj_set_style_border_color(box, err(), 0);
+  lv_obj_set_style_border_width(box, 2, 0);
+
+  gConfirmLbl = label(box, 0, 22, "", fontBody(), textPrimary());
+  lv_obj_set_width(gConfirmLbl, 268);
+  lv_obj_set_style_text_align(gConfirmLbl, LV_TEXT_ALIGN_CENTER, 0);
+
+  gConfirmNote = label(box, 0, 46, "", fontTiny(), textMuted());
+  lv_obj_set_width(gConfirmNote, 268);
+  lv_obj_set_style_text_align(gConfirmNote, LV_TEXT_ALIGN_CENTER, 0);
+
+  // HUỶ nằm BÊN TRÁI và là nút thường; nút đồng ý bên phải, viền đỏ. Đặt ngược
+  // lại thì ngón cái đi từ nút vừa bấm xuống là rơi trúng nút đồng ý — hộp xác
+  // nhận biến thành hai cú chạm liên tiếp ở gần cùng một chỗ, tức là không xác
+  // nhận gì cả.
+  lv_obj_t *bn = button(box, 26, 74, 100, 30, "HUỶ");
+  lv_obj_add_event_cb(bn, onConfirmNo, LV_EVENT_CLICKED, nullptr);
+
+  lv_obj_t *by = button(box, 142, 74, 100, 30, "");
+  lv_obj_set_style_border_color(by, err(), 0);
+  gConfirmYesLbl = lv_obj_get_child(by, 0);
+  lv_obj_set_style_text_color(gConfirmYesLbl, err(), 0);
+  lv_obj_add_event_cb(by, onConfirmYes, LV_EVENT_CLICKED, nullptr);
+}
+
+// ---------------------------------------------------------------------------
+//  Lớp phủ — NHAT KY LENH
+// ---------------------------------------------------------------------------
+void buildLogList() {
+  lv_obj_t *scr = lv_scr_act();
+  gLogOverlay = lv_obj_create(scr);
+  lv_obj_remove_style_all(gLogOverlay);
+  lv_obj_set_pos(gLogOverlay, 0, 0);
+  lv_obj_set_size(gLogOverlay, SCREEN_W, SCREEN_H);
+  lv_obj_set_style_bg_color(gLogOverlay, bgPrimary(), 0);
+  lv_obj_set_style_bg_opa(gLogOverlay, LV_OPA_COVER, 0);
+  lv_obj_clear_flag(gLogOverlay, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_add_flag(gLogOverlay, LV_OBJ_FLAG_HIDDEN);
+
+  lv_obj_t *t = label(gLogOverlay, 16, 10, "NHẬT KÝ LỆNH", fontLabel(), accent());
+  lv_obj_set_style_text_letter_space(t, 2, 0);
+
+  lv_obj_t *bc = button(gLogOverlay, 236, 6, 68, 26, "ĐÓNG");
+  lv_obj_add_event_cb(bc, onLogClose, LV_EVENT_CLICKED, nullptr);
+
+  gLogList = lv_obj_create(gLogOverlay);
+  lv_obj_remove_style_all(gLogList);
+  lv_obj_set_pos(gLogList, 16, 38);
+  lv_obj_set_size(gLogList, 288, 166);
+  lv_obj_set_flex_flow(gLogList, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_style_pad_row(gLogList, 4, 0);
+  lv_obj_set_scroll_dir(gLogList, LV_DIR_VER);
+  lv_obj_add_flag(gLogList, LV_OBJ_FLAG_SCROLLABLE);
+
+  for (uint8_t i = 0; i < LOG_ROWS; i++) {
+    lv_obj_t *row = lv_obj_create(gLogList);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_size(row, 272, 36);
+    lv_obj_set_style_bg_color(row, bgSecondary(), 0);
+    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(row, borderSubtle(), 0);
+    lv_obj_set_style_border_width(row, 1, 0);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(row, LV_OBJ_FLAG_HIDDEN);
+
+    gLogTop[i] = label(row, 8, 5, "", fontTiny(), textPrimary());
+    gLogSub[i] = label(row, 8, 20, "", fontTiny(), textMuted());
+    gLogRow[i] = row;
+  }
+
+  // Trạng thái rỗng phân biệt "chưa có gì" với "hỏng". Vòng lặp comfort chỉ ra
+  // lệnh KHI QUYẾT ĐỊNH ĐỔI, nên im lặng hàng giờ là bình thường — nói thẳng để
+  // người lắp khỏi đi tìm lỗi ở chỗ không có lỗi.
+  gLogEmpty = label(gLogOverlay, 0, 100,
+                    "CHƯA NHẬN LỆNH NÀO\nMáy chủ chỉ ra lệnh khi quyết định đổi",
+                    fontTiny(), textMuted());
+  lv_obj_set_width(gLogEmpty, SCREEN_W);
+  lv_obj_set_style_text_align(gLogEmpty, LV_TEXT_ALIGN_CENTER, 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -508,6 +979,16 @@ void build(CommandFn onCmd, SettingFn onSetting) {
   buildControl();
   buildInfo();
   buildSettings();
+  // THỨ TỰ CÓ NGHĨA: LVGL vẽ theo thứ tự tạo, nên lớp phủ học remote phải dựng
+  // SAU danh sách mã để nó luôn nằm trên. Backend có thể kích hoạt học trong lúc
+  // người dùng đang mở danh sách, và khi đó thứ cần nhìn là "bấm nút trên remote
+  // đi", không phải bảng liệt kê.
+  buildIrList();
+  buildLogList();
+  // Hộp xác nhận nằm TRÊN hai lớp phủ danh sách (nó hỏi về thứ trong đó) nhưng
+  // DƯỚI lớp phủ học remote: học có đồng hồ đếm ngược 30 giây, còn câu hỏi thì
+  // chờ được — thứ có hạn phải thắng.
+  buildConfirm();
   buildLearn();
   showTab(0);
 }
@@ -547,7 +1028,7 @@ void update(const Ui::Model &m) {
     // như thể vẫn đang đo được.
     setText(gOutTemp, "--");
     lv_obj_set_style_text_color(gOutTemp, textMuted(), 0);
-    snprintf(b, sizeof b, "MẤT NHỊP TIM %lus", (unsigned long)m.outAgeSec);
+    snprintf(b, sizeof b, "MẤT KẾT NỐI %lus", (unsigned long)m.outAgeSec);
     setText(gOutNote, b);
     setText(gOutHum, "");
   }
@@ -559,10 +1040,7 @@ void update(const Ui::Model &m) {
 
   if (m.overrideLocal) {
     lv_obj_set_style_bg_color(gAcBadge, warn(), 0);
-    setText(gAcBadgeLbl, "GHI ĐÈ");
-    // Nói đúng giới hạn của kiến trúc hiện tại (README §8.3) thay vì để người
-    // dùng tưởng ghi đè từ màn này là vĩnh viễn.
-    setText(gAcAge, "máy chủ sẽ giành lại quyền ở chu kỳ sau");
+    setText(gAcBadgeLbl, "THỦ CÔNG");
   } else {
     lv_obj_set_style_bg_color(gAcBadge, accent(), 0);
     setText(gAcBadgeLbl, "TỰ ĐỘNG");
@@ -595,12 +1073,62 @@ void update(const Ui::Model &m) {
   if (gModeOk[3] != m.hasOff) { gModeOk[3] = m.hasOff; changed = true; }
   if (changed) refreshControl();
 
+  // --- CAI DAT: danh sách mã đã học ---
+  // Chỉ dựng lại khi TẬP MÃ thật sự đổi. update() chạy 5 lần/giây, mà việc này
+  // sờ vào 18 widget và ép LVGL tính lại bố cục flex — làm mỗi nhịp là phí, và
+  // tệ hơn: bố cục tính lại giữa lúc người dùng đang cuộn sẽ giật vị trí cuộn.
+  if (m.coolMask != gIrLastMask || m.hasDry != gIrLastFixed[0] ||
+      m.hasFan != gIrLastFixed[1] || m.hasOff != gIrLastFixed[2]) {
+    gIrLastMask     = m.coolMask;
+    gIrLastFixed[0] = m.hasDry;
+    gIrLastFixed[1] = m.hasFan;
+    gIrLastFixed[2] = m.hasOff;
+
+    uint8_t shown = 0;
+    for (uint8_t i = 0; i < IR_ROWS; i++) {
+      const bool have = (i < IR_COOL_N) ? ((m.coolMask >> i) & 1u)
+                        : (i == IR_COOL_N)     ? m.hasDry
+                        : (i == IR_COOL_N + 1) ? m.hasFan
+                                               : m.hasOff;
+      if (have) {
+        irRowLabel(i, b, sizeof b);
+        setText(gIrRowLbl[i], b);
+        shown++;
+      }
+      if (gIrShown[i] != have) {
+        gIrShown[i] = have;
+        if (have) lv_obj_clear_flag(gIrRow[i], LV_OBJ_FLAG_HIDDEN);
+        else      lv_obj_add_flag(gIrRow[i], LV_OBJ_FLAG_HIDDEN);
+      }
+    }
+
+    if (shown) lv_obj_add_flag(gIrEmpty, LV_OBJ_FLAG_HIDDEN);
+    else       lv_obj_clear_flag(gIrEmpty, LV_OBJ_FLAG_HIDDEN);
+
+    snprintf(b, sizeof b, "%u", (unsigned)shown);
+    setText(gIrCountLbl, b);
+    snprintf(b, sizeof b, "MÃ IR ĐÃ HỌC · %u", (unsigned)shown);
+    setText(gIrTitle, b);
+  }
+
+  // --- NHẬT KÝ: làm mới mốc tương đối ---
+  // Chỉ khi SANG PHÚT MỚI. Các dòng "3 phút trước" phải già đi theo thời gian,
+  // nhưng vẽ lại 5 lần/giây để đổi một con số mỗi 60 giây thì 299 lần kia là phí
+  // — và mỗi lần đều làm bẩn vùng vẽ. Đồng hồ hợp lệ thì mốc là giờ tuyệt đối,
+  // không bao giờ đổi, nên bỏ qua hẳn.
+  if (!gLog[0].used || gLog[0].hasClock) {
+    // không có gì già đi
+  } else if (m.uptimeSec / 60 != gLogLastMin) {
+    gLogLastMin = m.uptimeSec / 60;
+    renderLog(m.uptimeSec);
+  }
+
   // --- THONG TIN ---
   setText(gInfoVal[0], m.ssid[0] ? m.ssid : "--");
   setText(gInfoVal[1], m.ip[0] ? m.ip : "--");
   if (m.wifiUp) snprintf(b, sizeof b, "%d dBm", m.rssi); else snprintf(b, sizeof b, "--");
   setText(gInfoVal[2], b);
-  setText(gInfoVal[3], m.mqttUp ? "ĐÃ NỐI" : "MẤT KẾT NỐI");
+  setText(gInfoVal[3], m.mqttUp ? "KẾT NỐI" : "MẤT KẾT NỐI");
   lv_obj_set_style_text_color(gInfoVal[3], m.mqttUp ? ok() : err(), 0);
   // Mọi ký tự đặc biệt dùng ở đây (· – — … •) phải CÓ TRONG DẢI SINH FONT của
   // tools/make_lvgl_fonts.ps1. Thiếu một cái là LVGL vẽ ô trống ở đúng chỗ đó VÀ
@@ -659,10 +1187,10 @@ void tickToast(uint32_t nowMs) {
   }
 }
 
-void setClock(bool valid, uint8_t hh, uint8_t mm) {
-  char b[8];
-  if (valid) snprintf(b, sizeof b, "%02u:%02u", (unsigned)hh, (unsigned)mm);
-  else       snprintf(b, sizeof b, "--:--");
+void setClock(bool valid, uint8_t hh, uint8_t mm, uint8_t ss) {
+  char b[12];
+  if (valid) snprintf(b, sizeof b, "%02u:%02u:%02u", (unsigned)hh, (unsigned)mm, (unsigned)ss);
+  else       snprintf(b, sizeof b, "--:--:--");
   setText(gLblClock, b);
 }
 
@@ -670,6 +1198,37 @@ void setBrightness(uint8_t percent) {
   char b[8];
   snprintf(b, sizeof b, "%u%%", (unsigned)percent);
   setText(gBrightLbl, b);
+}
+
+void addLog(const Ui::CmdLog &e, bool clockValid, uint8_t hh, uint8_t mm, uint32_t nowSec) {
+  // Đẩy xuống một chỗ, chèn vào đầu: mới nhất phải nằm trên. Dòng thứ 9 rơi ra
+  // khỏi đáy — cố ý, đây là cửa sổ chẩn đoán tại chỗ chứ không phải sổ lưu trữ.
+  for (uint8_t i = LOG_ROWS - 1; i > 0; i--) gLog[i] = gLog[i - 1];
+
+  LogEntry &n = gLog[0];
+  n.used     = true;
+  n.hasClock = clockValid;
+  n.hh       = hh;
+  n.mm       = mm;
+  n.atSec    = nowSec;
+  n.result   = e.result;
+  snprintf(n.reason, sizeof n.reason, "%s", e.reason[0] ? e.reason : "—");
+
+  // Nhãn người đọc, khớp màn ĐIỀU KHIỂN. Backend gửi mã máy ("COOL"), nhưng
+  // setpoint chỉ có nghĩa với COOL — DRY/FAN/OFF là mã cố định nên in kèm nhiệt
+  // độ ở đó là bịa ra một thông tin máy lạnh không hề nhận.
+  const char *vn = e.mode;
+  for (uint8_t k = 0; k < 4; k++) {
+    if (strcmp(e.mode, kModeName[k]) == 0) { vn = kModeLabel[k]; break; }
+  }
+  if (strcmp(e.mode, "COOL") == 0 && e.setpoint >= 0) {
+    snprintf(n.what, sizeof n.what, "%s %d°C", vn, e.setpoint);
+  } else {
+    snprintf(n.what, sizeof n.what, "%s", vn);
+  }
+
+  gLogLastMin = nowSec / 60;
+  renderLog(nowSec);
 }
 
 void setBuzzer(bool on) {

@@ -7,6 +7,7 @@
 
 #include <lvgl.h>
 #include <TFT_eSPI.h>
+#include <WiFi.h>       // chỉ để hỏi WiFi.status() trước khi đồng bộ NTP
 
 // ============================================================================
 //  Cổng nối LVGL với phần cứng + tác vụ giao diện trên lõi 0.
@@ -39,10 +40,16 @@ TFT_eSPI tft;
 //
 //  DISPLAY_SELFTEST: hiện 3 ô màu có ghi tên trong 3 giây lúc khởi động. Bật
 //  lên khi nghi ngờ màu; nhìn 3 giây là biết ngay chiều đảo nào đúng, thay vì
-//  nạp lại firmware nhiều lần để đoán. Chốt xong thì đặt về 0.
+//  nạp lại firmware nhiều lần để đoán.
+//
+//  ĐANG TẮT — chiều đảo màu đã chốt (DISPLAY_INVERT=0, kiểm chứng trên bo thật:
+//  3 ô ra đúng XANH DUONG / TRANG / XANH LA). Giữ bật thì mỗi lần bật nguồn
+//  người dùng phải nhìn 3 giây màn kiểm tra kỹ thuật trước khi thấy giao diện —
+//  trên một bảng điều khiển treo tường đó là màn hình lỗi, không phải màn khởi
+//  động. Bật lại (1) nếu đổi lô màn hoặc nghi ngờ màu.
 // ============================================================================
 #define DISPLAY_INVERT   0
-#define DISPLAY_SELFTEST 1
+#define DISPLAY_SELFTEST 0
 
 /// Hiện 3 ô màu có ghi tên. Vẽ THẲNG bằng TFT_eSPI, không qua LVGL — nên nó
 /// kiểm tra được cả đường dẫn phần cứng lẫn chiều đảo màu, độc lập với mọi thứ
@@ -201,6 +208,24 @@ SemaphoreHandle_t modelMx = nullptr;   // bảo vệ `shared`
 Model             shared;              // loop() ghi, tác vụ UI đọc
 QueueHandle_t     cmdQ    = nullptr;   // UI    -> loop(): người dùng vừa bấm
 QueueHandle_t     replyQ  = nullptr;   // loop() -> UI   : kết quả, hiện thành toast
+QueueHandle_t     logQ    = nullptr;   // loop() -> UI   : lệnh backend vừa nhận
+
+// Giờ đọc được gần nhất từ DS1307. Giữ ở đây thay vì đọc lại lúc đóng dấu nhật
+// ký: mỗi lần đọc là một giao dịch I2C, mà bus này còn phải phục vụ cảm ứng —
+// nhịp 1 giây đã dày hơn độ phân giải phút mà màn hiển thị.
+bool    gClkValid = false;
+uint8_t gClkHh = 0, gClkMm = 0, gClkSs = 0;
+
+// Trạng thái đồng bộ NTP.
+//   kNtpRetryMs  — nhịp hỏi khi CHƯA có kết quả. SNTP mất vài giây để đi hỏi và
+//                  nhận về, nên hỏi dày ở giai đoạn này.
+//   kNtpPeriodMs — nhịp sau khi đã đồng bộ. DS1307 trôi cỡ vài giây/tháng, 6
+//                  tiếng một lần là thừa sức; dày hơn chỉ tốn gói UDP.
+bool     gNtpStarted = false;   // đã gọi configTzTime chưa (theo mỗi lần có mạng)
+bool     gNtpOk      = false;   // đã ghi được ít nhất một lần xuống DS1307
+uint32_t lastNtp     = 0;
+constexpr uint32_t kNtpRetryMs  = 5000;
+constexpr uint32_t kNtpPeriodMs = 6UL * 60 * 60 * 1000;
 TaskHandle_t      uiTask  = nullptr;
 
 struct Reply { char msg[40]; };
@@ -310,8 +335,44 @@ void uiTaskFn(void *) {
     if (now - lastClock >= 1000) {
       lastClock = now;
       BoardIo::Clock c;
-      if (BoardIo::clockRead(c)) Screens::setClock(true, c.hh, c.mm);
-      else                       Screens::setClock(false, 0, 0);
+      gClkValid = BoardIo::clockRead(c);
+      if (gClkValid) { gClkHh = c.hh; gClkMm = c.mm; gClkSs = c.ss; }
+      Screens::setClock(gClkValid, gClkHh, gClkMm, gClkSs);
+
+      // --- Đồng bộ giờ, hoàn toàn tự động ---
+      //
+      // Ở ĐÂY chứ không ở loop(): ntpPoll() ghi DS1307, mà bus I2C thuộc quyền
+      // tác vụ này. loop() ghi vào là hai lõi cùng nói chuyện trên một bus —
+      // triệu chứng là số đo sai lác đác, loại lỗi tốn cả tuần để tìm.
+      //
+      // KHÔNG kiểm "đồng hồ đã hợp lệ chưa" trước khi đồng bộ. DS1307 có pin
+      // nuôi nên một giá trị SAI cũng sống mãi, mà bit CH đã xoá thì clockRead()
+      // vẫn báo hợp lệ — chính là ca đang gặp. Điều kiện duy nhất là có mạng.
+      if (WiFi.status() == WL_CONNECTED) {
+        if (!gNtpStarted) {
+          BoardIo::ntpBegin();
+          gNtpStarted = true;
+        } else if (now - lastNtp >= (gNtpOk ? kNtpPeriodMs : kNtpRetryMs)) {
+          lastNtp = now;
+          if (BoardIo::ntpPoll()) {
+            // Lần đầu thành công mới đáng một dòng log; sau đó cứ 6 tiếng một
+            // lần thì im lặng, không thì log dài ra vì một việc chạy đúng.
+            if (!gNtpOk) Serial.println("Gio: da dong bo NTP -> DS1307");
+            gNtpOk = true;
+          }
+        }
+      } else {
+        // Mất mạng -> thử lại ngay khi có lại, đừng đợi hết chu kỳ 6 tiếng.
+        gNtpStarted = false;
+      }
+    }
+
+    // Nhật ký lệnh. Đóng dấu Ở ĐÂY, không ở loop(): DS1307 nằm trên bus I2C của
+    // tác vụ này (xem Ui::CmdLog). Rút SAU khối đọc đồng hồ để dòng đầu tiên sau
+    // khi khởi động đã có giờ, thay vì mang dấu "chưa đặt" của lần quét trước.
+    CmdLog entry;
+    while (logQ && xQueueReceive(logQ, &entry, 0) == pdTRUE) {
+      Screens::addLog(entry, gClkValid, gClkHh, gClkMm, now / 1000);
     }
 
     // Theo dõi heap LVGL. Giữ lại VĨNH VIỄN chứ không phải đoạn debug tạm: hết
@@ -361,6 +422,10 @@ bool begin() {
   modelMx = xSemaphoreCreateMutex();
   cmdQ    = xQueueCreate(4, sizeof(Command));
   replyQ  = xQueueCreate(4, sizeof(Reply));
+  // 8 chỗ: lệnh tự động thưa (chỉ khi quyết định đổi), nhưng một đợt broker phát
+  // lại QoS1 có thể dồn vài gói liền nhau — hàng đợi đầy thì mất dòng nhật ký,
+  // không ảnh hưởng điều khiển.
+  logQ    = xQueueCreate(8, sizeof(CmdLog));
 
   BoardIo::backlightBegin(LCD_BACKLIGHT_PIN);
   BoardIo::backlightSet(0);          // bật sáng SAU khi đã vẽ xong khung đầu
@@ -471,6 +536,13 @@ void publish(const Model &m) {
   if (xSemaphoreTake(modelMx, 0) != pdTRUE) return;
   memcpy(&shared, &m, sizeof(Model));
   xSemaphoreGive(modelMx);
+}
+
+void logCommand(const CmdLog &e) {
+  // xQueueSend không chờ (timeout 0) và không chạm LVGL, nên gọi được ngay
+  // trong callback của PubSubClient — khác hẳn mqtt.publish(), thứ sẽ ghi đè
+  // chính bộ đệm mà callback đang đọc dở (xem struct pending trong main.cpp).
+  if (logQ) xQueueSend(logQ, &e, 0);
 }
 
 bool pollCommand(Command &out) {

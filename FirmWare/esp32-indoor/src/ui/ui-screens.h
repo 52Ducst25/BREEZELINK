@@ -43,12 +43,25 @@ void toast(const char *msg, bool isError = false);
 /// Gọi mỗi vòng tác vụ UI để tự tắt toast sau vài giây.
 void tickToast(uint32_t nowMs);
 
-/// Đồng hồ trên thanh trạng thái. [valid]=false hiện "--:--" — DS1307 chưa
-/// từng được đặt giờ thì nói thẳng, không hiện 00:00 như thể đó là giờ thật.
-void setClock(bool valid, uint8_t hh, uint8_t mm);
+/// Đồng hồ trên thanh trạng thái, có GIÂY. [valid]=false hiện "--:--:--" —
+/// DS1307 chưa từng được đặt giờ thì nói thẳng, không hiện 00:00:00 như thể đó
+/// là giờ thật.
+///
+/// Giây có ích hơn vẻ ngoài của nó: nó là dấu hiệu SỐNG duy nhất trên màn khi
+/// mọi số đo đứng yên — nhìn giây nhảy là biết tác vụ giao diện còn chạy, không
+/// phải màn đã treo với một khung hình cũ.
+void setClock(bool valid, uint8_t hh, uint8_t mm, uint8_t ss);
 
 /// Phản ánh trạng thái phần cứng lên màn CAI DAT.
 void setBrightness(uint8_t percent);
 void setBuzzer(bool on);
+
+/// Thêm một dòng vào nhật ký lệnh (mới nhất lên đầu, giữ 8 dòng gần nhất).
+///
+/// [clockValid]/[hh]/[mm] là giờ DS1307 đọc được lúc nhận. Chưa từng đặt giờ thì
+/// clockValid=false và dòng đó hiện mốc TƯƠNG ĐỐI tính từ [nowSec] (uptime giây)
+/// — "3 phút trước". Không bịa 00:00: cùng luật với đồng hồ trên thanh trạng
+/// thái, thà nói "không biết mấy giờ" còn hơn đưa ra một con số sai.
+void addLog(const Ui::CmdLog &e, bool clockValid, uint8_t hh, uint8_t mm, uint32_t nowSec);
 
 } // namespace Screens

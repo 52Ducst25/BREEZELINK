@@ -86,11 +86,47 @@ struct Model {
 };
 
 /// Người dùng vừa bấm gì. Tác vụ UI đẩy vào queue, loop() rút ra thi hành.
+///
+/// DEL_CODE đi CHUNG hàng đợi này chứ không qua SettingFn, dù nút bấm nằm trong
+/// màn Cài đặt: SettingFn được tác vụ UI gọi TRỰC TIẾP ở lõi 0 (nó dành cho phần
+/// cứng mà lõi 0 sở hữu — đèn nền, còi), còn xoá mã là ghi NVS, mà NVS thuộc
+/// quyền loop() ở lõi 1 (xem bảng chia sở hữu ở đầu file). Gọi IrStore từ lõi 0
+/// là hai lõi cùng mở một namespace Preferences — hỏng theo kiểu ngẫu nhiên.
 struct Command {
-  enum Kind : uint8_t { MANUAL, AUTO } kind;
+  enum Kind : uint8_t { MANUAL, AUTO, DEL_CODE } kind;
   char mode[8];
+  /// MANUAL: nhiệt độ đặt. DEL_CODE: nhiệt độ của tổ hợp cần xoá, -1 cho mã cố
+  /// định (DRY/FAN/OFF) — cùng quy ước với IrStore::removeAlias().
   int  setpoint;
 };
+
+/// Một dòng nhật ký: lệnh vừa nhận từ backend và node đã làm gì với nó.
+///
+/// KHÔNG mang dấu thời gian. Giờ do DS1307 giữ, mà DS1307 nằm trên bus I2C
+/// thuộc quyền tác vụ UI (xem bảng chia sở hữu đầu file) — loop() đọc vào đây là
+/// hai lõi cùng nói chuyện trên một bus. Nên tác vụ UI tự đóng dấu lúc rút hàng
+/// đợi: nó trễ hơn thời điểm gói tới đúng một nhịp vẽ (200ms), không đáng kể so
+/// với độ phân giải phút mà màn hiển thị.
+struct CmdLog {
+  /// Node đã làm gì với lệnh này. Đây là phần mà log serial vốn có còn màn thì
+  /// không — và cũng là câu hỏi người lắp thật sự cần trả lời khi máy lạnh không
+  /// phản ứng: lệnh KHÔNG tới, hay tới rồi mà node không phát được?
+  enum Result : uint8_t {
+    SENT,      // có khung IR, đã/đang bắn ra máy lạnh
+    NO_CODE,   // backend không gửi ir_raw lẫn ir_code_id — tổ hợp này chưa học
+    NEED_RAW,  // có ir_code_id nhưng NVS rỗng -> đang xin server gửi lại
+    DUPLICATE, // trùng req_id đã thi hành (broker phát lại QoS1) -> bỏ, chỉ ack
+  };
+
+  char    mode[8];
+  int     setpoint;
+  char    reason[24];   // "auto:COOL@25" / "manual override" / "action:FAN_SPEED"
+  Result  result;
+};
+
+/// Ghi một dòng nhật ký. Gọi từ loop() (kể cả trong callback MQTT — chỉ đẩy vào
+/// hàng đợi, không chạm LVGL và không publish gì).
+void logCommand(const CmdLog &e);
 
 /// Dựng màn + cảm ứng + đèn nền + còi, rồi tạo tác vụ UI trên lõi 0.
 /// Gọi trong setup(), TRƯỚC connectWifi() để người lắp thấy màn sáng ngay —

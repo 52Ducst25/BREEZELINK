@@ -1,5 +1,6 @@
 #include "board-io.h"
 #include <Wire.h>
+#include <time.h>       // configTzTime/getLocalTime cho ntpBegin()/ntpPoll()
 #include "../config.h"
 
 namespace BoardIo {
@@ -184,8 +185,20 @@ bool sht3xRead(float &tempC, float &humidity) {
 // ---------------------------------------------------------------------------
 static const uint8_t DS1307_ADDR = 0x68;
 
-// Chỉ còn chiều ĐỌC: node không đặt giờ nữa (xem clockRead trong board-io.h).
 static uint8_t bcd2dec(uint8_t b) { return (uint8_t)((b >> 4) * 10 + (b & 0x0F)); }
+static uint8_t dec2bcd(uint8_t d) { return (uint8_t)(((d / 10) << 4) | (d % 10)); }
+
+/// Múi giờ Việt Nam, UTC+7, KHÔNG có giờ mùa hè.
+///
+/// Dấu NGƯỢC là đúng, không phải lỗi gõ: chuỗi TZ kiểu POSIX ghi số giờ phải
+/// CỘNG vào giờ địa phương để ra UTC, nên UTC+7 viết là "ICT-7". Ghi "ICT+7" thì
+/// đồng hồ lệch 14 tiếng — sai đủ nhiều để thấy ngay, nhưng cũng đủ giống một
+/// giờ hợp lệ để không ai nghi ngờ chuỗi cấu hình.
+///
+/// Hằng số ở đây chứ không ở config.h: sản phẩm bán trong nước, mà đưa vào
+/// config.h là thêm một ô nữa người lắp phải điền đúng — và điền sai thì hỏng
+/// theo kiểu im lặng.
+static const char *const TZ_INFO = "ICT-7";
 
 bool clockRead(Clock &out) {
   Wire.beginTransmission(DS1307_ADDR);
@@ -203,6 +216,39 @@ bool clockRead(Clock &out) {
   out.hh = (h & 0x40) ? (uint8_t)(bcd2dec(h & 0x1F) % 12 + ((h & 0x20) ? 12 : 0))
                       : bcd2dec(h & 0x3F);
   return out.hh < 24 && out.mm < 60 && out.ss < 60;
+}
+
+bool clockWrite(uint8_t hh, uint8_t mm, uint8_t ss) {
+  Wire.beginTransmission(DS1307_ADDR);
+  Wire.write((uint8_t)0x00);
+  Wire.write(dec2bcd(ss) & 0x7F);      // bit CH = 0 -> dao động chạy
+  Wire.write(dec2bcd(mm));
+  Wire.write(dec2bcd(hh) & 0x3F);      // ép chế độ 24h (xoá bit 6)
+  return Wire.endTransmission() == 0;
+}
+
+void ntpBegin() {
+  // SNTP của lwIP chạy trong tác vụ riêng của nó và tự cập nhật đồng hồ hệ
+  // thống — ở đây chỉ khởi động rồi thoát, việc chờ là của ntpPoll().
+  //
+  // Hai máy chủ chứ không một: pool.ntp.org phân giải qua DNS và có nhà mạng
+  // chặn/chuyển hướng UDP 123, còn time.google.com thì anycast nên hầu như luôn
+  // tới được. Mất một cái vẫn còn cái kia.
+  configTzTime(TZ_INFO, "pool.ntp.org", "time.google.com");
+}
+
+bool ntpPoll() {
+  struct tm tm_now;
+  // timeout 0: hỏi đồng hồ hệ thống rồi trả lời NGAY. Chờ trong này là chặn tác
+  // vụ UI, tức là màn hình đứng hình — đúng thứ kiến trúc hai lõi sinh ra để
+  // tránh, và đứng hình vì một cái đồng hồ thì càng không đáng.
+  if (!getLocalTime(&tm_now, 0)) return false;
+  // < năm 2020 nghĩa là SNTP chưa trả lời, đây mới là giá trị mặc định của
+  // đồng hồ hệ thống. Ghi nó xuống DS1307 là thay một giờ sai bằng một giờ sai
+  // khác, lại còn xoá bit CH nên clockRead() sẽ khẳng định nó hợp lệ.
+  if (tm_now.tm_year < 120) return false;
+  return clockWrite((uint8_t)tm_now.tm_hour, (uint8_t)tm_now.tm_min,
+                    (uint8_t)tm_now.tm_sec);
 }
 
 } // namespace BoardIo
