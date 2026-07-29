@@ -28,7 +28,7 @@ using CommandFn = void (*)(const Ui::Command &cmd);
 /// trạng thái hiện tại chứ không phải vào nút vừa bấm: bấm TẮT hai lần là còi
 /// bật lại, bấm BẬT lúc đang bật là thành tắt. Nút có nhãn khẳng định ("BẬT")
 /// thì phải LUÔN cho ra trạng thái đó, bấm bao nhiêu lần cũng vậy.
-enum Setting : uint8_t { BRIGHT_DOWN, BRIGHT_UP, BUZZER_ON, BUZZER_OFF, NTP_SYNC, REBOOT };
+enum Setting : uint8_t { BRIGHT_DOWN, BRIGHT_UP, BUZZER_ON, BUZZER_OFF, REBOOT };
 using SettingFn = void (*)(Setting s);
 
 /// Dựng toàn bộ. Gọi một lần trong Ui::begin(), sau Theme::init().

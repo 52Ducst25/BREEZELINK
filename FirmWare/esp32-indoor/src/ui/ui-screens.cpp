@@ -394,11 +394,26 @@ void buildSettings() {
 
   lv_obj_t *r0 = card(p, PAD, 4, 308, 40);
   label(r0, 12, 12, "ĐỘ SÁNG", fontBody(), textPrimary());
+  // GIỮ ĐỂ CHẠY LIÊN TỤC. Độ sáng nhảy 10% mỗi bước nên đi từ 10% lên 100% là 9
+  // lần bấm — đủ nhiều để thành khó chịu trên màn cảm ứng nhỏ.
+  //
+  // Cặp sự kiện phải là SHORT_CLICKED + LONG_PRESSED_REPEAT, KHÔNG PHẢI
+  // CLICKED + LONG_PRESSED_REPEAT: LVGL vẫn bắn CLICKED lúc nhả tay kể cả sau
+  // một lượt giữ dài, nên dùng CLICKED thì mỗi lần giữ bị cộng thêm đúng một
+  // bước thừa ở cuối. SHORT_CLICKED chỉ bắn khi nhả TRƯỚC ngưỡng giữ lâu, nên
+  // hai đường không chồng nhau: chạm = 1 bước, giữ = lặp cho tới khi nhả.
+  //
+  // Nhịp lặp lấy mặc định của LVGL (100 ms) — quét hết dải 10 bước mất ~1 giây,
+  // vừa đủ nhanh mà vẫn dừng đúng chỗ được. Không đụng tới `pressFeedback`: nó
+  // gắn vào LV_EVENT_PRESSED nên chỉ kêu MỘT tiếng lúc chạm xuống, không kêu
+  // theo từng bước lặp — giữ nút mà còi kêu 10 lần thì thành tiếng ồn.
   lv_obj_t *bd = button(r0, 190, 6, 28, 28, "-");
-  lv_obj_add_event_cb(bd, onSetting, LV_EVENT_CLICKED, (void *)(uintptr_t)BRIGHT_DOWN);
+  lv_obj_add_event_cb(bd, onSetting, LV_EVENT_SHORT_CLICKED, (void *)(uintptr_t)BRIGHT_DOWN);
+  lv_obj_add_event_cb(bd, onSetting, LV_EVENT_LONG_PRESSED_REPEAT, (void *)(uintptr_t)BRIGHT_DOWN);
   gBrightLbl = label(r0, 224, 12, "70%", fontLabel(), accent());
   lv_obj_t *bu = button(r0, 262, 6, 28, 28, "+");
-  lv_obj_add_event_cb(bu, onSetting, LV_EVENT_CLICKED, (void *)(uintptr_t)BRIGHT_UP);
+  lv_obj_add_event_cb(bu, onSetting, LV_EVENT_SHORT_CLICKED, (void *)(uintptr_t)BRIGHT_UP);
+  lv_obj_add_event_cb(bu, onSetting, LV_EVENT_LONG_PRESSED_REPEAT, (void *)(uintptr_t)BRIGHT_UP);
 
   lv_obj_t *r1 = card(p, PAD, 50, 308, 40);
   label(r1, 12, 12, "ÂM BÁO", fontBody(), textPrimary());
@@ -415,14 +430,12 @@ void buildSettings() {
   gBuzzOff = button(r1, 258, 6, 36, 28, "TẮT");
   lv_obj_add_event_cb(gBuzzOff, onSetting, LV_EVENT_CLICKED, (void *)(uintptr_t)BUZZER_OFF);
 
+  // Hàng "ĐỒNG BỘ GIỜ" đã bỏ -> KHỞI ĐỘNG LẠI dời lên y=96 thế chỗ. Để nguyên
+  // y=142 thì màn hở một khoảng trống bằng đúng một hàng, nhìn ra là thiếu mất
+  // một mục chứ không phải là bố cục có chủ đích.
   lv_obj_t *r2 = card(p, PAD, 96, 308, 40);
-  label(r2, 12, 12, "ĐỒNG BỘ GIỜ", fontBody(), textPrimary());
-  lv_obj_t *bn = button(r2, 226, 6, 68, 28, "CHẠY");
-  lv_obj_add_event_cb(bn, onSetting, LV_EVENT_CLICKED, (void *)(uintptr_t)NTP_SYNC);
-
-  lv_obj_t *r3 = card(p, PAD, 142, 308, 40);
-  label(r3, 12, 12, "KHỞI ĐỘNG LẠI", fontBody(), textPrimary());
-  lv_obj_t *br = button(r3, 226, 6, 68, 28, "CHẠY");
+  label(r2, 12, 12, "KHỞI ĐỘNG LẠI", fontBody(), textPrimary());
+  lv_obj_t *br = button(r2, 226, 6, 68, 28, "CHẠY");
   lv_obj_set_style_border_color(br, err(), 0);
   lv_obj_set_style_text_color(lv_obj_get_child(br, 0), err(), 0);
   lv_obj_add_event_cb(br, onSetting, LV_EVENT_CLICKED, (void *)(uintptr_t)REBOOT);

@@ -253,10 +253,6 @@ void onSetting(Screens::Setting s) {
       Screens::setBuzzer(on);
       break;
     }
-    case Screens::NTP_SYNC:
-      BoardIo::ntpBegin();            // không chặn; ntpPoll() báo khi xong
-      Screens::toast("ĐANG LẤY GIỜ...");
-      break;
     case Screens::REBOOT:
       Screens::toast("KHỞI ĐỘNG LẠI...");
       lv_timer_handler();             // kịp vẽ dòng thông báo trước khi tắt
@@ -281,7 +277,6 @@ void uiTaskFn(void *) {
     BoardIo::buzzerTick();
     blTick();                 // bò dần tới độ sáng đích — xem khối "Tự hạ sáng"
     Screens::tickToast(now);
-    if (BoardIo::ntpPoll()) Screens::toast("ĐÃ ĐỒNG BỘ GIỜ");
 
     // Kết quả từ loop() -> toast.
     Reply r;

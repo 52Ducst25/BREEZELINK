@@ -50,20 +50,12 @@ struct Clock { uint8_t hh, mm, ss; };
 /// Đọc giờ. Trả false nếu chip không trả lời HOẶC đang ở trạng thái dừng dao
 /// động (bit CH) — tức là chưa từng được đặt giờ. Không đoán bừa: giao diện
 /// hiện "--:--" còn hơn hiện 00:00 như thể đó là giờ thật.
-bool clockRead(Clock &out);
-
-/// Ghi giờ và xoá bit CH để dao động chạy.
-bool clockWrite(uint8_t hh, uint8_t mm, uint8_t ss);
-
-/// Bắt đầu xin giờ NTP. Trả về ngay.
 ///
-/// TÁCH LÀM HAI BƯỚC chứ không viết một hàm chặn 8 giây: hàm này chạy trong tác
-/// vụ giao diện, mà giao diện đứng hình 8 giây ngay sau khi người dùng bấm nút
-/// là dấu hiệu kinh điển của "máy treo" — họ sẽ bấm loạn hoặc rút điện.
-void ntpBegin();
-
-/// Gọi lại mỗi vòng của tác vụ UI. true đúng một lần, khi đã lấy được giờ và
-/// nạp xong vào DS1307. Không chặn.
-bool ntpPoll();
+/// CHỈ CÒN CHIỀU ĐỌC. Node không đặt giờ nữa: nút "ĐỒNG BỘ GIỜ" cùng cặp
+/// ntpBegin()/ntpPoll() và clockWrite() đã bỏ. Hệ quả phải biết trước: DS1307
+/// phải được đặt giờ bằng công cụ khác (nó có pin nuôi riêng nên đặt một lần là
+/// giữ). Chưa từng đặt thì thanh trạng thái hiện "--:--" vĩnh viễn — đúng theo
+/// luật "thà không có số còn hơn số bịa", nhưng nhìn ra là đồng hồ hỏng.
+bool clockRead(Clock &out);
 
 } // namespace BoardIo

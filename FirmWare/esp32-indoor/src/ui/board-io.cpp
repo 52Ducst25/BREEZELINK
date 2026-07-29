@@ -1,6 +1,5 @@
 #include "board-io.h"
 #include <Wire.h>
-#include <time.h>
 #include "../config.h"
 
 namespace BoardIo {
@@ -185,8 +184,8 @@ bool sht3xRead(float &tempC, float &humidity) {
 // ---------------------------------------------------------------------------
 static const uint8_t DS1307_ADDR = 0x68;
 
+// Chỉ còn chiều ĐỌC: node không đặt giờ nữa (xem clockRead trong board-io.h).
 static uint8_t bcd2dec(uint8_t b) { return (uint8_t)((b >> 4) * 10 + (b & 0x0F)); }
-static uint8_t dec2bcd(uint8_t d) { return (uint8_t)(((d / 10) << 4) | (d % 10)); }
 
 bool clockRead(Clock &out) {
   Wire.beginTransmission(DS1307_ADDR);
@@ -204,30 +203,6 @@ bool clockRead(Clock &out) {
   out.hh = (h & 0x40) ? (uint8_t)(bcd2dec(h & 0x1F) % 12 + ((h & 0x20) ? 12 : 0))
                       : bcd2dec(h & 0x3F);
   return out.hh < 24 && out.mm < 60 && out.ss < 60;
-}
-
-bool clockWrite(uint8_t hh, uint8_t mm, uint8_t ss) {
-  Wire.beginTransmission(DS1307_ADDR);
-  Wire.write((uint8_t)0x00);
-  Wire.write(dec2bcd(ss) & 0x7F);      // CH = 0 -> dao động chạy
-  Wire.write(dec2bcd(mm));
-  Wire.write(dec2bcd(hh) & 0x3F);      // ép chế độ 24h
-  return Wire.endTransmission() == 0;
-}
-
-void ntpBegin() {
-  // SNTP của lwIP chạy trong tác vụ riêng của nó và tự cập nhật đồng hồ hệ
-  // thống — ở đây chỉ khởi động rồi thoát, việc chờ là của ntpPoll().
-  configTzTime(TZ_INFO, "pool.ntp.org", "time.google.com");
-}
-
-bool ntpPoll() {
-  struct tm tm_now;
-  // timeout 0: hỏi đồng hồ hệ thống rồi trả lời ngay, KHÔNG chờ trong này.
-  if (!getLocalTime(&tm_now, 0)) return false;
-  if (tm_now.tm_year < 120) return false;   // < năm 2020 -> SNTP chưa về, mới là giá trị mặc định
-  return clockWrite((uint8_t)tm_now.tm_hour, (uint8_t)tm_now.tm_min,
-                    (uint8_t)tm_now.tm_sec);
 }
 
 } // namespace BoardIo

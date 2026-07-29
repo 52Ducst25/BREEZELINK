@@ -91,7 +91,6 @@
 #define TOUCH_INVERT_X     0
 #define TOUCH_INVERT_Y     1
 
-//  Múi giờ cho nút "DONG BO GIO" (nạp giờ NTP vào DS1307). Chuỗi POSIX TZ:
-//  Việt Nam UTC+7, không có giờ mùa hè — dấu trừ trong "ICT-7" là đúng chuẩn
-//  POSIX (nó ghi độ lệch cần CỘNG vào giờ địa phương để ra UTC).
-#define TZ_INFO            "ICT-7"
+//  KHÔNG CÒN TZ_INFO: nút "ĐỒNG BỘ GIỜ" và cả đường NTP đã bỏ. Node chỉ ĐỌC
+//  DS1307 để hiện giờ trên thanh trạng thái, không đặt giờ nữa — đặt bằng công
+//  cụ khác, chip có pin nuôi riêng nên một lần là giữ.

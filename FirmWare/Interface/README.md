@@ -443,8 +443,12 @@ Bốn hàng đầy chiều rộng, `x=6 w=308 h=40`, `y = 28 / 74 / 120 / 166`:
 |---|---|---|
 | `DO SANG` | `−` `70%` `+` | PWM LEDC lên GPIO27, bước 10 %, sàn 10 % (0 % = màn như hỏng) |
 | `AM BAO` | `BAT` / `TAT` | còi GPIO13, bíp 40 ms mỗi lần chạm |
-| `DONG BO GIO` | `CHAY` | nạp giờ NTP vào DS1307 |
 | `KHOI DONG LAI` | `CHAY` | `ESP.restart()`, có bước xác nhận |
+
+> Hàng `DONG BO GIO` **đã bỏ** cùng toàn bộ đường NTP (`ntpBegin`/`ntpPoll`/
+> `clockWrite`). Node chỉ còn **đọc** DS1307 để hiện giờ trên thanh trạng thái.
+> Hệ quả: đồng hồ phải được đặt bằng công cụ khác — chip có pin nuôi riêng nên
+> đặt một lần là giữ. Chưa từng đặt thì thanh trạng thái hiện `--:--` mãi.
 
 Không có mục "đổi WiFi" — cấu hình WiFi nằm trong `config.h`, thêm màn nhập mật
 khẩu bằng bàn phím ảo là một dự án riêng.
@@ -570,9 +574,6 @@ tức thì trong khi màn vẫn không bị vẽ thừa.
   gì tới MQTT/IR đang chạy ở lõi 1.
 - **Tự hạ sáng** sau 60 s không ai chạm (xuống 15 %). Cú chạm đánh thức **không**
   tính là bấm nút: người dùng chạm màn tối để *nhìn*, không phải để đổi nhiệt độ.
-- **Đồng bộ NTP không chặn**: `ntpBegin()` + `ntpPoll()` mỗi vòng thay vì một
-  hàm chặn 8 giây. Giao diện đứng hình 8 s ngay sau khi bấm nút là dấu hiệu kinh
-  điển của "máy treo" — người dùng sẽ bấm loạn hoặc rút điện.
 - **Đo cảm biến mỗi 2–2.5 s** (SHT3x 2 s ở tác vụ UI, DHT22 2.5 s ở `loop()` —
   datasheet DHT22 yêu cầu tối thiểu 2 s giữa hai lần đọc) để màn phản ánh phòng
   gần như tức thì, trong khi telemetry lên cloud vẫn giữ nhịp `TELEMETRY_MS`
