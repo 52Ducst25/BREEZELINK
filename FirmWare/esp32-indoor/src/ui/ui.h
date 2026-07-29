@@ -109,15 +109,23 @@ bool pollCommand(Command &out);
 /// nullptr = thành công, dùng lời mặc định.
 void reply(const char *msg);
 
-/// Số đo trong nhà mới nhất, đo bằng SHT3x trên bus I2C.
+/// Số đo trong nhà mới nhất. HAI nguồn có thể ghi vào đây, tuỳ bo lắp con nào:
 ///
-/// VÌ SAO ĐI QUA ĐÂY chứ không để loop() tự đọc cảm biến: bus I2C có ba con
-/// (cảm ứng, DS1307, SHT3x) và thuộc quyền sở hữu của tác vụ UI. Hai lõi cùng
-/// nói chuyện trên một bus I2C thì hỏng gói, mà triệu chứng là số đo sai lác
-/// đác — loại lỗi tốn cả tuần để tìm. Tác vụ UI đo mỗi 2s rồi đặt số ở đây.
+///   SHT3x (I2C 0x44) — tác vụ UI tự đọc mỗi 2s. Bus I2C có ba con (cảm ứng,
+///     DS1307, SHT3x) và thuộc quyền sở hữu của tác vụ UI: hai lõi cùng nói
+///     chuyện trên một bus I2C thì hỏng gói, mà triệu chứng là số đo sai lác đác
+///     — loại lỗi tốn cả tuần để tìm.
+///   DHT22 (GPIO17) — loop() đọc rồi gọi setIndoor(). Ngược hướng vì lý do đối
+///     xứng: thư viện DHT tắt ngắt suốt ~5ms để bắt nhịp bit, mà lõi 0 là chỗ
+///     ngăn xếp WiFi chạy. Đọc ở lõi 1 vừa an toàn cho WiFi vừa ít bị ngắt xen
+///     vào giữa nên tỉ lệ đọc hỏng thấp hơn hẳn.
 ///
 /// Trả false khi chưa có số đo hợp lệ nào (chưa cắm cảm biến, hoặc CRC sai).
 /// KHÔNG bao giờ trả 0.0 thay cho "không đo được".
 bool readIndoor(float &tempC, float &humidity);
+
+/// Đặt số đo trong nhà từ bên ngoài tác vụ UI (dùng cho DHT22 đọc ở loop()).
+/// An toàn đa lõi. Người gọi phải tự loại NaN — hàm này không đoán hộ.
+void setIndoor(float tempC, float humidity);
 
 } // namespace Ui

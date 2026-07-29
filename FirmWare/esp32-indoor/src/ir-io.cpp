@@ -57,6 +57,22 @@ void blast(const uint16_t *raw, uint16_t len) {
 
 void learnStart(uint32_t timeoutMs) {
   if (receiver == nullptr) return;
+
+  // TẮT TRƯỚC NẾU ĐANG HỌC DỞ. enableIRIn() của IRremoteESP8266 gọi timerBegin()
+  // + timerAttachInterrupt() + attachInterrupt() MỖI LẦN, không tự kiểm tra đã
+  // gắn hay chưa. Gọi chồng lên nhau thì ESP-IDF từ chối:
+  //     addApbChangeCallback(): duplicate func=...
+  //     timer_group: timer_isr_callback_add(236): register interrupt service failed
+  // và bộ định thời lấy mẫu KHÔNG chạy -> mắt thu chết hẳn cho tới khi khởi động
+  // lại, trong khi log vẫn thản nhiên in "[learn] huong remote vao mat thu roi
+  // bam nut". Hỏng câm đúng kiểu tệ nhất: người lắp bấm remote mãi không được và
+  // sẽ đi nghi mắt thu, dây, hay khoảng cách.
+  //
+  // Vào lại chế độ học khi đang học dở KHÔNG hiếm: backend gửi lại lệnh, người
+  // dùng bấm nút "học" lần nữa vì lần đầu chưa kịp, hoặc đổi sang học nút khác.
+  // disableIRIn() dọn sạch (timerEnd + detachInterrupt) nên gọi lại là an toàn.
+  if (active) receiver->disableIRIn();
+
   receiver->enableIRIn();
   receiver->resume();
   active   = true;

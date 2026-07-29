@@ -2,8 +2,9 @@
 //  Aircon — QR Box Advance Touch · node TRONG NHÀ (indoor) + MASTER + IR blaster
 // ----------------------------------------------------------------------------
 //  Node này gộp cả 4 vai trò của một hộ vào một bo:
-//    1. Đo nhiệt/ẩm (SHT3x qua I2C) -> đẩy t_in/h_in lên cloud (đầu vào của
-//       thuật toán comfort). Số đo do tác vụ UI lấy hộ vì bus I2C thuộc về nó.
+//    1. Đo nhiệt/ẩm -> đẩy t_in/h_in lên cloud (đầu vào của thuật toán comfort).
+//       DHT22 trên GPIO17 đọc ngay tại loop() này; nếu bo có thêm SHT3x trên I2C
+//       thì tác vụ UI lấy hộ (bus I2C thuộc về nó) và số của SHT3x được ưu tiên.
 //    2. Nhận lệnh từ cloud -> phát hồng ngoại điều khiển máy lạnh + học remote
 //    3. Nhận ESP-NOW từ node outdoor -> chuyển tiếp lên MQTT hộ nó
 //    4. Hiển thị + cho điều khiển tại chỗ trên màn cảm ứng 2.8" (tác vụ lõi 0)
@@ -24,6 +25,7 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
+#include <DHTesp.h>
 #include "config.h"
 #include "espnow-relay.h"
 #include "slave-watch.h"
@@ -33,6 +35,37 @@
 // Thiết kế giao diện + lý do phải tách lõi: ../../Interface/README.md và ui.h.
 // loop() dưới đây không vẽ một pixel nào — nó chỉ đổ số liệu sang và rút lệnh về.
 #include "ui/ui.h"
+#include "ui/board-io.h"   // chỉ để hỏi sht3xPresent() — xem readDht() bên dưới
+
+// --- Cảm biến nhiệt/ẩm trong nhà --------------------------------------------
+// DHT22 trên GPIO17 (pad chân TX của module A7680C không hàn).
+//
+// ĐỌC Ở LÕI 1 (trong loop()), không ở tác vụ giao diện: giải mã DHT22 phải tắt
+// ngắt ~5ms để tự bắt nhịp bit, mà tác vụ giao diện nằm ở lõi 0 — đúng lõi ngăn
+// xếp WiFi chạy. loop() ở lõi 1 chỉ có nó và IR nên vừa an toàn cho WiFi vừa ít
+// bị xen vào giữa, tỉ lệ đọc hỏng thấp hơn.
+//
+// DÙNG DHTesp CHỨ KHÔNG PHẢI thư viện DHT của Adafruit — lý do dài, xem lib_deps
+// trong platformio.ini. Tóm tắt: bản Adafruit tắt ngắt hơn 1 giây khi chưa cắm
+// cảm biến và làm panic lõi 1.
+static DHTesp dht;
+static unsigned long lastDht = 0;
+
+/// GPIO34..39 là chân CHỈ VÀO: không có mạch lái ngõ ra, không có trở kéo trong
+/// chip. DHT22 là giao thức một dây HAI CHIỀU — MCU phải tự kéo dây xuống thấp
+/// ~1ms mở đầu mỗi lượt đọc rồi mới nhả ra nghe — nên đặt DHT_PIN vào dải này
+/// thì cảm biến không bao giờ trả lời.
+///
+/// Phải kiểm ở đây vì trình biên dịch KHÔNG bắt được: pinMode(36, OUTPUT) là mã
+/// hợp lệ và trên ESP32 nó lặng lẽ không làm gì. Không có dòng cảnh báo này thì
+/// triệu chứng duy nhất là NaN vĩnh viễn — nhìn y hệt đứt dây hoặc chết cảm
+/// biến, và người ta sẽ đi thay cảm biến trước khi nghĩ tới sơ đồ chân.
+static const bool DHT_PIN_OK = !(DHT_PIN >= 34 && DHT_PIN <= 39);
+
+/// Nhịp đọc DHT22 (ms). Datasheet ghi TỐI THIỂU 2s giữa hai lần đọc — dưới mức
+/// đó chip trả lại số của lần trước chứ không đo mới. 2.5s cho dư biên.
+static const unsigned long DHT_PERIOD_MS = 2500;
+static void readDht();
 
 // Broker EMQX tự host trên VPS chạy plaintext 1883 (MQTT_TLS=false trong
 // docker-compose), nên dùng WiFiClient thường — KHÔNG phải WiFiClientSecure.
@@ -441,9 +474,10 @@ void setup() {
   // chục giây. Người đi lắp nhìn thấy "MAT KET NOI" nhấp nháy — tức là node
   // sống và đang dò mạng — thay vì một màn đen không nói gì.
   //
-  // Bo này KHÔNG có DHT: GPIO4 đã là I2C SCL. Nhiệt/ẩm đo bằng SHT3x trên chính
-  // bus I2C đó, do tác vụ UI đọc hộ (Interface/README.md §3.1).
+  // Ui::begin() cũng là nơi dò SHT3x trên I2C và kéo EN_LEVEL_SHIFT lên HIGH —
+  // mà IR phát nay đi qua bộ dịch mức đó, nên nó phải chạy TRƯỚC IrIo::begin().
   Ui::begin();
+  dht.setup(DHT_PIN, DHTesp::DHT22);
   IrIo::begin(IR_TX_PIN, IR_RX_PIN);
   if (!IrStore::begin()) {
     // Không chặn khởi động: node vẫn chạy được, chỉ là mọi lệnh phải kèm ir_raw.
@@ -471,7 +505,28 @@ void setup() {
   } else {
     Serial.println("ESP-NOW KHOI TAO LOI — se khong nhan duoc so lieu tu node ngoai troi");
   }
-  Serial.printf("IR: phat GPIO%d · thu GPIO%d\n", IR_TX_PIN, IR_RX_PIN);
+  // Tự suy ra đường đi thay vì ghi cứng: cặp UART_1 (GPIO2/15) ra P3 qua TXS0104
+  // nên phụ thuộc EN_LEVEL_SHIFT, còn lại nối 3.3V thẳng. Bản trước ghi cứng
+  // "qua TXS0104" từ hồi IR phát còn ở GPIO15, và dòng log đó tiếp tục khẳng
+  // định sai sau khi chân đã dời — đúng kiểu log tự tin mà dối, tốn thời gian
+  // của người đọc hơn là không in gì.
+  auto irPath = [](int pin) {
+    return (pin == 2 || pin == 15) ? "P3 qua TXS0104, can EN_LEVEL_SHIFT" : "3.3V thang";
+  };
+  Serial.printf("IR: phat GPIO%d (%s) · thu GPIO%d (%s)\n",
+                IR_TX_PIN, irPath(IR_TX_PIN), IR_RX_PIN, irPath(IR_RX_PIN));
+  if (BoardIo::sht3xPresent()) {
+    Serial.println("Cam bien nhiet/am: SHT3x @0x44 (I2C) — DHT22 bi bo qua");
+  } else if (!DHT_PIN_OK) {
+    Serial.printf(
+        "\n!!! SAI SO DO CHAN: DHT22 dang dat o GPIO%d, ma GPIO34..39 la chan CHI VAO.\n"
+        "    DHT22 can MCU keo day xuong thap ~1ms de mo dau moi luot doc, chan chi vao\n"
+        "    khong lam duoc -> se KHONG BAO GIO co so do (chi ra NaN, khong bao loi).\n"
+        "    Sua: doi DHT_PIN trong platformio.ini sang mot chan lai duoc ngo ra.\n"
+        "    Da TAT han viec doc DHT de khoi ton thoi gian.\n\n", DHT_PIN);
+  } else {
+    Serial.printf("Cam bien nhiet/am: DHT22 @GPIO%d (khong thay SHT3x @0x44)\n", DHT_PIN);
+  }
 }
 
 static unsigned long lastPub = 0;
@@ -589,10 +644,35 @@ static void pushUiModel() {
   Ui::publish(m);
 }
 
+/// Đọc DHT22 theo nhịp rồi đặt số vào kho chung của giao diện.
+///
+/// NHƯỜNG SHT3x KHI CÓ MẶT: nếu cả hai cùng lắp mà cả hai cùng ghi, số trên màn
+/// nhảy qua nhảy lại giữa hai con lệch nhau vài phần mười độ — nhìn như cảm biến
+/// hỏng. SHT3x được ưu tiên vì mỗi lần đọc có CRC kiểm chứng.
+static void readDht() {
+  if (!DHT_PIN_OK) return;          // đã cảnh báo ở setup(), đừng phí công đọc
+  if (millis() - lastDht < DHT_PERIOD_MS) return;
+  lastDht = millis();
+  if (BoardIo::sht3xPresent()) return;
+
+  // Một lượt đọc lấy cả hai số — KHÔNG gọi getTemperature() rồi getHumidity()
+  // như hai lệnh riêng: mỗi lệnh là một lần bắt tay 5ms với cảm biến, mà nhịp
+  // tối thiểu của DHT22 là 2s nên lệnh thứ hai chỉ trả lại số cũ.
+  const TempAndHumidity th = dht.getTempAndHumidity();
+
+  // Sai checksum hoặc hết giờ chờ là chuyện thường với DHT22 (vài phần trăm số
+  // lần đọc). Bỏ lượt này, 2.5s nữa đọc lại — ghi NaN vào kho chung sẽ làm màn
+  // chớp "—" rồi lại hiện số, trông như cảm biến sắp hỏng.
+  if (dht.getStatus() != DHTesp::ERROR_NONE) return;
+  if (isnan(th.temperature) || isnan(th.humidity)) return;
+  Ui::setIndoor(th.temperature, th.humidity);
+}
+
 void loop() {
   connectWifi();
   if (!mqtt.connected()) connectMqtt();
   mqtt.loop();
+  readDht();
 
   // Rút lệnh người dùng bấm MỖI VÒNG (nút phải phản hồi ngay), nhưng ảnh chụp
   // trạng thái chỉ đẩy sang giao diện theo nhịp 200ms — đúng nhịp vẽ lại của màn
@@ -639,15 +719,30 @@ void loop() {
   unsigned long now = millis();
   if (lastPub != 0 && now - lastPub < TELEMETRY_MS) return;  // chưa tới nhịp
 
-  // Cảm biến nằm trên bus I2C do tác vụ UI sở hữu (nó đo mỗi 2s). Ở đây chỉ
-  // lấy số đã đo sẵn — KHÔNG delay(): số mới sẽ có ở vòng sau, mà lõi 1 còn
-  // phải chạy mqtt.loop() và rút hàng đợi ESP-NOW.
+  // Đóng dấu nhịp NGAY, TRƯỚC khi biết có số đo hay không — chứ không chỉ khi
+  // gửi thành công. Đặt sau lần đọc hỏng thì `lastPub` đứng yên ở 0, điều kiện
+  // trên không bao giờ chặn, và cả khối này chạy MỖI VÒNG loop(): chưa cắm cảm
+  // biến là log phun ra vài nghìn dòng mỗi phút (đo được 304 KB trong 40 s),
+  // đủ để chôn mọi dòng log khác và ăn hẳn một phần lõi 1.
+  lastPub = now;
+
+  // Lấy số ĐÃ ĐO SẴN — không đọc cảm biến tại đây. readDht() ở đầu loop() lo
+  // nhịp 2.5s của DHT22, còn SHT3x thì tác vụ UI đo. Chờ một lượt đo ở đây sẽ
+  // chặn cả mqtt.loop() lẫn việc rút hàng đợi ESP-NOW.
   float t, h;
   if (!Ui::readIndoor(t, h)) {
-    Serial.println("Chua co so do SHT3x — kiem tra day I2C tren J1");
+    // Hai nguyên nhân khác hẳn nhau -> hai lời nhắc khác hẳn nhau. Nhắc "kiểm
+    // tra trở kéo" khi thật ra chân không lái được ngõ ra là đẩy người đọc log
+    // đi sai hướng — đúng cái mà dòng cảnh báo ở setup() sinh ra để chặn.
+    if (!DHT_PIN_OK)
+      Serial.printf("Chua co so do nhiet/am — DHT22 dang o GPIO%d (chan CHI VAO), "
+                    "xem canh bao luc khoi dong\n", DHT_PIN);
+    else
+      Serial.printf("Chua co so do nhiet/am — kiem tra DHT22 tren GPIO%d "
+                    "(co tro keo 4.7k len 3.3V chua?) hoac day I2C cua SHT3x tren J1\n",
+                    DHT_PIN);
     return;
   }
-  lastPub = now;
 
   JsonDocument doc;
   doc["ts"]   = (uint32_t)(millis() / 1000);  // không RTC -> backend tự đóng dấu giờ nhận

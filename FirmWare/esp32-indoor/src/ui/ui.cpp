@@ -499,4 +499,11 @@ bool readIndoor(float &tempC, float &humidity) {
   return true;
 }
 
+void setIndoor(float tempC, float humidity) {
+  portENTER_CRITICAL(&indoorMux);
+  gIndoorT = tempC;
+  gIndoorH = humidity;
+  portEXIT_CRITICAL(&indoorMux);
+}
+
 } // namespace Ui

@@ -116,64 +116,151 @@ Firmware indoor cần 3 chân mà bo này đã dùng hết:
 
 ### 3.1 Phương án đã chọn
 
-**Cả hai chân IR mượn của module 4G A7680C — module mà dự án này không dùng
-(§1) nên không hàn lên bo, hai chân của nó bỏ không:**
-
 ```
-IR phát -> GPIO17 = UART_2_RX  (nối chân TX của A7680C), R5 kéo lên 100 kΩ
-IR thu  -> GPIO5  = UART_2_TX  (nối chân RX của A7680C), R6 kéo lên 100 kΩ
+IR phát -> GPIO5  = UART_2_TX   (pad chân RX của A7680C), 3.3V thẳng
+IR thu  -> GPIO17 = UART_2_RX   (pad chân TX của A7680C), 3.3V thẳng
+DHT22   -> GPIO2  = UART_1_RX,  ra cổng P3 QUA TXS0104 (mức 5V)
+
+GPIO15 (UART_1_TX, ra P3 qua TXS0104) ĐỂ TRỐNG
 ```
 
-Cả hai chạy **3.3 V thẳng**: đường `UART_2` **không** đi qua TXS0104, nên IR
-không phụ thuộc `EN_LEVEL_SHIFT` — đây là lý do chính chọn cặp chân này thay vì
-cặp `UART_1` (GPIO15/GPIO2) ra cổng P3 như bản trước tài liệu từng ghi. Đổi lại
-không có tầm phát xa như đi 5 V, và **không chân nào ra header**: phải hàn dây
-thẳng vào pad chân module trên bo.
+**IR phát — GPIO5** (`UART_2_TX`, pad chân RX của A7680C). 3.3 V thẳng, **không
+qua TXS0104** nên không phụ thuộc `EN_LEVEL_SHIFT`. Có sẵn R6 100 kΩ kéo lên.
+Không ra header — phải hàn dây vào pad.
 
-**ĐIỀU KIỆN BẮT BUỘC: không hàn module A7680C lên bo.** Hàn vào là hai chân có
-hai chủ, IR câm và module 4G cũng không chạy.
+Ở 3.3 V thì module phát **nên có transistor riêng**; loại chỉ có LED nối tiếp trở
+(kiểu KY-005) vẫn chạy nhưng dòng thấp, tầm phát yếu.
 
-Ràng buộc lúc boot:
+> **GPIO5 là chân strapping nhưng vô hại ở đây.** Nó cùng MTDO chọn *timing của
+> SDIO slave* — chế độ mà thiết kế này không bao giờ dùng, nên mức lúc reset
+> không ảnh hưởng gì tới việc boot. Khác hẳn GPIO12/MTDI (chọn mức flash, sai là
+> bo chết ngay) hay GPIO2 (chọn chế độ nạp).
 
-- GPIO5 là **chân strapping** (chọn timing SDIO slave), phải HIGH lúc reset —
-  R6 100 kΩ kéo lên sẵn, và ngõ ra mắt thu IR ở trạng thái nghỉ cũng là HIGH,
-  nên đúng yêu cầu. GPIO17 không phải chân strapping.
-- **`EN_LEVEL_SHIFT` (GPIO12) vẫn phải kéo HIGH trong `setup()`** cho cổng
-  `UART_1` ra P3, nhưng **IR không còn cần nó**. GPIO12 là **MTDI**: HIGH lúc
-  reset thì ROM chọn mức flash 1.8 V và bo **không boot** — nên tuyệt đối không
-  kéo lên bằng trở ngoài. Trên bo này **R7 10 kΩ kéo GPIO12 XUỐNG GND**, đúng
-  chuẩn (đã đối chiếu schematic trang 5).
+#### Vì sao IR phát phải rời khỏi TXS0104 — đã thử trên bo
 
-**DHT → bỏ, thay bằng cảm biến I²C.**
-Không còn chân thứ ba cho DHT, và DHT là giao thức một dây hai chiều — ép qua
-TXS0104 rất dễ hỏng theo kiểu khó tìm. Bus I²C sẵn có (GPIO4/16) đã có trở kéo,
-đã chạy 100 kHz cho DS1307, thừa chỗ cho một con nữa:
+Đi qua bộ dịch mức được hai thứ hấp dẫn: chân **ra thẳng header P3** (khỏi hàn
+vào pad) và ngõ ra **5 V** nên tầm phát xa hơn. Cắm vào GPIO15 thì **LED của
+module phát sáng liên tục**.
+
+TXS0104 ở trạng thái ổn định chỉ *giữ* mức bằng trở ~40 kΩ — mạch one-shot của nó
+chỉ kích mạnh vài chục ns lúc chuyển mức. Nó **không kéo nổi ngõ vào module xuống
+thấp**, cũng **không cấp nổi dòng** cho LED hồng ngoại hay cực B của NPN. Hỏng
+kép: IR câm, mà LED lại chạy DC liên tục → nóng và suy giảm nhanh.
+
+Đây là **giới hạn của IC chứ không của chân**, nên GPIO2 (nửa còn lại của cùng
+cặp `UART_1`) cũng vậy — đừng thử lại đường đó. GPIO5 lái **đẩy-kéo thật** nên
+hết cả hai; trả giá bằng mức 3.3 V nên tầm phát ngắn hơn.
+
+**IR thu — GPIO17** (`UART_2_RX`, pad chân TX của A7680C). 3.3 V thẳng, **không
+qua TXS0104**. Có sẵn R5 100 kΩ kéo lên. Không ra header — phải hàn dây vào pad.
+
+- **Nuôi mắt thu bằng 3.3 V, không phải 5 V.** Không chân ESP32 nào chịu quá áp
+  (ngưỡng tuyệt đối VDD+0.3 ≈ 3.6 V).
+- GPIO17 **không mang vai trò strapping nào** — sạch nhất trong các chân còn lại.
+
+**ĐIỀU KIỆN BẮT BUỘC: không hàn module A7680C lên bo.** Cả hai chân IR đều mượn
+pad của nó. Hàn vào là hai chân có hai chủ, IR câm hoàn toàn.
+
+**DHT22 — GPIO2** (`UART_1_RX` → P3 qua TXS0104). Đây là **thứ duy nhất còn đi
+qua bộ dịch mức**, nên `EN_LEVEL_SHIFT` (GPIO12) phải HIGH thì mới đọc được
+nhiệt/ẩm. `OE` thấp → ngõ ra treo lơ lửng → `NaN` vĩnh viễn.
+
+**Đã kiểm chứng chạy trên đúng chân này:** `[telemetry] t=30.1°C h=49% -> da gui`,
+đọc liên tiếp ra 30.1 rồi 29.9 — số nhích tự nhiên chứ không nhảy loạn. Điều này
+**không hiển nhiên**: DHT22 là giao thức một dây hai chiều (MCU kéo thấp ~1 ms mở
+đầu rồi **nhả** cho cảm biến lái tiếp) còn TXS0104 tự đoán chiều bằng mạch
+one-shot — đảo chiều giữa chừng đúng là chỗ loại IC này hay lỗi. Dấu hiệu nếu
+hỏng: đọc được lúc được lúc không, `NaN` xen kẽ (checksum bắt được nên **không**
+ra số sai).
+
+- **Trở kéo 4.7 kΩ phải đặt PHÍA P3, không hàn thẳng vào chân chip.** Cả GPIO2
+  lẫn GPIO15 (đang để trống cạnh đó) đều là chân strapping, hỏng ngược chiều nhau:
+  - **GPIO2** chọn chế độ nạp — lúc reset phải **thấp hoặc thả nổi**. Kéo cao ở
+    phía chip là **mất luôn đường nạp USB-TTL**, mà bo không có đường nào khác.
+  - **GPIO15** là **MTDO** — kéo **thấp** lúc reset thì **tắt toàn bộ log boot**
+    trên U0TXD, triệu chứng nhìn y như bo chết.
+
+  Đặt phía P3 thì cả hai đều an toàn: lúc reset R7 10 kΩ giữ GPIO12 thấp nên
+  TXS0104 đang Hi-Z, cách ly hẳn mọi trở ngoài khỏi chân chip.
+- R5/R6 100 kΩ trên pad A7680C **quá yếu** cho sườn ~1 µs của DHT22 → chân nào
+  cũng cần thêm 4.7 kΩ, không thì đọc ra toàn `NaN`.
+- Firmware đọc DHT22 **trong `loop()` (lõi 1)**, không ở tác vụ giao diện: giải
+  mã phải tắt ngắt ~5 ms, mà lõi 0 là chỗ ngăn xếp WiFi chạy. Nhịp đọc 2.5 s
+  (datasheet yêu cầu tối thiểu 2 s).
+
+> **Đừng đặt `DHT_PIN` vào dải GPIO34…39.** Chúng là **chân chỉ vào** — không có
+> mạch lái ngõ ra — nên MCU không kéo dây xuống được và cảm biến **không bao giờ
+> trả lời**. Nguy hiểm ở chỗ nó **hỏng câm**: `pinMode(36, OUTPUT)` là mã hợp lệ,
+> trình biên dịch không cảnh báo, ESP32 lặng lẽ không làm gì, triệu chứng duy
+> nhất là `NaN` vĩnh viễn — nhìn y hệt đứt dây hoặc chết cảm biến. Firmware có
+> chốt chặn in cảnh báo ở boot và tắt hẳn việc đọc (`DHT_PIN_OK` trong
+> `main.cpp`).
+
+#### Vì sao mắt thu KHÔNG dùng GPIO36/39 (`SENSOR_VP`/`VN`) — đã thử và đo trên bo
+
+Nhìn trên schematic thì hai chân đó rất hợp: chúng là **cực C của opto TLP291**
+(U7/U9) trong khối `PULSE OUT CONFIG`, **đã có sẵn trở kéo 10 kΩ lên 3.3 V**
+(R22/R27) nên không phải gắn thêm gì. Đo thực tế thì hỏng cả ba mặt — mắt thu ra
+**2.08 V lúc rảnh, 4.85 V khi có tín hiệu**:
+
+| Đo được | Vì sao hỏng |
+|---|---|
+| 4.85 V khi có tín hiệu | Vượt ngưỡng tuyệt đối của chân (~3.6 V) → diode ESD dẫn ngược vào rail 3.3 V mỗi lần có tín hiệu, lâu dài hỏng chân |
+| 2.08 V lúc rảnh | **Lọt giữa** hai ngưỡng logic (thấp < ~0.83 V, cao > ~2.48 V) → chip không đọc được là 0 hay 1, ngõ vào chập chờn và dẫn xuyên tầng đệm |
+| Rảnh thấp, có tín hiệu lên cao | **Ngược chiều chuẩn.** TSOP/VS1838B phải rảnh ở mức CAO và kéo XUỐNG khi bắt burst — `IRremoteESP8266` giả định đúng chuẩn đó, ngược chiều thì học ra mã rác |
+
+Nếu sau này quay lại hai chân đó, ba điều phải nhớ:
+
+- Nối vào **phía MCU (`SIGNAL_IN_MCU_x`)**, đừng nối vào `SIGNAL_IN_x` — đầu kia
+  là LED của opto qua trở 750 Ω: tín hiệu bị **đảo** và bị TLP291 **làm méo sườn**
+  hàng chục µs (opto đa dụng, phụ thuộc CTR), hỏng hẳn phép đo mark/space.
+- Opto nằm **song song** trên cùng nút với mắt thu. Bình thường LED không có dòng
+  → phototransistor hở → nút để trống cho mắt thu lái. Nhưng ai cấp xung vào
+  `SIGNAL_IN_x` ở header là opto dẫn và **ghim nút xuống thấp**, át hoàn toàn.
+- **Errata ESP32:** GPIO36/39 bị xung nhiễu ~80 ns xuống thấp mỗi khi khối SAR
+  ADC bật/tắt nguồn, mà `IRrecv` bắt bằng **ngắt sườn** (`attachInterrupt
+  CHANGE`) nên xung đó lọt thẳng vào khung thu → **đừng gọi `analogRead()` trên
+  bất kỳ chân ADC1 nào.**
+
+`EN_LEVEL_SHIFT` (GPIO12) là **MTDI**: HIGH lúc reset thì ROM chọn mức flash
+1.8 V và bo **không boot** — tuyệt đối không kéo lên bằng trở ngoài, phải đặt
+trong `setup()`. Trên bo này **R7 10 kΩ kéo GPIO12 XUỐNG GND**, đúng chuẩn (đã
+đối chiếu schematic trang 5).
+
+**SHT3x vẫn còn trong firmware.** Nó được dò trên I²C 0x44 lúc khởi động và
+**được ưu tiên nếu có mặt** (mỗi lần đọc có CRC kiểm chứng, đáng tin hơn DHT22);
+không đấu thì tự động rơi về DHT22. Hai con không bao giờ cùng ghi số — cùng ghi
+thì số trên màn nhảy qua nhảy lại giữa hai nguồn lệch nhau vài phần mười độ,
+nhìn y như cảm biến hỏng.
 
 | Cảm biến | Địa chỉ | Kết luận |
 |---|---|---|
-| **SHT30 / SHT31 / SHT35** | **0x44** | ✅ nên dùng — không đụng ai, chính xác hơn DHT22 nhiều |
+| **SHT30 / SHT31 / SHT35** | **0x44** | ✅ tuỳ chọn tốt nhất — không đụng ai, chính xác hơn DHT22 |
 | SHT40 | 0x44 | ✅ tương đương |
 | AHT20 / AHT21 | 0x38 | ❌ **đụng FT6236 cảm ứng** |
 | DS1307 (có sẵn) | 0x68 | — |
 | Cảm ứng | 0x38 / 0x5D / 0x15 | — |
 
-Đấu vào đâu: bus I²C không có header, phải câu từ **J1** (chân 2 = SCL, chân 3 =
-SDA, chân 1 = 3V3, chân 6 = GND) hoặc từ chân DS1307. Đây là **sửa phần cứng**,
-không tránh được — cần nói rõ với người lắp.
-
-> GPIO17 (`UART_2_RX`, chân TX của A7680C) giờ đã dùng cho **IR phát** (§3.1),
-> nên không còn là phương án dự phòng cho DHT nữa — giữ DHT thì bắt buộc phải
-> qua đường I²C (SHT3x) như trên.
+Đấu SHT3x vào đâu: bus I²C không có header, phải câu từ **J1** (chân 2 = SCL,
+chân 3 = SDA, chân 1 = 3V3, chân 6 = GND) hoặc từ chân DS1307.
 
 ### 3.2 Bảng chân mới cho node indoor trên bo này
 
 ```
-IR phát   -> GPIO17  (chân TX của A7680C — hàn thẳng vào pad, 3.3V)   ┐ KHÔNG hàn
-IR thu    -> GPIO5   (chân RX của A7680C — hàn thẳng vào pad, 3.3V)   ┘ module 4G
+IR phát   -> GPIO5   (pad chân RX của A7680C — hàn thẳng, 3.3V)  ┐ KHÔNG hàn
+IR thu    -> GPIO17  (pad chân TX của A7680C — hàn thẳng, 3.3V)  ┘ module 4G
+             (nuôi mắt thu 3.3V, KHÔNG 5V — không chân nào chịu quá áp)
+DHT22     -> GPIO2   (UART_1_RX -> P3 qua TXS0104, 5V; trở kéo 4.7k ĐẶT PHÍA P3)
+GPIO15    -> ĐỂ TRỐNG (UART_1_TX -> P3 qua TXS0104)
+
+TRỞ KÉO CHO ĐƯỜNG QUA P3 ĐẶT Ở PHÍA P3, KHÔNG hàn vào chân chip:
+  GPIO2  strapping chọn chế độ nạp — kéo CAO ở chip là mất đường nạp USB-TTL
+  GPIO15 strapping MTDO          — kéo THẤP ở chip là tắt sạch log boot
+
 EN dịch mức -> GPIO12 (đặt HIGH trong setup(), KHÔNG kéo lên bằng trở ngoài)
-             — chỉ cho UART_1 ra P3; IR KHÔNG đi qua nó
+             — CHỈ CÒN DHT22 đi qua nó; thiếu là nhiệt/ẩm ra NaN mãi. IR không cần.
 Màn hình  -> ST7789V, MOSI 18 / SCK 22 / CS 19 / A0(DC) 21 / RST 23, xoay ngang (rotation 1)
-Nhiệt/ẩm  -> SHT3x trên I²C 0x44 (SCL GPIO4 / SDA GPIO16, 100 kHz)
+Nhiệt/ẩm  -> DHT22 GPIO2; hoặc SHT3x I²C 0x44 (SCL GPIO4 / SDA GPIO16) nếu có, được ưu tiên
 ```
 
 ---
@@ -435,8 +522,8 @@ lõi 0. Dùng `xTaskCreatePinnedToCore(...,  UI_CORE=0)` — **không** dùng
   ┌────────────────────────┐           ┌──────────────────────────────┐
   │ WiFi · MQTT · ESP-NOW  │  publish  │ SPI màn hình                 │
   │ IR phát/học            │ ────────► │ I2C: cảm ứng + DS1307 + SHT3x│
-  │ NVS (IrStore)          │           │ LEDC: đèn nền + còi          │
-  │                        │ ◄──────── │                              │
+  │ DHT22 (GPIO17)         │           │ LEDC: đèn nền + còi          │
+  │ NVS (IrStore)          │ ◄──────── │                              │
   └────────────────────────┘ pollCommand└──────────────────────────────┘
                              / reply
 ```
@@ -449,6 +536,7 @@ lõi 0. Dùng `xTaskCreatePinnedToCore(...,  UI_CORE=0)` — **không** dùng
 | `Ui::pollCommand()` | queue 4 phần tử | UI đặt hàng, `loop()` rút ra thi hành |
 | `Ui::reply()` | queue 4 phần tử | `loop()` trả kết quả → toast |
 | `Ui::readIndoor()` | spinlock, 2 float | UI đo SHT3x (nó sở hữu bus I2C), `loop()` lấy số đi gửi |
+| `Ui::setIndoor()` | cùng spinlock | **chiều ngược lại**: `loop()` đo DHT22 rồi đặt số vào. Ngược hướng vì thư viện DHT tắt ngắt ~5 ms mỗi lần đọc, mà lõi 0 là chỗ ngăn xếp WiFi chạy. Chỉ một trong hai nguồn được ghi — SHT3x thắng nếu dò thấy |
 
 Sở hữu phần cứng chia dứt khoát, **không có tài nguyên nào hai bên cùng chạm**.
 Đây đúng là khuôn đã dùng cho callback MQTT trong `main.cpp` ("callback chỉ bóc
@@ -485,8 +573,11 @@ tức thì trong khi màn vẫn không bị vẽ thừa.
 - **Đồng bộ NTP không chặn**: `ntpBegin()` + `ntpPoll()` mỗi vòng thay vì một
   hàm chặn 8 giây. Giao diện đứng hình 8 s ngay sau khi bấm nút là dấu hiệu kinh
   điển của "máy treo" — người dùng sẽ bấm loạn hoặc rút điện.
-- **Đo SHT3x mỗi 2 s** để màn phản ánh phòng gần như tức thì, trong khi
-  telemetry lên cloud vẫn giữ nhịp `TELEMETRY_MS` riêng.
+- **Đo cảm biến mỗi 2–2.5 s** (SHT3x 2 s ở tác vụ UI, DHT22 2.5 s ở `loop()` —
+  datasheet DHT22 yêu cầu tối thiểu 2 s giữa hai lần đọc) để màn phản ánh phòng
+  gần như tức thì, trong khi telemetry lên cloud vẫn giữ nhịp `TELEMETRY_MS`
+  riêng. Đọc DHT22 hỏng (sai checksum) thì **bỏ lượt, không ghi `NaN`** — ghi
+  vào là màn chớp `—` rồi lại hiện số, trông như cảm biến sắp hỏng.
 
 Ngân sách: ngăn xếp tác vụ UI 8 KB + bộ đệm MQTT 12 KB + `irBuf` 1.2 KB.
 
@@ -570,15 +661,31 @@ khác biệt giữa các bo chỉ là sơ đồ chân.
 | Chạm lệch trục | Đổi `TOUCH_SWAP_XY` / `TOUCH_INVERT_X` / `TOUCH_INVERT_Y` trong `config.h` |
 | Cảm ứng không nhận | `Touch::chip()` in ra lúc boot; `NONE` = sai địa chỉ hoặc chưa nhả RST (GPIO25) |
 | Giờ ra số vô lý | Bus I²C đang chạy >100 kHz — DS1307 không chịu nổi (§2.1) |
+| **`Interrupt wdt timeout on CPU1` ngay sau khi setup() xong** | Thư viện DHT sai: `adafruit/DHT sensor library` chạy đủ 80 lượt `expectPulse()` **không thoát sớm** khi hết giờ → tắt ngắt >1 s trên lõi 1. Phải dùng `beegee-tokyo/DHT sensor library for ESPx` (nó bấm giờ từng sườn bằng `micros()`, hạn 90 µs, thoát ngay). Sập **chỉ khi chưa cắm cảm biến** nên rất dễ lọt qua bàn thử |
+| **LED trên module phát IR sáng liên tục** | `IR_TX_PIN` đang đi qua TXS0104 (cặp `UART_1` = GPIO2/GPIO15). IC đó chỉ *giữ* mức bằng trở ~40 kΩ nên không kéo nổi ngõ vào module xuống thấp → IR câm mà LED chạy DC liên tục, nóng và suy giảm nhanh. Dùng **GPIO5** (3.3 V thẳng, đẩy-kéo thật) — §3.1 |
+| Máy lạnh không nhúc nhích nhưng log in `da phat` | Mạch phát không đủ dòng ở 3.3 V (module nên có transistor riêng), hoặc mắt phát hướng sai/xa quá. IR ở cặp `UART_2` không phụ thuộc `EN_LEVEL_SHIFT` nên **không** phải nghi chân đó |
+| Nhiệt/ẩm ra `NaN` mãi dù đã đấu DHT22 | `EN_LEVEL_SHIFT` (GPIO12) không lên HIGH → TXS0104 treo ngõ ra. Đây là thứ **duy nhất** còn đi qua bộ dịch mức (§3.1) |
+| Nhiệt/ẩm luôn `—`, log nhắc DHT22 mỗi 15 s | Thiếu trở kéo 4.7 kΩ lên 3.3 V — R5/R6 100 kΩ có sẵn quá yếu cho sườn ~1 µs (§3.1) |
+| **Serial phun `lv_draw_letter: glyph dsc. not found for U+xxxx`, chỗ chữ đó trống trên màn** | Chuỗi dùng ký tự **không có trong font**. Hai nguồn đã gặp: (a) nhãn CHỮ gán vào `fontHero()`/`fontBig()` — hai font đó **chỉ có chữ số** (§4.3), phải dùng `fontTitle()`/`fontLabel()`; (b) dấu câu ngoài dải đã sinh — dùng `•` (U+2022) chứ **không** `·` (U+00B7), và `-` chứ **không** `—` (U+2014). Tra mã trong thông báo ra ký tự để biết chỗ nào |
+| **Vào chế độ học lần 2 là mắt thu chết câm** | `enableIRIn()` gọi chồng lên nhau → `timer_isr_callback_add: register interrupt service failed` + `addApbChangeCallback: duplicate`, bộ định thời lấy mẫu không chạy nữa cho tới khi khởi động lại — mà log vẫn in `[learn] huong remote vao mat thu`. Đã sửa: `IrIo::learnStart()` gọi `disableIRIn()` trước nếu đang học dở |
+| **`SAI SO DO CHAN` ở boot, DHT22 không đọc lần nào** | `DHT_PIN` đang nằm trong GPIO34…39 — **chân chỉ vào**, không kéo dây xuống được nên DHT22 không bao giờ trả lời. Trình biên dịch KHÔNG bắt được lỗi này (§3.1). Chuyển sang chân lái được ngõ ra, ví dụ GPIO2 |
 
 ---
 
 ## 10. Còn lại phải làm
 
-- [ ] **Đấu dây** SHT3x vào J1 (chân 1 = 3V3, 2 = SCL, 3 = SDA, 6 = GND), module
-      IR thu vào P3, và module IR phát hàn trực tiếp vào pad TX của A7680C
-      (GPIO17, §3.1 — **không hàn module 4G** lên bo) — *driver và firmware đã
-      xong, đây là việc phần cứng*
+- [x] ~~**DHT22 trên GPIO2 (qua TXS0104) chạy được**~~ — đã đo thật:
+      `[telemetry] t=30.1°C h=49% -> da gui`. Trở kéo 4.7 kΩ **đặt phía P3**,
+      không hàn vào chân chip (GPIO2 là strapping chọn chế độ nạp — kéo cao ở
+      phía chip là mất luôn đường nạp USB-TTL)
+- [ ] **Đấu dây còn lại** (§3.1/§3.2 — *firmware đã xong, đây là việc phần cứng*):
+      - IR thu hàn vào pad chân TX của A7680C (GPIO17), **nuôi mắt thu 3.3 V,
+        không phải 5 V**. Không cần trở kéo — R5 100 kΩ đã có sẵn
+      - IR phát hàn vào pad chân RX của A7680C (GPIO5), 3.3 V thẳng. Module phát
+        **nên có transistor riêng** — ở 3.3 V, loại chỉ LED nối tiếp trở vẫn chạy
+        nhưng dòng thấp, tầm phát yếu
+      - *(tuỳ chọn)* SHT3x vào J1 (chân 1 = 3V3, 2 = SCL, 3 = SDA, 6 = GND) nếu
+        muốn thay DHT22 bằng cảm biến chính xác hơn — firmware tự ưu tiên nó
 - [ ] Chỉnh `TOUCH_SWAP_XY` / `TOUCH_INVERT_*` sau khi chạm thử trên bo thật (§9.1)
 - [ ] Topic `override` phía backend (§8.3)
 - [x] ~~Font VLW tiếng Việt có dấu~~ — xong, xem §4.3 và `tools/make_vlw.py`

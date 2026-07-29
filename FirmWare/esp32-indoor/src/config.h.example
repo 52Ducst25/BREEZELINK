@@ -39,12 +39,14 @@
 //  Cách đọc ngược sơ đồ chân từ schematic + thiết kế giao diện:
 //  ../../Interface/README.md
 //
-//  CHÂN IR KHÔNG KHAI Ở ĐÂY. `IR_TX_PIN` (17) và `IR_RX_PIN` (5) nằm trong
-//  build_flags của platformio.ini, cùng chỗ với các cờ TFT_* — vì cả hai nhóm
-//  đều phải có mặt lúc biên dịch THƯ VIỆN, không chỉ lúc biên dịch src/.
+//  CHÂN IR VÀ DHT KHÔNG KHAI Ở ĐÂY. `IR_TX_PIN` (5), `IR_RX_PIN` (17) và
+//  `DHT_PIN` (2) nằm trong build_flags của platformio.ini, cùng chỗ với các cờ
+//  TFT_* — vì cả hai nhóm đều phải có mặt lúc biên dịch THƯ VIỆN, không chỉ lúc
+//  biên dịch src/. Lý do chọn từng chân + các bẫy phần cứng: đọc khối chú thích
+//  đầu platformio.ini, và Interface/README.md §3.
 //
-//  KHÔNG có DHT trên bo này: GPIO4 đã là I2C SCL, và bo dùng hết sạch GPIO.
-//  Nhiệt/ẩm đo bằng SHT3x (I2C 0x44) — xem Interface/README.md §3.1.
+//  Nhiệt/ẩm: DHT22 trên GPIO17. SHT3x (I2C 0x44) vẫn được dò và ĐƯỢC ƯU TIÊN nếu
+//  có mặt — nó có CRC nên đáng tin hơn. Không đấu thì tự rơi về DHT22.
 // ============================================================================
 
 //  Thời gian chờ người dùng bấm remote khi vào chế độ HỌC (ms).
@@ -68,10 +70,13 @@
 #define LCD_BACKLIGHT_PIN  27
 #define BUZZER_PIN         13
 
-//  OE của TXS0104 (bộ dịch mức cho UART_1 ra cổng P3). IR KHÔNG đi qua IC này:
-//  cả hai chân IR nằm trên footprint module 4G không hàn (GPIO17/GPIO5, 3.3V
-//  thẳng), nên IR chạy được kể cả khi bỏ dòng này.
-//  Vẫn PHẢI đặt trong setup() chứ không kéo bằng trở ngoài: GPIO12 = MTDI, HIGH
+//  OE của TXS0104 (bộ dịch mức cho UART_1 ra cổng P3).
+//
+//  DHT22 (GPIO2 = UART_1_RX) ĐI QUA IC NÀY — nên chân này là điều kiện sống còn
+//  của phép đo nhiệt/ẩm. OE thấp thì ngõ ra treo lơ lửng và cảm biến ra NaN mãi.
+//  (IR thì không: cả phát GPIO5 lẫn thu GPIO17 đều nối 3.3V thẳng.)
+//
+//  PHẢI đặt trong setup() chứ không kéo bằng trở ngoài: GPIO12 = MTDI, HIGH
 //  lúc reset thì ROM chọn mức flash 1.8V và bo không boot. Trên bo này R7 10k
 //  kéo GPIO12 XUỐNG GND — đúng chuẩn (đã đối chiếu schematic).
 #define EN_LEVEL_SHIFT_PIN 12
