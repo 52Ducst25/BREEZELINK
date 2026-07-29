@@ -42,3 +42,21 @@ async def get_ir(code_id: str) -> dict | None:
     if _RAW_TIMING_FIELD in data:
         data[_RAW_TIMING_FIELD] = json.loads(data[_RAW_TIMING_FIELD])
     return data
+
+
+async def drop_ir(code_id: str) -> bool:
+    """Forget that a node holds this code, so the next command re-sends ``ir_raw``.
+
+    This entry means "the node has it in NVS" — ``command_publisher`` omits the
+    raw timing whenever it is present. When the node says otherwise (it was
+    erased, swapped, or the user deleted the code from the panel), the entry is
+    a lie that makes every future command for that code a no-op: the node gets
+    an id it cannot resolve and silently does nothing.
+
+    Deleting is always safe. Worst case the next command carries a few KB of
+    timing the node already had — cheap next to an air conditioner that stops
+    responding with nothing in the logs.
+
+    Returns True if an entry was actually removed.
+    """
+    return bool(await get_redis().delete(_cache_key(code_id)))
