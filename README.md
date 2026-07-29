@@ -312,6 +312,53 @@ AC_HOST=1.2.3.4 AC_USER=user scripts/deploy.sh
 Xác thực dùng SSH thông thường (khoá SSH hoặc gõ mật khẩu khi ssh hỏi) — **không** lưu mật
 khẩu trong script. Mỗi lần deploy gây gián đoạn ~30–40 giây (cloudflared khởi động lại).
 
+### Đổi tên miền
+
+**Thiết bị không ảnh hưởng.** ESP32 nối MQTT bằng **IP trần** (`MQTT_PUBLIC_HOST`), không
+qua tên miền — đổi domain thì hai node vẫn chạy y nguyên, không phải nạp lại. (Mặt trái:
+đổi **IP của VPS** mới là việc phải đi nạp lại từng node.)
+
+> ⚠️ **App đã cài trên máy khách mới là chỗ nguy hiểm.** App lưu base URL vào
+> `SharedPreferences`, và **giá trị đã lưu luôn thắng giá trị mặc định**:
+> `prefs.getString(_kBaseUrlKey) ?? _kDefaultBaseUrl`.
+>
+> Nên phát hành bản mới với `_kDefaultBaseUrl` mới **không cứu được khách cũ** — mặc định
+> chỉ dùng khi chưa có gì được lưu. Bản mới phải kèm một đoạn **di trú một lần**: thấy URL
+> đã lưu là domain cũ thì ghi đè thành domain mới.
+>
+> Và nếu tắt domain cũ trước khi khách kịp cập nhật thì họ mất luôn đường nhận bản sửa —
+> `/app/update.json` cũng nằm ở đúng domain vừa chết. Không đẩy được bản vá qua chính cái
+> kênh mà việc đổi domain vừa làm hỏng; khách phải tự gõ URL mới ở màn đăng nhập hoặc cài
+> lại APK bằng tay.
+
+Chín chỗ phải đổi:
+
+| Chỗ | Ghi chú |
+|---|---|
+| **Cloudflare Tunnel ingress** | **Ngoài repo** — sửa trên dashboard. Đây mới là thứ thật sự định tuyến |
+| `docker/.env`: `RESET_PASSWORD_URL_BASE` | Sai → link đặt lại mật khẩu trỏ vào domain chết |
+| `docker/.env`: `SMTP_FROM` | Phải là sender **đã xác minh** ở nhà cung cấp SMTP — đổi domain là phải xác minh lại |
+| `src/app/config.py` | Hai giá trị mặc định tương ứng |
+| `app-flutter/lib/app/auth_gate.dart` | `_kDefaultBaseUrl` + đoạn di trú nói trên |
+| `scripts/deploy.sh` | `AC_URL` — health-check ở cuối script |
+| `src/app/main.py`, `README.md`, `scripts/seed_demo.py` | Tài liệu + tài khoản demo |
+
+Cách làm an toàn — mấu chốt là **một Cloudflare Tunnel gắn được nhiều hostname**, tất cả
+trỏ về cùng `http://localhost:8000`, nên hai tên chạy song song được mà không phải cắt đứt:
+
+1. Thêm hostname mới vào **đúng tunnel đang chạy** → hai tên cùng sống
+2. Đổi `RESET_PASSWORD_URL_BASE` + `SMTP_FROM` trong `docker/.env` trên server, restart api
+3. Phát hành app mới (default mới + đoạn di trú) — **qua domain cũ, lúc nó còn sống**
+4. Theo dõi cột **phiên bản app** trong web quản trị (`users.app_version`, ghi lại mỗi lần
+   đăng nhập) để biết chính xác khách nào đã lên bản mới
+5. Chỉ khi không còn ai dùng bản cũ mới gỡ hostname cũ
+
+Chưa bán cho ai thì bỏ hết năm bước trên, đổi thẳng.
+
+**Chuyển sang *path* (`vi-du.com/aircon`) thay vì subdomain là việc khác hẳn** — nặng hơn
+nhiều: toàn bộ route đang gắn ở gốc (`/web`, `/api/v1`, `/app`, `/web-static`), phải đặt
+`root_path` cho FastAPI và sửa mọi link tuyệt đối trong template lẫn app.
+
 ---
 
 ## Hướng dẫn sử dụng
