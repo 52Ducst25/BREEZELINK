@@ -1,6 +1,8 @@
 """IR-code endpoints: trigger LEARN mode + list captured codes with coverage
 flags (design §4.2 LEARN flow, §5 risk)."""
 
+import uuid
+
 import aiomqtt
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -59,6 +61,39 @@ async def trigger_learn_action(
     uuid = await _indoor_uuid(session, str(user.org_id))
     await ir_service.trigger_learn_action(mqtt_client, str(user.org_id), uuid, data.action)
     return MessageResponse(detail="learn triggered")
+
+
+@router.delete("/codes/{code_id}", response_model=MessageResponse)
+async def delete_code(
+    code_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> MessageResponse:
+    """Xoá một mã (mode, temp) đã học — dùng khi bấm nhầm nút trên remote.
+
+    Không đụng gì tới node: mã sống trong DB, nút "Học" phát lại LEARN là ghi đè.
+    Xoá ở đây chỉ để đưa nút đó về trạng thái "chưa học" cho rõ ràng, và để
+    check_coverage báo lại là còn thiếu.
+    """
+    ok = await ir_service.delete_code(session, user.org_id, code_id)
+    if not ok:
+        raise NotFoundError("Không tìm thấy mã này")
+    return MessageResponse(detail="deleted")
+
+
+@router.delete("/actions/{action}", response_model=MessageResponse)
+async def delete_action(
+    action: str,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> MessageResponse:
+    """Xoá mã của một nút chức năng đã học (FAN_SPEED, SLEEP, …)."""
+    if action not in ir_action_service.KNOWN_ACTIONS:
+        raise AppException(f"unknown action '{action}'", status_code=422)
+    ok = await ir_action_service.delete_action(session, user.org_id, action)
+    if not ok:
+        raise NotFoundError("Nút này chưa được học")
+    return MessageResponse(detail="deleted")
 
 
 @router.get("/codes", response_model=IrCoverageResponse)

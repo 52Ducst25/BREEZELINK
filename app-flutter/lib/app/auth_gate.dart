@@ -119,7 +119,21 @@ class _AuthGateState extends State<AuthGate> {
     final s = _appState;
     if (s == null) return;
     s.dispose();
-    if (mounted) setState(() => _appState = null);
+    if (!mounted) return;
+
+    // Gỡ HẾT route đã push trước khi đổi home sang LoginScreen.
+    //
+    // AuthGate là `home:` của MaterialApp, tức là route ĐẦU TIÊN. Màn Tài khoản
+    // (và màn chọn vị trí trong đó) được push CHỒNG LÊN nó. Chỉ setState thì
+    // home bên dưới đã thành LoginScreen nhưng route cũ vẫn che phía trên —
+    // người dùng bấm "Đăng xuất", thấy màn hình không đổi, phải bấm back một
+    // lần mới ra được form đăng nhập.
+    //
+    // Đặt ở đây chứ không ở chỗ bấm nút, vì _forceLogout còn là callback của
+    // ApiClient.onSessionExpired: phiên hết hạn lúc đang mở màn Tài khoản cũng
+    // dính đúng lỗi này.
+    Navigator.of(context).popUntil((r) => r.isFirst);
+    setState(() => _appState = null);
   }
 
   @override

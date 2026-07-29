@@ -74,6 +74,46 @@ class _LearnScreenState extends State<LearnScreen> {
     }
   }
 
+  /// Xoá một mã đã học, có hỏi lại. Học nhầm nút trên remote là chuyện thường,
+  /// mà học lại đè lên thì vẫn còn mã cũ nếu người dùng đổi ý — nên cần đường
+  /// xoá hẳn để nút đó quay về "chưa học".
+  Future<void> _confirmDelete(String label, Future<void> Function() delete) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Xoá mã đã học'),
+        content: Text('Xoá mã đã học của "$label"? Nút này sẽ quay về trạng thái '
+            'chưa học, và bạn có thể học lại từ đầu.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Hủy')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Xoá')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    setState(() {
+      _busy = true;
+      _status = null;
+    });
+    try {
+      await delete();
+      // Đọc lại phủ sóng NGAY thay vi bat nguoi dung bam "Lam moi": xoá là thao
+      // tác đồng bộ, kết quả có liền, khác hẳn học (bất đồng bộ qua MQTT).
+      final c = await _irApi.coverage();
+      if (mounted) {
+        setState(() {
+          _coverage = c;
+          _status = 'Đã xoá mã "$label".';
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _status = 'Lỗi khi xoá: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final ac = context.ac;
@@ -176,6 +216,10 @@ class _LearnScreenState extends State<LearnScreen> {
             style: AcText.body(size: 12, color: coverage.isComplete ? ac.success : ac.warning),
           ),
           const SizedBox(height: 8),
+          if (coverage.codes.isNotEmpty)
+            Text('Bấm dấu × trên mã để xoá nếu học nhầm nút.',
+                style: AcText.body(size: 11, color: ac.whiteDim)),
+          const SizedBox(height: 6),
           Wrap(
             spacing: 6,
             runSpacing: 6,
@@ -185,6 +229,16 @@ class _LearnScreenState extends State<LearnScreen> {
                   visualDensity: VisualDensity.compact,
                   avatar: Icon(Icons.check, size: 14, color: ac.success),
                   label: Text(code.buttonLabel, style: AcText.mono(size: 11, color: ac.white)),
+                  // deleteIcon + onDeleted là đường xoá dựng sẵn của Chip: hiện
+                  // dấu × ngay trên nhãn, đúng chỗ mắt người dùng đang nhìn.
+                  deleteIcon: const Icon(Icons.close, size: 15),
+                  deleteButtonTooltipMessage: 'Xoá mã ${code.buttonLabel}',
+                  onDeleted: _busy
+                      ? null
+                      : () => _confirmDelete(
+                            code.buttonLabel,
+                            () => _irApi.deleteCode(code.id),
+                          ),
                 ),
             ],
           ),
@@ -221,6 +275,20 @@ class _LearnScreenState extends State<LearnScreen> {
           primary: !learned,
           onPressed: _busy ? null : () => _run(a.label, () => _irApi.triggerLearnAction(a.wire)),
         ),
+        // Nút xoá chỉ hiện khi đã học — chưa học thì không có gì để xoá, mà
+        // một nút luôn hiện rồi báo lỗi khi bấm là thiết kế tệ.
+        if (learned) ...[
+          const SizedBox(width: 4),
+          IconButton(
+            onPressed: _busy
+                ? null
+                : () => _confirmDelete(a.label, () => _irApi.deleteAction(a.wire)),
+            icon: const Icon(Icons.delete_outline, size: 20),
+            color: ac.whiteDim,
+            tooltip: 'Xoá mã đã học',
+            visualDensity: VisualDensity.compact,
+          ),
+        ],
       ],
     );
   }

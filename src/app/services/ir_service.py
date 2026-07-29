@@ -30,6 +30,22 @@ async def list_codes(session: AsyncSession, org_id: uuid.UUID) -> list[IrCode]:
     return list((await session.execute(stmt)).scalars().all())
 
 
+async def delete_code(session: AsyncSession, org_id: uuid.UUID, code_id: uuid.UUID) -> bool:
+    """Xoá một mã đã học. Trả False nếu không có hàng nào khớp.
+
+    Lọc theo CẢ org_id lẫn code_id, không chỉ code_id: id là UUID nên đoán được
+    thì khó, nhưng lọc theo org là thứ duy nhất chặn được việc một tổ chức xoá
+    mã của tổ chức khác nếu id rò rỉ ra ngoài.
+    """
+    stmt = select(IrCode).where(IrCode.org_id == org_id, IrCode.id == code_id)
+    row = (await session.execute(stmt)).scalar_one_or_none()
+    if row is None:
+        return False
+    await session.delete(row)
+    await session.commit()
+    return True
+
+
 async def check_coverage(session: AsyncSession, org_id: uuid.UUID) -> list[str]:
     """Human-readable list of still-missing required buttons, e.g. ``["COOL 24", "DRY"]``."""
     stmt = select(IrCode.mode, IrCode.temp).where(IrCode.org_id == org_id)

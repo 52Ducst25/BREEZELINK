@@ -49,6 +49,19 @@ async def list_actions(session: AsyncSession, org_id: uuid.UUID) -> list[str]:
     return list((await session.execute(stmt)).scalars().all())
 
 
+async def delete_action(session: AsyncSession, org_id: uuid.UUID, action: str) -> bool:
+    """Xoá mã của một nút chức năng. Trả False nếu org này chưa học nút đó."""
+    stmt = select(IrActionCode).where(
+        IrActionCode.org_id == org_id, IrActionCode.action == action
+    )
+    row = (await session.execute(stmt)).scalar_one_or_none()
+    if row is None:
+        return False
+    await session.delete(row)
+    await session.commit()
+    return True
+
+
 async def upsert_action_code(
     session: AsyncSession, org_id: str, action: str, raw_timing: list[int]
 ) -> IrActionCode:

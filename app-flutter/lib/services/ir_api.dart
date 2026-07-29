@@ -23,4 +23,12 @@ class IrApi {
     final body = await _client.get('/api/v1/ir/codes');
     return IrCoverage.fromJson(body);
   }
+
+  /// Xoá một mã (mode, temp) đã học — dùng khi học nhầm nút trên remote.
+  Future<void> deleteCode(String codeId) =>
+      _client.delete('/api/v1/ir/codes/$codeId');
+
+  /// Xoá mã của một nút chức năng đã học (FAN_SPEED, SLEEP, …).
+  Future<void> deleteAction(String action) =>
+      _client.delete('/api/v1/ir/actions/$action');
 }
