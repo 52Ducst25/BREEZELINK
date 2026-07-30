@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app/auth_gate.dart';
 import 'services/api_client.dart';
+import 'services/notification_store.dart';
 import 'state/theme_controller.dart';
 import 'theme/ac_theme.dart';
 
@@ -33,8 +34,13 @@ class BreezeLinkApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) => ThemeController(prefs),
+    // NotificationStore đặt Ở ĐÂY, trên AuthGate: AuthGate hủy AppState mỗi lần
+    // đăng xuất, còn lịch sử thông báo phải sống qua đó.
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => ThemeController(prefs)),
+        ChangeNotifierProvider(create: (_) => NotificationStore(prefs)),
+      ],
       child: Consumer<ThemeController>(
         builder: (_, theme, _) => MaterialApp(
           title: 'BreezeLink',

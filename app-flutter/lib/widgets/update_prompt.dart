@@ -2,8 +2,30 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:open_file/open_file.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:provider/provider.dart';
 
+import '../models/app_notification.dart';
+import '../services/notification_store.dart';
 import '../services/ota_service.dart';
+
+/// Ghi bản cập nhật vừa tìm thấy vào lịch sử thông báo (nút chuông).
+///
+/// Khoá theo versionCode nên mở app mười lần cũng chỉ có MỘT dòng cho mỗi bản —
+/// xem chú thích ở [AppNotification.id]. Ghi TRƯỚC khi hiện hộp thoại, để người
+/// bấm "Để sau" vẫn còn dấu vết tìm lại được.
+Future<void> _recordUpdateNotification(BuildContext context, UpdateCheck check) async {
+  final info = check.info;
+  await context.read<NotificationStore>().add(AppNotification(
+        id: 'update:${info.latestVersionCode}',
+        kind: 'update',
+        title: check.forced
+            ? 'Bắt buộc cập nhật ${info.latestVersionName}'
+            : 'Có bản cập nhật ${info.latestVersionName}',
+        body: info.changelog,
+        ts: DateTime.now(),
+        read: false,
+      ));
+}
 
 /// Launch-time check: prompt ONLY when there is actually a newer build. Silent
 /// on "up to date" and on network failure — a launch check must never interrupt
@@ -12,6 +34,8 @@ Future<void> maybePromptUpdate(BuildContext context, String baseUrl) async {
   final ota = OtaService(baseUrl);
   final check = await ota.check();
   if (check == null || !check.available) return;
+  if (!context.mounted) return;
+  await _recordUpdateNotification(context, check);
   if (!context.mounted) return;
   await _showUpdateDialog(context, ota, check);
 }
@@ -38,6 +62,8 @@ Future<void> checkForUpdate(BuildContext context, String baseUrl) async {
     _snack(context, 'Bạn đang dùng phiên bản mới nhất.');
     return;
   }
+  await _recordUpdateNotification(context, check);
+  if (!context.mounted) return;
   await _showUpdateDialog(context, OtaService(baseUrl), check);
 }
 

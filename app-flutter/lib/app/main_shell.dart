@@ -8,6 +8,7 @@ import '../screens/learn/learn_screen.dart';
 import '../state/app_state.dart';
 import '../theme/ac_colors.dart';
 import '../theme/ac_text.dart';
+import '../widgets/notification_bell.dart';
 
 /// Main navigation shell: three tabs with ĐIỀU KHIỂN in the MIDDLE (the remote
 /// is the app's primary surface), flanked by TRẠNG THÁI and HỌC LỆNH. Account
@@ -65,6 +66,7 @@ class _MainShellState extends State<MainShell> {
           ],
         ),
         actions: [
+          const NotificationBell(),
           IconButton(
             onPressed: _openAccount,
             icon: const Icon(Icons.settings_outlined),
