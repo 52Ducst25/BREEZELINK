@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import ConflictError, NotFoundError
 from app.models.app_release import AppRelease
 
-logger = logging.getLogger("aircon.releases")
+logger = logging.getLogger("breezelink.releases")
 
 # Matches the container path in docker/Dockerfile (chowned to appuser there) and
 # the mount target in both compose files. Not derived from __file__ like
@@ -39,7 +39,11 @@ MAX_APK_BYTES = 300 * 1024 * 1024
 # Whatever the browser reports as the filename is attacker-controlled. Rather
 # than sanitising it (endless "../.." games), the name is REBUILT server-side
 # from the version code and only matched against this.
-_SAFE_NAME = re.compile(r"^aircon-[0-9]+-[0-9A-Za-z._-]+\.apk$")
+#  Nhận CẢ HAI tiền tố. `aircon-` là tên cũ, trước khi dự án đổi lại thành
+#  BreezeLink — và tên file đã được LƯU vào cột apk_filename của từng bản phát
+#  hành, nên các bản cũ vẫn xin tải bằng đúng tên đó. Chỉ nhận `breezelink-` là
+#  mọi bản đã phát hành trước đây lập tức 404 dù tệp vẫn nằm trong volume.
+_SAFE_NAME = re.compile(r"^(?:aircon|breezelink)-[0-9]+-[0-9A-Za-z._-]+\.apk$")
 
 
 def _filename_for(version_code: int, version_name: str) -> str:
@@ -51,7 +55,7 @@ def _filename_for(version_code: int, version_name: str) -> str:
     a human reading the file list.
     """
     safe_version = re.sub(r"[^0-9A-Za-z._-]", "-", version_name.strip()) or "build"
-    return f"aircon-{version_code}-{safe_version}.apk"
+    return f"breezelink-{version_code}-{safe_version}.apk"
 
 
 def resolve_apk(filename: str) -> Path:

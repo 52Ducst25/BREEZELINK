@@ -19,7 +19,7 @@ from app.schemas.comfort import ComfortResult
 from app.services import command_service, comfort_log_service, ir_code_service, redis_ir_cache, redis_state_service
 from app.utils import mqtt_naming
 
-logger = logging.getLogger("aircon.worker.command_publisher")
+logger = logging.getLogger("breezelink.worker.command_publisher")
 
 
 async def _resolve_ir_raw(session: AsyncSession, ir_code_id: uuid.UUID) -> list[int] | None:

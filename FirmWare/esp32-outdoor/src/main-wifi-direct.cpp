@@ -1,5 +1,5 @@
 // ============================================================================
-//  Aircon — ESP32 · node NGOÀI TRỜI (outdoor) · bản DỰ PHÒNG (WiFi + MQTT thẳng)
+//  BreezeLink — ESP32 · node NGOÀI TRỜI (outdoor) · bản DỰ PHÒNG (WiFi + MQTT thẳng)
 // ----------------------------------------------------------------------------
 //  Đọc DHT rồi đẩy telemetry {t,h,ts,rssi,fw} lên topic
 //  bl/{ORG_ID}/{DEVICE_UUID}/telemetry qua MQTT plaintext 1883 (EMQX tự host).
@@ -66,7 +66,7 @@ static void connectMqtt() {
 void setup() {
   Serial.begin(115200);
   delay(300);
-  Serial.println("\n== Aircon · ESP32 · NGOAI TROI (WiFi + MQTT thang) ==");
+  Serial.println("\n== BreezeLink · ESP32 · NGOAI TROI (WiFi + MQTT thang) ==");
   dht.begin();
   buildTopics();
   connectWifi();

@@ -196,7 +196,7 @@ Future<void> _downloadAndInstall(BuildContext context, OtaService ota, AppUpdate
     final result = await OpenFile.open(path, type: 'application/vnd.android.package-archive');
     if (result.type != ResultType.done && context.mounted) {
       _snack(context,
-          'Không mở được trình cài đặt. Vào Cài đặt → cho phép Aircon "Cài ứng dụng không rõ nguồn gốc" rồi thử lại.');
+          'Không mở được trình cài đặt. Vào Cài đặt → cho phép BreezeLink "Cài ứng dụng không rõ nguồn gốc" rồi thử lại.');
     }
   } on DioException catch (e) {
     closeDialog();

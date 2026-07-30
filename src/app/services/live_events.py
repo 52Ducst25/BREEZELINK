@@ -14,7 +14,7 @@ import logging
 
 from app.core.redis_client import get_redis
 
-logger = logging.getLogger("aircon.live_events")
+logger = logging.getLogger("breezelink.live_events")
 
 
 # One channel every vendor-staff socket listens on, in addition to their own

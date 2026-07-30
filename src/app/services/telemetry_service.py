@@ -16,7 +16,7 @@ from app.models.device import Device
 from app.models.enums import NodeType
 from app.models.telemetry import Telemetry
 
-logger = logging.getLogger("aircon.telemetry_service")
+logger = logging.getLogger("breezelink.telemetry_service")
 
 _DEFAULT_LIMIT = 200
 

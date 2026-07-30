@@ -23,11 +23,11 @@ Future<void> main() async {
   final info = await PackageInfo.fromPlatform();
   ApiClient.appVersion = '${info.version}+${info.buildNumber}';
 
-  runApp(AirconApp(prefs: prefs));
+  runApp(BreezeLinkApp(prefs: prefs));
 }
 
-class AirconApp extends StatelessWidget {
-  const AirconApp({super.key, required this.prefs});
+class BreezeLinkApp extends StatelessWidget {
+  const BreezeLinkApp({super.key, required this.prefs});
 
   final SharedPreferences prefs;
 
@@ -37,7 +37,7 @@ class AirconApp extends StatelessWidget {
       create: (_) => ThemeController(prefs),
       child: Consumer<ThemeController>(
         builder: (_, theme, _) => MaterialApp(
-          title: 'Aircon',
+          title: 'BreezeLink',
           debugShowCheckedModeBanner: false,
           theme: AcTheme.light,
           darkTheme: AcTheme.dark,

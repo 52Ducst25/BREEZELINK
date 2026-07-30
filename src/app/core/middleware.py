@@ -15,7 +15,7 @@ from starlette.types import ASGIApp
 from app.core.security import decode_token
 from app.core.tenant import set_current_org, set_current_user
 
-logger = logging.getLogger("aircon.request")
+logger = logging.getLogger("breezelink.request")
 
 
 class RequestContextMiddleware(BaseHTTPMiddleware):

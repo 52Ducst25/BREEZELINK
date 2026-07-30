@@ -1,4 +1,4 @@
-// Aircon SSR admin: sidebar toggle + realtime refresh.
+// BreezeLink SSR admin: sidebar toggle + realtime refresh.
 //
 // Realtime design choice: on every non-ping WebSocket message we RE-FETCH
 // the current page and swap #main (SafeKitchen's pattern, design (a)),

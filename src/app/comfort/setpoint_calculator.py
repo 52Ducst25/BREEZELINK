@@ -11,7 +11,7 @@ from app.comfort.comfort_constants import ComfortConfig
 # de Dear & Brager, ASHRAE RP-884 (1997; 20k+ field entries, 160 buildings, 4
 # continents): T_comf = 0.31*T_rm + 17.8, valid only for 10 <= T_rm <= 33.5.
 # CAVEAT (researcher-01 §1): this model's original scope is naturally
-# ventilated buildings, NOT air-conditioned rooms. Aircon reframes the
+# ventilated buildings, NOT air-conditioned rooms. BreezeLink reframes the
 # output as an "energy-saving setpoint reference" (design §1.1 point 2), not
 # a comfort-compliance guarantee — true comfort in a sealed AC room is
 # restored by the humidity correction below (design §1.1 point 2 caveat).

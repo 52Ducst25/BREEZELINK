@@ -1,6 +1,6 @@
 #pragma once
 // ============================================================================
-//  Aircon — QR Box Advance Touch Screen  ·  node TRONG NHÀ (indoor) + MASTER + IR
+//  BreezeLink — QR Box Advance Touch Screen  ·  node TRONG NHÀ (indoor) + MASTER + IR
 //  BẢN MẪU — copy thành `config.h` rồi điền. (config.h bị gitignore vì chứa
 //  mật khẩu WiFi + token MQTT thật.)
 // ============================================================================

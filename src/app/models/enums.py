@@ -1,4 +1,4 @@
-"""Shared domain enums for Aircon comfort-control tables.
+"""Shared domain enums for BreezeLink comfort-control tables.
 
 Kept as plain ``str`` Enums (not native Python IntEnum) so Pydantic and
 SQLAlchemy both serialize the readable string value directly.

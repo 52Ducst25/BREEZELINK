@@ -24,7 +24,7 @@ from app.services import (
 )
 from app.utils.mqtt_naming import ParsedTopic
 
-logger = logging.getLogger("aircon.worker.state")
+logger = logging.getLogger("breezelink.worker.state")
 
 
 async def handle_state(client, topic: ParsedTopic, payload: dict) -> None:

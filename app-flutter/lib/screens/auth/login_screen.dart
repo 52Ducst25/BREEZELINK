@@ -174,7 +174,7 @@ class _LoginScreenState extends State<LoginScreen> {
               children: [
                 Icon(Icons.ac_unit, size: 56, color: ac.ice),
                 const SizedBox(height: 8),
-                Text('AIRCON', textAlign: TextAlign.center, style: AcText.heading(size: 22, color: ac.white)),
+                Text('BREEZELINK', textAlign: TextAlign.center, style: AcText.heading(size: 22, color: ac.white)),
                 const SizedBox(height: 4),
                 Text('Điều hòa thích ứng', textAlign: TextAlign.center, style: AcText.body(size: 12, color: ac.whiteDim)),
                 const SizedBox(height: 24),

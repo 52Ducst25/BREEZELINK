@@ -12,7 +12,7 @@ from app.models.enums import AcMode
 from app.services import ir_action_service, ir_code_service, telemetry_service
 from app.utils.mqtt_naming import ParsedTopic
 
-logger = logging.getLogger("aircon.worker.learn")
+logger = logging.getLogger("breezelink.worker.learn")
 
 
 async def handle_learn(client, topic: ParsedTopic, payload: dict) -> None:

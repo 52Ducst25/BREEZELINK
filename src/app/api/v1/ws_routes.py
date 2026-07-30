@@ -23,7 +23,7 @@ from app.core.security import (
 from app.services import live_events, live_state_service, user_service
 
 router = APIRouter(tags=["ws"])
-logger = logging.getLogger("aircon.ws")
+logger = logging.getLogger("breezelink.ws")
 
 _HEARTBEAT_SEC = 25
 

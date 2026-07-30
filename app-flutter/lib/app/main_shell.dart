@@ -58,8 +58,8 @@ class _MainShellState extends State<MainShell> {
         titleSpacing: 16,
         title: Row(
           children: [
-            Text('AIR', style: AcText.heading(size: 17, color: ac.white)),
-            Text('CON', style: AcText.heading(size: 17, color: ac.ice)),
+            Text('BREEZE', style: AcText.heading(size: 17, color: ac.white)),
+            Text('LINK', style: AcText.heading(size: 17, color: ac.ice)),
             const SizedBox(width: 10),
             Text('· ${_titles[_index]}', style: AcText.label(size: 11, color: ac.whiteDim)),
           ],

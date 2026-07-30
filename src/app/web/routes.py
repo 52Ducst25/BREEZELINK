@@ -72,7 +72,7 @@ async def login_submit(
     if not user.is_sysadmin:
         return render(request, "login.html", {
             "user": None,
-            "error": "Tài khoản này dành cho khách hàng — hãy dùng ứng dụng Aircon trên điện thoại. "
+            "error": "Tài khoản này dành cho khách hàng — hãy dùng ứng dụng BreezeLink trên điện thoại. "
                      "Trang quản trị chỉ dành cho nhân viên.",
         })
 

@@ -1,7 +1,7 @@
 """Running-mean outdoor temperature proxy (design §1.1 caveat #1, §1.2 step A).
 
 ASHRAE-55's adaptive model expects a multi-day *prevailing mean outdoor
-temperature*. Aircon has no multi-day stable history at deploy time, so
+temperature*. BreezeLink has no multi-day stable history at deploy time, so
 an EMA of raw ``Tout`` telemetry is used as a proxy running mean instead — it
 damps the cloud/sun noise that a raw instantaneous Tout would otherwise
 inject straight into the setpoint.

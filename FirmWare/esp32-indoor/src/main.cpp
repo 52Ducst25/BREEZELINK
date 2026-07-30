@@ -1,5 +1,5 @@
 // ============================================================================
-//  Aircon — QR Box Advance Touch · node TRONG NHÀ (indoor) + MASTER + IR blaster
+//  BreezeLink — QR Box Advance Touch · node TRONG NHÀ (indoor) + MASTER + IR blaster
 // ----------------------------------------------------------------------------
 //  Node này gộp cả 4 vai trò của một hộ vào một bo:
 //    1. Đo nhiệt/ẩm -> đẩy t_in/h_in lên cloud (đầu vào của thuật toán comfort).
@@ -584,7 +584,7 @@ static void connectMqtt() {
 void setup() {
   Serial.begin(115200);
   delay(300);
-  Serial.println("\n== Aircon · QR Box Advance Touch · TRONG NHA (indoor + master + IR) ==");
+  Serial.println("\n== BreezeLink · QR Box Advance Touch · TRONG NHA (indoor + master + IR) ==");
 
   // Dựng màn TRƯỚC WiFi, có chủ đích: tác vụ giao diện chạy ở lõi 0 nên nó vẫn
   // vẽ bình thường suốt lúc connectWifi()/connectMqtt() đang chặn lõi 1 hàng

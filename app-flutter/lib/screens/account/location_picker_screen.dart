@@ -67,7 +67,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
           'accept-language': 'vi',
         },
         // Nominatim's usage policy requires an identifying User-Agent.
-        options: Options(headers: {'User-Agent': 'AirconApp/1.0 (home-location picker)'}),
+        options: Options(headers: {'User-Agent': 'BreezeLinkApp/1.0 (home-location picker)'}),
       );
       if (res.data is Map) address = res.data['display_name'] as String?;
     } catch (_) {
@@ -95,7 +95,10 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
             children: [
               TileLayer(
                 urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.aircon.app',
+                // Phải khớp applicationId thật (android/app/build.gradle.kts).
+                // Trước ghi 'com.aircon.app' — một package KHÔNG tồn tại, tức là
+                // khai báo sai với máy chủ tile của OpenStreetMap.
+                userAgentPackageName: 'com.breezelink.breezelink_app',
               ),
             ],
           ),

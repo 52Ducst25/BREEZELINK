@@ -1,5 +1,5 @@
 // ============================================================================
-//  Aircon — ESP32 · node NGOÀI TRỜI · vai trò SLAVE (ESP-NOW)
+//  BreezeLink — ESP32 · node NGOÀI TRỜI · vai trò SLAVE (ESP-NOW)
 // ----------------------------------------------------------------------------
 //  KHÔNG dùng WiFi/MQTT. Đọc DHT rồi bắn gói ESP-NOW về node trong nhà; node đó
 //  mới là node chuyển tiếp lên cloud theo topic riêng của node này.
@@ -99,7 +99,7 @@ static bool bindToChannel(int ch) {
 void setup() {
   Serial.begin(115200);
   delay(300);
-  Serial.println("\n== Aircon · ESP32 · NGOAI TROI (SLAVE / ESP-NOW) ==");
+  Serial.println("\n== BreezeLink · ESP32 · NGOAI TROI (SLAVE / ESP-NOW) ==");
   dht.begin();
 
   // STA nhưng KHÔNG connect: ESP-NOW cần giao diện station bật, không cần vào mạng.

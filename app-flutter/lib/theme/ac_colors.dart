@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// Aircon palette — the app half of the "Titanium Command" brand shared with
+/// BreezeLink palette — the app half of the "Titanium Command" brand shared with
 /// the vendor web admin. Same chamfer geometry, same Inter + JetBrains Mono
 /// type, same 2px square borders — and, as of the brand-consistency pass, the
 /// SAME accent: web tech-blue #0055FF (was ice #33C7FF). The token is still

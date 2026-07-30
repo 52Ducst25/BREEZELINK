@@ -14,7 +14,7 @@ from app.models.device import DeviceStatus
 from app.services import live_events, telemetry_service
 from app.utils.mqtt_naming import ParsedTopic
 
-logger = logging.getLogger("aircon.worker.status")
+logger = logging.getLogger("breezelink.worker.status")
 
 _VALID = {"online": DeviceStatus.online, "offline": DeviceStatus.offline}
 

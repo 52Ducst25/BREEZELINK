@@ -1,5 +1,5 @@
 /**
- * Aircon -- project layer on top of the vendored "Titanium Command"
+ * BreezeLink -- project layer on top of the vendored "Titanium Command"
  * design system (static/ds/, source: design-guiline). Loaded as its own
  * <link ... ?v=> in base.html, AFTER ds/index.css, so cascade order lets
  * these rules extend/override DS defaults.

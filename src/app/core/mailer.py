@@ -17,17 +17,17 @@ from email.message import EmailMessage
 
 from app.config import get_settings
 
-logger = logging.getLogger("aircon.mailer")
+logger = logging.getLogger("breezelink.mailer")
 
 
 def _build_message(to: str, token: str, link: str) -> EmailMessage:
     settings = get_settings()
     msg = EmailMessage()
-    msg["Subject"] = "Aircon - Đặt lại mật khẩu"
+    msg["Subject"] = "BreezeLink - Đặt lại mật khẩu"
     msg["From"] = settings.smtp_from
     msg["To"] = to
     msg.set_content(
-        "Bạn (hoặc ai đó) vừa yêu cầu đặt lại mật khẩu tài khoản Aircon.\n\n"
+        "Bạn (hoặc ai đó) vừa yêu cầu đặt lại mật khẩu tài khoản BreezeLink.\n\n"
         f"Mở liên kết sau trong app/trình duyệt để đặt mật khẩu mới "
         f"(hết hạn sau 30 phút):\n{link}\n\n"
         f"Token đặt lại: {token}\n\n"

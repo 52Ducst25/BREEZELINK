@@ -1,4 +1,4 @@
-# Aircon — Firmware node
+# BreezeLink — Firmware node
 
 Hai node cảm biến cho **1 nhà** (khách hàng *Khách hàng*):
 
@@ -201,7 +201,7 @@ pio device monitor -p COMx -b 115200
 
 Log chạy đúng:
 ```
-== Aircon · QR Box Advance Touch · TRONG NHA (indoor + master + IR) ==
+== BreezeLink · QR Box Advance Touch · TRONG NHA (indoor + master + IR) ==
 LCD: ST7789 320x240 (rotation 1) · cam ung: GT911
 WiFi -> "TEN_WIFI" .... OK  IP=192.168.x.x
 MQTT ... connected
