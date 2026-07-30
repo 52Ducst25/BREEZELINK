@@ -173,6 +173,22 @@ void fmtNum(char *buf, size_t n, float v, int decimals) {
   snprintf(buf, n, decimals ? "%.1f" : "%.0f", v);
 }
 
+/// Số đo kèm đơn vị. Đơn vị CHỈ được thêm khi có số thật.
+///
+/// "--°C" đọc như một nhiệt độ hợp lệ đang bị lỗi hiển thị; "--" thì nói đúng
+/// điều đang xảy ra là chưa đo được. Cùng một luật với fmtNum ở trên, nên gom
+/// vào đây thay vì để mỗi chỗ gọi tự nhớ kiểm isnan — độ ẩm trước đây làm đúng
+/// việc này bằng tay ở hai chỗ, còn nhiệt độ thì quên hẳn đơn vị.
+///
+/// `°` (U+00B0) và `C` CÓ trong cả hai font số: tools/make_lvgl_fonts.ps1 sinh
+/// dải $num gồm 0xB0 và 0x43 đúng cho mục đích này. Đừng đổi sang ký hiệu khác
+/// (ví dụ `℃` U+2103) — nó không có trong font và sẽ ra ô trống kèm một dòng
+/// `lv_draw_letter: glyph dsc. not found` trên serial.
+void fmtUnit(char *buf, size_t n, float v, int decimals, const char *unit) {
+  fmtNum(buf, n, v, decimals);
+  if (!isnan(v)) strncat(buf, unit, n - strlen(buf) - 1);
+}
+
 lv_obj_t *dot(lv_obj_t *parent, lv_coord_t x, lv_coord_t y, lv_color_t c) {
   lv_obj_t *o = lv_obj_create(parent);
   lv_obj_remove_style_all(o);
@@ -390,8 +406,11 @@ void buildHome() {
 //  Màn 2 — DIEU KHIEN
 // ---------------------------------------------------------------------------
 void refreshControl() {
-  char b[8];
-  snprintf(b, sizeof b, "%d", gPendSet);
+  // 12 byte, không phải 8: `°` là U+00B0 = HAI byte trong UTF-8, nên "30°C" tốn
+  // 6 byte kể cả NUL. Vẫn vừa ở 8 nhưng biên mỏng tới mức một lần thêm ký tự nữa
+  // là snprintf cắt âm thầm.
+  char b[12];
+  snprintf(b, sizeof b, "%d°C", gPendSet);
   setText(gSetBig, b);
   for (uint8_t i = 0; i < 4; i++) {
     buttonSelect(gModeBtn[i], i == gPendMode);
@@ -1154,21 +1173,19 @@ void update(const Ui::Model &m) {
   skeletonShow(gInSkel, isnan(m.tIn));
   skeletonShow(gOutSkel, m.outOnline && isnan(m.tOut));
 
-  fmtNum(b, sizeof b, m.tIn, 1);
+  fmtUnit(b, sizeof b, m.tIn, 1, "°C");
   setText(gInTemp, b);
   lv_obj_set_style_text_color(gInTemp, thermal(m.tIn), 0);
-  fmtNum(b, sizeof b, m.hIn, 0);
-  if (!isnan(m.hIn)) strncat(b, " %", sizeof(b) - strlen(b) - 1);
+  fmtUnit(b, sizeof b, m.hIn, 0, " %");
   setText(gInHum, b);
 
   lv_obj_set_style_bg_color(gOutDot, m.outOnline ? ok() : textMuted(), 0);
   if (m.outOnline) {
-    fmtNum(b, sizeof b, m.tOut, 1);
+    fmtUnit(b, sizeof b, m.tOut, 1, "°C");
     setText(gOutTemp, b);
     lv_obj_set_style_text_color(gOutTemp, thermal(m.tOut), 0);
     setText(gOutNote, "ĐỘ ẨM");
-    fmtNum(b, sizeof b, m.hOut, 0);
-    if (!isnan(m.hOut)) strncat(b, " %", sizeof(b) - strlen(b) - 1);
+    fmtUnit(b, sizeof b, m.hOut, 0, " %");
     setText(gOutHum, b);
   } else {
     // Node ngoài trời mất nhịp tim: nói thẳng, KHÔNG đóng băng số cũ trên màn
@@ -1181,7 +1198,8 @@ void update(const Ui::Model &m) {
   }
 
   setText(gAcMode, m.mode[0] ? m.mode : "--");
-  if (m.setpoint >= 0) snprintf(b, sizeof b, "%d", m.setpoint);
+  // Cùng luật với fmtUnit: chưa biết setpoint thì "--" trần, không "--°C".
+  if (m.setpoint >= 0) snprintf(b, sizeof b, "%d°C", m.setpoint);
   else                 snprintf(b, sizeof b, "--");
   setText(gAcSet, b);
 
