@@ -14,12 +14,14 @@
 //  nên "node indoor" và "node indoor-master" không thể là hai hàng devices khác
 //  nhau. Node này mang chính DEVICE_UUID của node ESP32-S3 cũ và thay thế nó.
 //
-//  4 topic đang dùng, khớp CHÍNH XÁC backend (src/app/utils/mqtt_naming.py):
+//  6 topic đang dùng, khớp CHÍNH XÁC backend (src/app/utils/mqtt_naming.py):
 //    telemetry  node -> cloud   {ts,t,h,rssi,mac,fw}      (telemetry_handler.py)
 //    status     node -> cloud   "online"/"offline" retain (status_handler.py)
 //    cmd        cloud -> node   lệnh IR HOẶC lệnh học     (command_publisher.py)
 //    state      node -> cloud   {ack,mode,setpoint} retain (state_handler.py)
 //    learn      node -> cloud   {raw_timing,mode/action,temp} (learn_handler.py)
+//    override   node -> cloud   {mode,setpoint} | {clear}  (override_handler.py)
+//                               KHÔNG retain — xem buildTopics()
 // ============================================================================
 #include <Arduino.h>
 #include <WiFi.h>
@@ -78,7 +80,7 @@ static PubSubClient mqtt(net);
 /// log không báo gì, máy lạnh không nhúc nhích. 12KB dư cho 600 mốc.
 static const uint16_t MQTT_BUFFER_BYTES = 12288;
 
-static String tTelemetry, tStatus, tCmd, tState, tLearn;
+static String tTelemetry, tStatus, tCmd, tState, tLearn, tOverride;
 static void buildTopics() {
   String base = String("bl/") + ORG_ID + "/" + DEVICE_UUID + "/";
   tTelemetry = base + "telemetry";
@@ -86,6 +88,14 @@ static void buildTopics() {
   tCmd       = base + "cmd";
   tState     = base + "state";
   tLearn     = base + "learn";
+  // `override` là đường để MÀN NÀY xin máy chủ nhường quyền — trước đây không có
+  // nên ghi đè tại chỗ chỉ sống được tới chu kỳ comfort kế tiếp. Xem
+  // ../Interface/README.md §8.3 và app/utils/mqtt_naming.py.
+  //
+  // PHẢI LÀ TOPIC RIÊNG, KHÔNG ĐƯỢC NHỒI VÀO `state`: publishState() gửi RETAIN,
+  // nên một cờ ghi đè nằm trong đó sẽ được broker phát lại mỗi lần node nối lại
+  // và tự bật ghi đè vĩnh viễn — máy chủ thôi tính comfort mãi mà không ai bấm gì.
+  tOverride  = base + "override";
 }
 
 /// Bộ đệm khung IR dùng chung cho cả phát lẫn học. Một node chỉ làm một việc
@@ -98,10 +108,18 @@ static char learnLabel[24] = "";
 static int  learnTemp = -1;
 
 // --- Dấu vết quyền điều khiển ------------------------------------------------
-// Ai đang cầm lái: máy chủ (mặc định) hay người vừa bấm trên màn cảm ứng.
-// `overrideLocal` chỉ có ý nghĩa HIỂN THỊ — nó KHÔNG dừng vòng lặp comfort của
-// máy chủ, vì node không có kênh nào để xin đặt ghi đè (Interface/README.md
-// §8.3). Giao diện nói đúng chuyện đó thay vì hứa hão.
+// Ai đang cầm lái: máy chủ, hay một người (ở màn này HOẶC trong app).
+//
+// `overrideLocal` GIỜ CÓ HIỆU LỰC THẬT, không còn là cờ trang trí: bấm THỦ CÔNG
+// publish lên topic `override` và `override_handler.py` đặt cổng ghi đè trong
+// Redis, nên vòng lặp comfort thực sự nhường quyền (Interface/README.md §8.3 —
+// khoảng trống đó đã lấp).
+//
+// VÀ NÓ PHẢI PHẢN ÁNH CẢ GHI ĐÈ ĐẶT TỪ APP, không chỉ từ màn này. Trước đây mọi
+// gói `cmd` đều kéo cờ này về false, kể cả gói do chính app phát khi người dùng
+// vừa ghi đè trong app — nên đứng ở tường thì thấy huy hiệu TU DONG trong lúc
+// máy chủ đã nhường quyền cho app xong. Màn khẳng định sai về việc ai đang cầm
+// lái. Nay cờ bám theo `reason` của gói, xem cuối takeCommand().
 static uint32_t lastCmdMs = 0;
 static bool     overrideLocal = false;
 
@@ -423,7 +441,19 @@ static void takeCommand(JsonDocument &doc) {
   // Máy chủ vừa ra lệnh -> nó đã giành lại quyền, huy hiệu trên màn trở về
   // "TU DONG". Đây chính là điều giao diện đã cảnh báo lúc người dùng ghi đè.
   lastCmdMs = millis();
-  overrideLocal = false;
+
+  // Ai đang cầm lái, đọc từ `reason` chứ không mặc định là máy chủ.
+  //
+  //   "auto:COOL@25"    máy chủ tự quyết        -> máy chủ cầm lái
+  //   "manual override" người dùng ghi đè (app) -> NGƯỜI cầm lái
+  //   "action:FAN_SPEED" bấm nút rời trong app  -> KHÔNG ĐỔI (xem dưới)
+  //
+  // Nút rời cố tình không đụng cờ này: nó không mang (mode, setpoint) và không
+  // đặt cổng ghi đè nào phía máy chủ, nên suy ra quyền điều khiển từ nó là bịa.
+  // Bấm "tốc độ quạt" trong lúc máy chủ đang tự chạy thì máy chủ VẪN đang tự
+  // chạy — cờ giữ nguyên là câu trả lời đúng, không phải là bỏ sót nhánh.
+  if (strncmp(reason, "auto:", 5) == 0)              overrideLocal = false;
+  else if (strcmp(reason, "manual override") == 0)   overrideLocal = true;
 }
 
 static void onMessage(char *topic, byte *payload, unsigned int len) {
@@ -660,7 +690,22 @@ static unsigned long lastPub = 0;
 static void runPanelCommand(const Ui::Command &c) {
   if (c.kind == Ui::Command::AUTO) {
     overrideLocal = false;
-    Serial.println("[panel] tra quyen ve cho may chu");
+    // Gỡ cổng ghi đè trên máy chủ, không chỉ đổi huy hiệu trên màn. Thiếu dòng
+    // này thì THỦ CÔNG là đường một chiều: bấm một lần là hộ đó nằm ngoài vòng
+    // comfort suốt `override_hours` (mặc định 2h) và panel không có cách nào gỡ.
+    //
+    // Gỡ ghi đè là việc CỦA CẢ HỘ chứ không riêng màn này, nên vẫn gửi dù cờ cục
+    // bộ đang false — ghi đè có thể do app đặt, và người đứng ở tường bấm TỰ ĐỘNG
+    // là đang nói "thôi, để máy chủ lo". Trả về sớm vì cờ false sẽ bỏ rơi đúng
+    // trường hợp đó.
+    const bool ok = mqtt.connected() &&
+                    mqtt.publish(tOverride.c_str(), "{\"clear\":true}", false);
+    Serial.printf("[panel] tra quyen ve cho may chu -> %s\n",
+                  ok ? "da gui" : "GUI LOI (may chu se tu het han)");
+    // KHÔNG gọi Ui::reply() ở đây: onAuto() đã hiện đúng toast đó ngay lúc bấm.
+    // Gọi lại là vẽ lại cùng một câu -> nháy một cái vô nghĩa. Và không báo lỗi
+    // ra màn khi gửi trượt: huy hiệu ĐÃ về TU DONG, đúng ở phía node, còn cổng
+    // ghi đè phía máy chủ thì tự hết hạn — chậm, nhưng không sai.
     return;
   }
 
@@ -710,8 +755,10 @@ static void runPanelCommand(const Ui::Command &c) {
   // Gộp hai thứ này làm một là lý do một nút vừa-là-hành-động vừa-là-đèn-báo trở
   // nên không bấm được.
   //
-  // Vẫn TRUNG THỰC: màn hình nói "GHI ĐÈ" kèm "máy chủ sẽ giành lại quyền ở chu
-  // kỳ sau" — cả hai đều đúng ngay cả khi mã IR chưa học.
+  // Vẫn TRUNG THỰC: huy hiệu "GHI ĐÈ" nói về Ý ĐỊNH, và ý định đó có thật ngay cả
+  // khi mã IR chưa học. Còn ghi đè có SỐNG SÓT hay không thì hai câu toast ở cuối
+  // hàm phân biệt rõ — chưa có mã thì không xin cổng ghi đè, nên máy chủ vẫn
+  // giành lại, và màn nói đúng câu đó.
   overrideLocal = true;
 
   const uint16_t n = IrStore::loadAlias(c.mode, aliasTemp(c.mode, c.setpoint),
@@ -729,15 +776,39 @@ static void runPanelCommand(const Ui::Command &c) {
 
   // Publish state KHÔNG kèm ack: không có req_id nào để khớp, nhưng
   // state_handler vẫn soi mode/setpoint vào redis_state_service nên app và web
-  // thấy ngay trạng thái mới. Đây là tất cả những gì node làm được — đặt ghi đè
-  // thật cần một topic mà backend chưa có (Interface/README.md §8.3).
+  // thấy ngay trạng thái mới (giờ kèm cả một nhịp realtime — state_handler đã
+  // gọi live_events.publish_change, app không phải chờ tick telemetry nữa).
   pending.reqId[0] = '\0';
   copyStr(pending.mode, sizeof(pending.mode), c.mode);
   pending.setpoint = c.setpoint;
   publishState();
 
-  overrideLocal = true;
-  Ui::reply("ĐÃ GỬI — máy chủ sẽ giành lại quyền");
+  // Rồi XIN ĐẶT CỔNG GHI ĐÈ — nửa còn lại, và là nửa làm cho ghi đè sống sót.
+  //
+  // ĐẶT SAU nhánh "chưa có mã" ở trên, CỐ Ý: chặn vòng lặp comfort trong lúc
+  // node không bắn nổi khung nào là để máy lạnh nằm im ở trạng thái cũ suốt
+  // `override_hours`. Chưa phát được thì thà để máy chủ tiếp tục thử — nó có thể
+  // chọn một nhiệt độ khác mà node CÓ mã. "Giành quyền" chỉ có nghĩa khi kèm
+  // được năng lực thi hành.
+  //
+  // Không retain (tham số cuối = false): đây là một Ý ĐỊNH xảy ra một lần, không
+  // phải trạng thái. Retain thì mỗi lần node nối lại broker phát lại và ghi đè tự
+  // bật lại vĩnh viễn — cùng lý do đã ghi ở buildTopics() và ở nhánh resync.
+  JsonDocument ov;
+  ov["mode"]     = c.mode;
+  ov["setpoint"] = c.setpoint;
+  char ovBuf[64];
+  const size_t ovLen = serializeJson(ov, ovBuf);
+  const bool ovOk = mqtt.connected() &&
+                    mqtt.publish(tOverride.c_str(), (const uint8_t *)ovBuf, ovLen, false);
+  Serial.printf("[panel] xin dat ghi de %s %d -> %s\n",
+                c.mode, c.setpoint, ovOk ? "da gui" : "GUI LOI");
+
+  // Nói đúng chuyện vừa xảy ra, hai câu khác nhau cho hai kết cục khác nhau.
+  // Câu cũ ("máy chủ sẽ giành lại quyền") giờ SAI khi gửi được — cổng ghi đè đã
+  // đặt xong thì máy chủ không giành lại nữa cho tới khi hết hạn hoặc bấm TỰ ĐỘNG.
+  Ui::reply(ovOk ? "ĐÃ GỬI — bạn đang giữ quyền"
+                 : "ĐÃ PHÁT — nhưng máy chủ sẽ giành lại quyền");
 }
 
 /// Dựng ảnh chụp cho màn. Bitmask mã IR tính ở đây vì NVS thuộc quyền lõi 1.

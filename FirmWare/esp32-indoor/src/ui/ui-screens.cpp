@@ -34,6 +34,40 @@ lv_obj_t *gAcMode, *gAcSet, *gAcBadge, *gAcBadgeLbl, *gAcAge;
 lv_obj_t *gSetBig, *gModeBtn[4], *gSendBtn, *gAutoBtn, *gLimitLbl;
 int   gPendSet  = 26;               // thay đổi được GOM LẠI, chỉ gửi khi bấm GUI
 int   gPendMode = 0;                // 0=COOL 1=DRY 2=FAN 3=OFF
+
+// Lần cuối người dùng sờ vào ± hoặc nút chế độ (lv_tick_get, ms). 0 = chưa sờ.
+//
+// VÌ SAO CẦN: gPendSet/gPendMode giờ ĐƯỢC ĐỒNG BỘ từ trạng thái thật của máy lạnh
+// (xem syncPending() bên dưới). Trước đây chúng là biến cục bộ khởi tạo cứng 26 và
+// không bao giờ đổi theo máy chủ, nên đặt 22 độ trong app thì màn vẫn trơ trơ hiện
+// 26 — hai giao diện của cùng một máy nói hai con số khác nhau.
+//
+// Nhưng đồng bộ MÙ thì hỏng theo kiểu khác, tệ hơn: đúng lúc người ta đang bấm `+`
+// mà một gói cmd tới là con số bị giật về giá trị của máy chủ NGAY DƯỚI NGÓN TAY,
+// rồi cú bấm tiếp theo cộng từ một mốc khác hẳn mốc họ đang nhìn. Nên trong khoảng
+// lặng dưới đây, người đang chỉnh luôn thắng.
+uint32_t gPendTouchedMs = 0;
+constexpr uint32_t PEND_EDIT_LOCK_MS = 5000;
+
+// Ai đang cầm lái, bản sao ở lõi 0 của Ui::Model.overrideLocal. onAdjust() cần
+// biết điều này mà nó chạy trong callback chạm, không có Model trong tay.
+bool gOverrideNow = false;
+
+// Hạn tự gửi sau khi bấm ± (lv_tick_get, ms). 0 = không có gì chờ gửi.
+//
+// VÌ SAO PHẢI CÓ: trước đây bấm ± trên panel chỉ đổi con số, phải bấm thêm THỦ
+// CÔNG mới phát IR — trong khi app bấm ± là tự gửi. Cùng một máy, hai giao diện,
+// hai cách hành xử; ở panel treo tường thì nó bị đọc là nút hỏng.
+//
+// Và phải là DEBOUNCE chứ không gửi ngay từng nhịp: đi từ 26 lên 30 là bốn cú
+// bấm, gửi ngay là bốn khung IR liên tiếp. Mỗi khung chặn ~50-250ms trong
+// IrIo::blast() và máy lạnh phải xử lý cả bốn — 26, 27, 28, rồi 30. Gộp lại chỉ
+// phát mốc cuối, đúng con số người dùng muốn.
+//
+// 500ms bằng đúng app (override_panel.dart `_tempDebounce`) — hai giao diện
+// không nên "cảm giác" khác nhau khi làm cùng một việc.
+uint32_t gAutoSendAt = 0;
+constexpr uint32_t AUTO_SEND_DEBOUNCE_MS = 500;
 const char *const kModeName[4] = {"COOL", "DRY", "FAN", "OFF"};
 const char *const kModeLabel[4] = {"LẠNH", "KHÔ", "QUẠT", "TẮT"};
 bool  gModeOk[4] = {false, false, false, false};   // có mã IR trong NVS chưa
@@ -199,8 +233,28 @@ void buildChrome() {
   lv_obj_set_style_bg_color(brandBox, accent(), 0);
   lv_obj_set_style_bg_opa(brandBox, LV_OPA_COVER, 0);
 
-  lv_obj_t *brand = label(gStatusBar, 20, 4, "BREEZELINK", fontLabel(), accent());
-  lv_obj_set_style_text_letter_space(brand, 1, 0);
+  // Logo hai màu: "BREEZE" trắng + "LINK" xanh accent.
+  //
+  // Phải là HAI nhãn — LVGL 8 không có văn bản nhiều màu trong một lv_label
+  // (không có RichText/TextSpan như Flutter), nên cách duy nhất là hai đối tượng
+  // đặt cạnh nhau.
+  //
+  // ĐỪNG ghi cứng toạ độ x của nhãn thứ hai. Bề rộng "BREEZE" phụ thuộc font VLW
+  // đang dùng và letter-space; đổi font (hoặc sinh lại font với dải ký tự khác)
+  // là hai chữ dính vào nhau hoặc hở một khoảng — mà lỗi đó chỉ thấy khi soi màn
+  // thật, không có gì trong lúc biên dịch cảnh báo. Nên đo bằng chính thước của
+  // LVGL, có tính letter-space y như lúc vẽ.
+  static const lv_coord_t BRAND_X = 20, BRAND_Y = 4, BRAND_LETTER_SPACE = 1;
+
+  lv_obj_t *brand1 = label(gStatusBar, BRAND_X, BRAND_Y, "BREEZE", fontLabel(), textPrimary());
+  lv_obj_set_style_text_letter_space(brand1, BRAND_LETTER_SPACE, 0);
+
+  lv_point_t sz;
+  lv_txt_get_size(&sz, "BREEZE", fontLabel(), BRAND_LETTER_SPACE, 0,
+                  LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+
+  lv_obj_t *brand2 = label(gStatusBar, BRAND_X + sz.x, BRAND_Y, "LINK", fontLabel(), accent());
+  lv_obj_set_style_text_letter_space(brand2, BRAND_LETTER_SPACE, 0);
 
   // Đồng hồ có giây nên rộng hơn trước ~18px ("14:32:07" so với "14:32"). Hai
   // chấm trạng thái lùi trái nhường chỗ, và đồng hồ CĂN PHẢI trong một ô cố
@@ -367,11 +421,44 @@ void refreshControl() {
   else                          setText(gLimitLbl, "");
 }
 
+/// Đặt hàng lệnh THỦ CÔNG với (chế độ, nhiệt độ) đang chờ.
+///
+/// Dùng chung cho ba đường vào — bấm THỦ CÔNG, hết hạn debounce của ±, và đổi chế
+/// độ khi đang giữ quyền — nên nội dung lệnh không thể trôi lệch giữa chúng.
+/// Chỉ ĐẶT HÀNG vào queue; việc phát IR là của loop() ở lõi 1 (xem ui.h).
+static void sendPending() {
+  if (!gOnCmd) return;
+  gAutoSendAt = 0;            // huỷ hạn đang chờ, khỏi gửi lặp ngay sau đó
+  Ui::Command c{};
+  c.kind = Ui::Command::MANUAL;
+  snprintf(c.mode, sizeof c.mode, "%s", kModeName[gPendMode]);
+  c.setpoint = gPendSet;
+  gOnCmd(c);
+  toast("ĐANG GỬI...");
+}
+
 void onAdjust(lv_event_t *e) {
   int d = (int)(intptr_t)lv_event_get_user_data(e);
   gPendSet += d;
   if (gPendSet < 16) gPendSet = 16;
   if (gPendSet > 30) gPendSet = 30;
+  gPendTouchedMs = lv_tick_get();
+
+  // Tự phát khi bấm ± — nhưng CHỈ khi cả hai điều kiện dưới đây đúng.
+  //
+  //  1. Đang giữ quyền. Máy chủ đang cầm lái thì ± chỉ đổi số chờ, không tự giành
+  //     quyền: chạm nhầm vào màn treo tường không được phép hất máy chủ ra khỏi
+  //     vòng điều khiển. Muốn giành thì bấm THỦ CÔNG, một cú bấm có chủ đích.
+  //
+  //  2. Đang ở COOL. Chỉ COOL có ma trận (chế độ, nhiệt độ); DRY/FAN/OFF dùng mã
+  //     cố định và aliasTemp() bỏ hẳn nhiệt độ. Không có điều kiện này thì bấm ±
+  //     trong FAN phát LẠI ĐÚNG CÙNG MỘT khung — đã thấy thật trong log: năm gói
+  //     "FAN 23" liên tiếp. Và lặp lại KHÔNG vô hại: với nút xoay vòng (tốc độ
+  //     quạt, đảo gió) lần phát thứ hai nhảy sang nấc khác, nên IR thừa ở đây có
+  //     thể đổi trạng thái máy lạnh theo cách không ai yêu cầu.
+  //     Cùng luật với app (override_panel.dart: `steppable = _on && COOL`).
+  if (gOverrideNow && gPendMode == 0) gAutoSendAt = lv_tick_get() + AUTO_SEND_DEBOUNCE_MS;
+
   refreshControl();
 }
 
@@ -382,21 +469,57 @@ void onMode(lv_event_t *e) {
     return;
   }
   gPendMode = i;
+  gPendTouchedMs = lv_tick_get();
   refreshControl();
+
+  // Không debounce như ±: đổi chế độ là một lựa chọn dứt khoát, không phải chuỗi
+  // nhịp dồn. Đúng như app (`_cycleMode` gửi ngay, `_step` mới debounce).
+  if (gOverrideNow) sendPending();
 }
 
-void onSend(lv_event_t *) {
-  if (!gOnCmd) return;
-  Ui::Command c{};
-  c.kind = Ui::Command::MANUAL;
-  snprintf(c.mode, sizeof c.mode, "%s", kModeName[gPendMode]);
-  c.setpoint = gPendSet;
-  gOnCmd(c);
-  toast("ĐANG GỬI...");
+/// Kéo giá trị chờ gửi theo trạng thái máy lạnh thật (do máy chủ hoặc app đặt),
+/// để màn này và app không bao giờ khoe hai con số khác nhau về cùng một máy.
+///
+/// Trả true nếu có gì đổi (người gọi phải vẽ lại trang ĐIỀU KHIỂN).
+///
+/// BA ĐIỀU KIỆN, thiếu một là sinh lỗi khó tìm:
+///  1. Người dùng chưa sờ vào ± / nút chế độ trong PEND_EDIT_LOCK_MS — xem chú
+///     thích ở gPendTouchedMs.
+///  2. Model phải CÓ số thật. `setpoint = -1` và `mode` rỗng nghĩa là "chưa biết"
+///     (ui.h nói rõ: NAN/-1 cho thiếu số, KHÔNG dùng 0) — đồng bộ theo nó là tự
+///     tay ghi 16 độ vào màn lúc node vừa khởi động, trước khi có lệnh nào tới.
+///  3. Chỉ nhận nhiệt độ trong dải nút bấm cho phép (16..30). Ngoài dải thì đó
+///     là mã cố định hoặc dữ liệu lạ; kẹp im lặng sẽ hiện một con số máy lạnh
+///     chưa từng nhận.
+static bool syncPending(const Ui::Model &m) {
+  if (gPendTouchedMs && (lv_tick_get() - gPendTouchedMs) < PEND_EDIT_LOCK_MS) return false;
+
+  bool changed = false;
+
+  if (m.mode[0]) {
+    for (uint8_t i = 0; i < 4; i++) {
+      if (strcmp(m.mode, kModeName[i]) == 0) {
+        if (gPendMode != i) { gPendMode = i; changed = true; }
+        break;
+      }
+    }
+  }
+
+  // Nhiệt độ chỉ có nghĩa với COOL — DRY/FAN/OFF không dùng setpoint, nên giữ
+  // nguyên con số cũ để người dùng chuyển về LẠNH là thấy lại mốc quen thuộc.
+  if (gPendMode == 0 && m.setpoint >= 16 && m.setpoint <= 30 && gPendSet != m.setpoint) {
+    gPendSet = m.setpoint;
+    changed = true;
+  }
+
+  return changed;
 }
+
+void onSend(lv_event_t *) { sendPending(); }
 
 void onAuto(lv_event_t *) {
   if (!gOnCmd) return;
+  gAutoSendAt = 0;    // trả quyền thì bỏ luôn lệnh ± đang chờ gửi
   Ui::Command c{};
   c.kind = Ui::Command::AUTO;
   gOnCmd(c);
@@ -1010,6 +1133,16 @@ void build(CommandFn onCmd, SettingFn onSetting) {
 void update(const Ui::Model &m) {
   char b[40];
 
+  // Bản sao cho các callback chạm — chúng không nhận được Model.
+  gOverrideNow = m.overrideLocal;
+
+  // Hết hạn debounce của ± -> phát luôn.
+  //
+  // Kiểm ở ĐÂY chứ không dựng lv_timer riêng: file này vốn hẹn giờ bằng mốc thời
+  // hạn (xem gToastUntil), và update() chạy đều 5 lần/giây nên đã là nhịp quét sẵn
+  // có. Đổi lại: sai số tới ~200ms, không đáng kể với một debounce 500ms.
+  if (gAutoSendAt && lv_tick_get() >= gAutoSendAt) sendPending();
+
   // --- thanh trạng thái ---
   lv_obj_set_style_bg_color(gDotWifi, m.wifiUp ? ok() : err(), 0);
   lv_obj_set_style_bg_color(gDotMqtt, m.mqttUp ? ok() : err(), 0);
@@ -1078,8 +1211,11 @@ void update(const Ui::Model &m) {
   buttonSelect(gSendBtn, m.overrideLocal);
   buttonSelect(gAutoBtn, !m.overrideLocal);
 
-  // --- DIEU KHIEN: mã IR nào đã có ---
-  bool changed = false;
+  // --- DIEU KHIEN: mã IR nào đã có + giá trị chờ gửi ---
+  // Gộp vào MỘT cờ `changed` rồi vẽ lại một lần: refreshControl() sờ vào 6 widget
+  // và update() chạy 5 lần/giây, nên gọi nó hai lần cho hai lý do trong cùng một
+  // nhịp là vẽ thừa nguyên một lượt.
+  bool changed = syncPending(m);
   bool ok0 = m.coolMask != 0;
   if (gModeOk[0] != ok0)      { gModeOk[0] = ok0;      changed = true; }
   if (gModeOk[1] != m.hasDry) { gModeOk[1] = m.hasDry; changed = true; }
