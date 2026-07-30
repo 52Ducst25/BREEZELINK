@@ -10,8 +10,7 @@ import '../../theme/ac_text.dart';
 import '../../widgets/outline_panel.dart';
 
 /// One line chart of a device's history — used for BOTH temperature and
-/// humidity (same shape, different accessor/unit/colour), mirroring the energy
-/// screen's WattChart so the two screens feel identical.
+/// humidity (same shape, different accessor/unit/colour).
 ///
 /// Shows "chưa có dữ liệu" when the window holds fewer than 2 points: a single
 /// reading cannot draw a line, and inventing one would misrepresent the range.

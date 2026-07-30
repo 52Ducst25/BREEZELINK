@@ -12,8 +12,7 @@ import '../../widgets/outline_panel.dart';
 import 'sensor_chart.dart';
 
 /// Per-node history: tap a device card → temperature + humidity charts over
-/// Hôm nay / 7 ngày / 30 ngày. Mirrors the energy screen's layout so the two
-/// feel like one app.
+/// Hôm nay / 7 ngày / 30 ngày.
 ///
 /// [api] is injected rather than read from Provider: this screen is pushed on
 /// the root navigator, which sits ABOVE the tab shell's provider scope, so a

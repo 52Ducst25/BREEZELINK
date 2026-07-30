@@ -11,15 +11,13 @@ import '../../widgets/outline_panel.dart';
 import '../../widgets/section_label.dart';
 import '../../widgets/status_dot.dart';
 import '../device/device_history_screen.dart';
-import '../energy/energy_screen.dart';
 import 'comfort_pipeline_card.dart';
 import 'device_card.dart';
 import 'location_card.dart';
-import 'power_consumption_card.dart';
 
-/// TRẠNG THÁI tab — the BenKon "home": a location card (household + outdoor
-/// conditions), a power-consumption card, and the "Thiết bị của bạn" device
-/// list. The full comfort pipeline read-out is kept below for auditability.
+/// TRẠNG THÁI tab — the "home": a location card (household + outdoor
+/// conditions) and the "Thiết bị của bạn" device list. The full comfort
+/// pipeline read-out is kept below for auditability.
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
 
@@ -44,16 +42,6 @@ class DashboardScreen extends StatelessWidget {
     ));
   }
 
-  void _openEnergy(BuildContext context) {
-    final s = context.read<AppState>();
-    Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => ChangeNotifierProvider<AppState>.value(
-        value: s,
-        child: const EnergyScreen(),
-      ),
-    ));
-  }
-
   @override
   Widget build(BuildContext context) {
     final s = context.watch<AppState>();
@@ -61,7 +49,7 @@ class DashboardScreen extends StatelessWidget {
     final comfort = s.comfort;
 
     return RefreshIndicator(
-      onRefresh: s.refreshEnergy,
+      onRefresh: s.refresh,
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -92,8 +80,6 @@ class DashboardScreen extends StatelessWidget {
           ],
 
           LocationCard(locationName: _locationName(s.profile?.location, s.devices), outdoor: s.outdoor),
-          const SizedBox(height: 14),
-          PowerConsumptionCard(energy: s.energy, onTap: () => _openEnergy(context)),
 
           const SizedBox(height: 22),
           const SectionLabel('Thiết bị của bạn'),
