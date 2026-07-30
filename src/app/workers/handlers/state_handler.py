@@ -18,6 +18,7 @@ from app.core.tenant import set_current_org
 from app.services import (
     command_service,
     ir_service,
+    live_events,
     redis_ir_cache,
     redis_state_service,
     telemetry_service,
@@ -84,3 +85,13 @@ async def handle_state(client, topic: ParsedTopic, payload: dict) -> None:
         mode, setpoint = payload.get("mode"), payload.get("setpoint")
         if mode is not None and setpoint is not None:
             await redis_state_service.set_indoor_state(topic.org_id, {"mode": mode, "setpoint": setpoint})
+            # Push it, don't let clients wait for the next telemetry tick.
+            #
+            # This mirror was previously silent: only telemetry_handler and
+            # status_handler emitted live events, so a setpoint changed on the
+            # wall panel sat in Redis until the next telemetry tick happened to
+            # wake the app up (~15s with TELEMETRY_MS=15000). Which is also the
+            # tick that may overwrite it — so the app could go straight from the
+            # stale value to the server's replacement and never once show what
+            # the person standing at the panel had actually dialled in.
+            await live_events.publish_change(topic.org_id)

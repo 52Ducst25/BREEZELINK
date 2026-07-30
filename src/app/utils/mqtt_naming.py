@@ -9,12 +9,22 @@ Topic scheme (bidirectional — this differs from a 1-way-telemetry-only design)
                      number of nodes in one household (1 outdoor + N indoor)
                      each get their own topics — the node_type (indoor/outdoor)
                      is resolved from the devices row, not read off the topic.
-        kind: telemetry | cmd | state | status | learn
+        kind: telemetry | cmd | state | status | learn | override
 
     telemetry — device -> cloud sensor readings (QoS1, retain off)
     cmd       — cloud -> device downstream commands (QoS1, retain off)
     state     — device -> cloud current actuator state / ack (QoS1, retain on)
     status    — device -> cloud presence/LWT ("online"/"offline", retain on)
+    override  — device -> cloud "the user took the wheel on my panel"
+                (QoS1, retain OFF — see below)
+
+``override`` MUST NOT be folded into ``state``, even though both are
+device -> cloud and both carry mode/setpoint. ``state`` is published RETAINED
+so a reconnecting worker learns the node's current actuator state without
+waiting; a retained override would be replayed by the broker on every node
+reconnect and silently re-arm the manual gate forever, permanently disabling
+auto-control. Retain is exactly what makes ``state`` right and ``override``
+wrong on the same topic, so they stay separate.
 
 Client id: breezelink_{device_uuid}
 
@@ -42,6 +52,7 @@ class TopicKind(str, enum.Enum):
     state = "state"
     status = "status"
     learn = "learn"
+    override = "override"
 
 
 TOPIC_TEMPLATE = "bl/{org_id}/{device_uuid}/{kind}"
@@ -55,6 +66,7 @@ TELEMETRY_WILDCARD = "bl/+/+/telemetry"
 STATE_WILDCARD = "bl/+/+/state"
 STATUS_WILDCARD = "bl/+/+/status"
 LEARN_WILDCARD = "bl/+/+/learn"
+OVERRIDE_WILDCARD = "bl/+/+/override"
 
 
 def topic(org_id: str, device_uuid: str, kind: str) -> str:

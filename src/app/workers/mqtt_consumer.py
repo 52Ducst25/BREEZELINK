@@ -1,8 +1,8 @@
 """MQTT consumer — bidirectional ingest + command dispatch (Phase 4).
 
-Subscribes to all 4 inbound topic kinds (telemetry, state, status, learn)
-across every org/node (wildcarded — a single worker process serves every
-tenant) and routes each message to its handler by parsed topic ``kind``.
+Subscribes to all 5 inbound topic kinds (telemetry, state, status, learn,
+override) across every org/node (wildcarded — a single worker process serves
+every tenant) and routes each message to its handler by parsed topic ``kind``.
 Every message is isolated in its own try/except so one bad/absurd payload
 never kills the consume loop (design §5 risk).
 """
@@ -16,7 +16,13 @@ import aiomqtt
 from app.core.mqtt import build_mqtt_client
 from app.utils import mqtt_naming
 from app.utils.mqtt_naming import TopicKind
-from app.workers.handlers import learn_handler, state_handler, status_handler, telemetry_handler
+from app.workers.handlers import (
+    learn_handler,
+    override_handler,
+    state_handler,
+    status_handler,
+    telemetry_handler,
+)
 
 logger = logging.getLogger("breezelink.worker.consumer")
 
@@ -25,6 +31,7 @@ _HANDLERS = {
     TopicKind.state.value: state_handler.handle_state,
     TopicKind.status.value: status_handler.handle_status,
     TopicKind.learn.value: learn_handler.handle_learn,
+    TopicKind.override.value: override_handler.handle_override,
 }
 
 _STATUS_TOPIC_KIND = TopicKind.status.value
@@ -63,6 +70,7 @@ async def run_consumer() -> None:
                 await client.subscribe(mqtt_naming.STATE_WILDCARD, qos=1)
                 await client.subscribe(mqtt_naming.STATUS_WILDCARD, qos=1)
                 await client.subscribe(mqtt_naming.LEARN_WILDCARD, qos=1)
+                await client.subscribe(mqtt_naming.OVERRIDE_WILDCARD, qos=1)
                 logger.info("MQTT consumer subscribed; awaiting messages")
                 delay = _RECONNECT_INITIAL_DELAY_S  # reset backoff after a clean (re)connect
                 async for message in client.messages:
