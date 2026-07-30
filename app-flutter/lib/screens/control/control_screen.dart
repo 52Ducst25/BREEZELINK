@@ -74,6 +74,10 @@ class _ControlScreenState extends State<ControlScreen> {
         ],
         OverridePanel(
           bounds: bounds,
+          // Trạng thái THẬT của máy lạnh, để dial không lệch với panel treo tường.
+          // Trước đây không truyền gì nên OverridePanel rơi về COOL/25 ghi cứng và
+          // app khoe một mức máy lạnh chưa từng nhận.
+          acState: s.ac,
           onSubmit: (mode, setpoint) async {
             final err = await s.setOverride(mode: mode, setpoint: setpoint);
             if (err == null || err.contains('thiếu mã lệnh')) _startLocalCountdown();

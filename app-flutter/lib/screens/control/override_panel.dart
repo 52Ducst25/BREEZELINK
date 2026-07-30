@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../models/ac_action.dart';
 import '../../models/ac_mode.dart';
+import '../../models/ac_state.dart';
 import '../../models/config_bounds.dart';
 import '../../theme/ac_colors.dart';
 import '../../theme/ac_shapes.dart';
@@ -27,15 +28,24 @@ class OverridePanel extends StatefulWidget {
     required this.bounds,
     required this.onSubmit,
     required this.onAction,
-    this.initialMode = AcMode.cool,
-    this.initialSetpoint = 25,
+    this.acState,
   });
 
   final ConfigBounds? bounds;
   final Future<String?> Function(AcMode mode, int setpoint) onSubmit;
   final Future<String?> Function(String action) onAction;
-  final AcMode initialMode;
-  final int initialSetpoint;
+
+  /// Máy lạnh ĐANG được đặt ở mức nào, theo máy chủ. null = chưa có lệnh nào
+  /// từng chạy, khi đó dial dùng mặc định ở [_kFallbackSetpoint].
+  ///
+  /// THAY CHO `initialMode`/`initialSetpoint` CŨ, và đó là một lỗi thật chứ không
+  /// phải dọn dẹp cho gọn. Hai tham số kia (a) không được ControlScreen truyền
+  /// bao giờ nên luôn rơi về COOL/25 ghi cứng, và (b) kể cả có truyền thì
+  /// `late _mode = widget.initialMode` chỉ chạy MỘT LẦN — Dart không tính lại bộ
+  /// khởi tạo field khi widget cha dựng lại. Nên dial của app là một giá trị cục
+  /// bộ không bao giờ đọc máy chủ: panel đặt 26 độ thì app vẫn khoe 25.
+  /// Tên mới là `acState` để không ai còn đọc nó là "giá trị ban đầu".
+  final AcState? acState;
 
   @override
   State<OverridePanel> createState() => _OverridePanelState();
@@ -50,18 +60,57 @@ const _kModes = [AcMode.cool, AcMode.dry, AcMode.fan];
 final _kGridActions = kAcActions.where((a) => a.wire != 'FAN_SPEED').toList();
 AcAction _act(String wire) => kAcActions.firstWhere((a) => a.wire == wire);
 
+/// Dial dùng mức này khi máy chủ chưa biết máy lạnh đang ở đâu. Chỉ là chỗ đặt
+/// con trỏ ban đầu, KHÔNG phải trạng thái được khẳng định — và nó chỉ tồn tại tới
+/// ảnh chụp đầu tiên có `ac`.
+const _kFallbackSetpoint = 25;
+
+/// Bao lâu sau cú chạm cuối thì mới cho máy chủ ghi lại giá trị trên dial.
+///
+/// Cùng lý do và cùng con số với `PEND_EDIT_LOCK_MS` trong firmware
+/// (ui-screens.cpp): thiếu nó thì đúng lúc người dùng đang kéo dial mà một ảnh
+/// chụp tới là con số giật về giá trị máy chủ ngay dưới ngón tay. Ở app còn tệ hơn
+/// panel: `_step` tự gửi sau 500ms, nên một cú giật giữa chừng sẽ GỬI ĐI mức mà
+/// người dùng không hề chọn.
+const _kEditLock = Duration(seconds: 5);
+
 class _OverridePanelState extends State<OverridePanel> {
-  late AcMode _mode = widget.initialMode;
-  late int _setpoint = widget.initialSetpoint;
-  late AcMode _lastActiveMode = widget.initialMode == AcMode.off ? AcMode.cool : widget.initialMode;
+  late AcMode _mode = widget.acState?.mode ?? AcMode.cool;
+  late int _setpoint = widget.acState?.setpoint ?? _kFallbackSetpoint;
+  late AcMode _lastActiveMode = _mode == AcMode.off ? AcMode.cool : _mode;
   _SendState _state = _SendState.idle;
   String? _statusMsg;
   Timer? _tempDebounce;
   Timer? _sentReset;
 
+  /// Lần cuối người dùng chạm vào POWER / ± / chế độ. null = chưa chạm lần nào.
+  DateTime? _touchedAt;
+
   bool get _on => _mode != AcMode.off;
   int get _min => widget.bounds?.clampMin.round() ?? 16;
   int get _max => widget.bounds?.clampMax.round() ?? 32;
+
+  bool get _editing =>
+      _touchedAt != null && DateTime.now().difference(_touchedAt!) < _kEditLock;
+
+  /// Kéo dial theo trạng thái thật mỗi khi ảnh chụp mới tới.
+  ///
+  /// PHẢI Ở ĐÂY, không phải ở bộ khởi tạo field: Dart chỉ chạy `late ... =` một
+  /// lần cho cả đời State, nên nếu chỉ dựa vào nó thì dial đóng băng ở ảnh chụp
+  /// đầu tiên và mọi thay đổi từ panel/máy chủ về sau bị bỏ qua.
+  @override
+  void didUpdateWidget(OverridePanel old) {
+    super.didUpdateWidget(old);
+    final ac = widget.acState;
+    if (ac == null || ac == old.acState) return;   // không có tin mới -> không sờ vào dial
+    if (_editing) return;                          // người dùng đang chỉnh -> họ thắng
+    if (_tempDebounce?.isActive ?? false) return;  // có lệnh đang chờ gửi -> đừng ghi lên nó
+    setState(() {
+      _mode = ac.mode;
+      _setpoint = ac.setpoint;
+      if (ac.mode != AcMode.off) _lastActiveMode = ac.mode;
+    });
+  }
 
   @override
   void dispose() {
@@ -96,6 +145,7 @@ class _OverridePanelState extends State<OverridePanel> {
   }
 
   void _togglePower() {
+    _touchedAt = DateTime.now();
     setState(() {
       if (_on) {
         _lastActiveMode = _mode;
@@ -109,6 +159,7 @@ class _OverridePanelState extends State<OverridePanel> {
   }
 
   void _cycleMode() {
+    _touchedAt = DateTime.now();
     setState(() {
       _mode = _on ? _kModes[(_kModes.indexOf(_mode) + 1) % _kModes.length] : AcMode.cool;
       _lastActiveMode = _mode;
@@ -119,6 +170,7 @@ class _OverridePanelState extends State<OverridePanel> {
 
   void _step(int delta) {
     if (!_on) return;
+    _touchedAt = DateTime.now();
     setState(() => _setpoint = (_setpoint + delta).clamp(_min, _max));
     _tempDebounce?.cancel();
     _tempDebounce = Timer(const Duration(milliseconds: 500), _sendOverride);

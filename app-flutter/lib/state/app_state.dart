@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../models/ac_mode.dart';
+import '../models/ac_state.dart';
 import '../models/comfort_preview.dart';
 import '../models/config_bounds.dart';
 import '../models/device.dart';
@@ -51,6 +52,10 @@ class AppState extends ChangeNotifier {
   ComfortPreview _comfort = ComfortPreview.loading;
   LiveReading? _indoor;
   LiveReading? _outdoor;
+
+  /// Máy lạnh đang được đặt ở mức nào (null = chưa có lệnh nào từng chạy).
+  /// Khác `_comfort.tSet` — xem chú thích trong models/ac_state.dart.
+  AcState? _ac;
   List<Device> _devices = const [];
   bool _wsConnected = false;
   UserProfile? _profile;
@@ -63,6 +68,7 @@ class AppState extends ChangeNotifier {
   ComfortPreview get comfort => _comfort;
   LiveReading? get indoor => _indoor;
   LiveReading? get outdoor => _outdoor;
+  AcState? get ac => _ac;
   List<Device> get devices => _devices;
   bool get wsConnected => _wsConnected;
   UserProfile? get profile => _profile;
@@ -79,6 +85,10 @@ class AppState extends ChangeNotifier {
     }));
     _subs.add(_live.outdoor.listen((r) {
       _outdoor = r;
+      notifyListeners();
+    }));
+    _subs.add(_live.ac.listen((a) {
+      _ac = a;
       notifyListeners();
     }));
     _subs.add(_live.devices.listen((d) {
