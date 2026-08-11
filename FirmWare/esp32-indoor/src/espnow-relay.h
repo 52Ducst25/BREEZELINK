@@ -15,8 +15,11 @@
 namespace EspNowRelay {
 
 /// Được gọi trong loop() cho từng gói nhận được, theo đúng thứ tự đến.
-typedef void (*Handler)(const char *deviceUuid, const uint8_t mac[6],
-                        float temp, float humidity);
+///
+/// Truyền cả struct chứ không bóc sẵn từng trường: gói nay mang thêm node_kind
+/// và corner, và mỗi lần thêm trường mà đổi chữ ký hàm là mọi bên gọi phải sửa
+/// theo — thứ dễ quên đúng lúc đang thêm một loại node mới.
+typedef void (*Handler)(const AcEspNowPacket &pkt, const uint8_t mac[6]);
 
 /// Khởi tạo ESP-NOW. Gọi SAU khi WiFi đã kết nối: ESP-NOW dùng chính kênh mà
 /// WiFi đang bám, nên phải để WiFi chốt kênh trước.

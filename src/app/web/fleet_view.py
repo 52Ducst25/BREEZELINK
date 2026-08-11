@@ -22,7 +22,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.device import Device, DeviceStatus
 from app.models.organization import Organization
-from app.services import device_service, organization_service, redis_state_service
+from app.services import (
+    device_service,
+    organization_service,
+    redis_room_state_service,
+    redis_state_service,
+)
 from app.web import dashboard_view
 
 
@@ -66,9 +71,12 @@ async def build(session: AsyncSession) -> dict:
     devices = await device_service.list_all_devices(session)
     orgs = {o.id: o for o in await organization_service.list_orgs(session)}
 
-    # One Redis round-trip per ORG, not per device: both nodes of a household
-    # read from the same two keys, so caching per org collapses the fan-out.
-    state_cache: dict[uuid.UUID, tuple[dict | None, dict | None]] = {}
+    # One Redis round-trip set per ORG, not per device: every node of a
+    # household reads from the same three keys, so caching per org collapses
+    # the fan-out. The third entry maps device_id -> that corner sensor's OWN
+    # reading, because showing all four corners the household median would hide
+    # exactly what this page exists to reveal — the one corner that disagrees.
+    state_cache: dict[uuid.UUID, tuple[dict | None, dict | None, dict[str, dict]]] = {}
     groups: dict[uuid.UUID, FleetGroup] = {}
 
     for device in devices:
@@ -78,6 +86,11 @@ async def build(session: AsyncSession) -> dict:
 
         if device.org_id not in state_cache:
             org_key = str(device.org_id)
+            rooms = {
+                r.device_id: {"t": r.temp, "h": r.humidity}
+                for r in await redis_room_state_service.list_room_states(org_key)
+                if r.age_sec <= redis_room_state_service.ROOM_MAX_AGE_SEC
+            }
             state_cache[device.org_id] = (
                 dashboard_view.reading_from_state(
                     await redis_state_service.get_indoor_state(org_key)
@@ -85,10 +98,16 @@ async def build(session: AsyncSession) -> dict:
                 dashboard_view.reading_from_state(
                     await redis_state_service.get_outdoor_state(org_key)
                 ),
+                rooms,
             )
-        indoor, outdoor = state_cache[device.org_id]
-        is_outdoor = device.node_type.value == "outdoor"
-        reading = outdoor if is_outdoor else indoor
+        indoor, outdoor, rooms = state_cache[device.org_id]
+        kind = device.node_type.value
+        if kind == "outdoor":
+            reading = outdoor
+        elif kind == "room":
+            reading = rooms.get(str(device.id))  # None = this corner is silent
+        else:
+            reading = indoor
 
         # Judged on the plain hot/cold scale, not against a comfort target: the
         # fleet page deliberately does not run the comfort pipeline per

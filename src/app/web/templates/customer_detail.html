@@ -102,7 +102,8 @@
         <td>
           <select class="select select-sm" form="edit-{{ d.id }}" name="node_type">
             <option value="outdoor" {% if d.node_type.value == 'outdoor' %}selected{% endif %}>Ngoài trời</option>
-            <option value="indoor" {% if d.node_type.value == 'indoor' %}selected{% endif %}>Trong nhà</option>
+            <option value="indoor" {% if d.node_type.value == 'indoor' %}selected{% endif %}>Gateway trong nhà</option>
+            <option value="room" {% if d.node_type.value == 'room' %}selected{% endif %}>Cảm biến phòng</option>
           </select>
         </td>
         <td><input class="input input-sm" form="edit-{{ d.id }}" name="location" value="{{ d.location or '' }}" placeholder="Phòng khách"></td>
@@ -157,8 +158,11 @@
     </label>
     <label class="ac-field">
       <span class="ac-field__label">Loại</span>
+      {# "Cảm biến phòng" first: it is the only kind a household gets more than
+         one of, so it is the option this form is used for most often. #}
       <select class="select" name="node_type">
-        <option value="indoor">Trong nhà</option>
+        <option value="room">Cảm biến phòng</option>
+        <option value="indoor">Gateway trong nhà</option>
         <option value="outdoor">Ngoài trời</option>
       </select>
     </label>

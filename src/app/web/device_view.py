@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.models.device import Device
-from app.models.enums import NodeRole
+from app.models.enums import NodeRole, NodeType
 from app.services import comfort_preview_service, telemetry_service
 from app.web import charts
 
@@ -37,10 +37,13 @@ async def build_context(session: AsyncSession, org_id: uuid.UUID, device: Device
         session, device_id=device.id, limit=_CHART_SAMPLES
     )
 
-    # A setpoint reference line only makes sense on the indoor node's temp
-    # chart (outdoor has no target — see dashboard_view.classify_outdoor).
+    # A setpoint reference line only makes sense where the target applies:
+    # inside. Room sensors get it too — the setpoint is what the algorithm is
+    # steering THEIR readings toward, so a corner sitting stubbornly above the
+    # line is the whole point of charting it separately. Outdoor has no target
+    # (see dashboard_view.classify_outdoor).
     setpoint = None
-    if device.node_type.value == "indoor":
+    if device.node_type in (NodeType.indoor, NodeType.room):
         comfort = await comfort_preview_service.build_preview(session, str(org_id))
         setpoint = comfort.t_set
 
@@ -52,9 +55,33 @@ async def build_context(session: AsyncSession, org_id: uuid.UUID, device: Device
         )
     ).scalars().first()
 
+    # Every corner sensor of this household, oldest first. The position in this
+    # list is only a SUGGESTED ``ROOM_CORNER`` label — the node's real identity is
+    # its ``device_uuid``, which travels inside every ESP-NOW packet.
+    #
+    # That distinction matters: two corners flashed with the same label are
+    # HARMLESS (each still has its own topic and still votes in the median, the
+    # panel just prints the same label twice). Suggesting a distinct number
+    # anyway saves the installer from having to invent one, and makes the wall
+    # display readable without looking up uuids.
+    room_nodes = list(
+        (
+            await session.execute(
+                select(Device)
+                .where(Device.org_id == org_id, Device.node_type == NodeType.room)
+                .order_by(Device.created_at.asc(), Device.id.asc())
+            )
+        ).scalars().all()
+    )
+    room_index = next(
+        (i for i, r in enumerate(room_nodes) if r.id == device.id), None
+    )
+
     settings = get_settings()
     return {
         "device": device,
+        "room_nodes": room_nodes,
+        "room_index": room_index,
         "latest": readings[-1] if readings else None,
         "temp_series": charts.build_series([r.temp for r in readings], setpoint, "°C"),
         "hum_series": charts.build_series([r.humidity for r in readings], None, "%"),

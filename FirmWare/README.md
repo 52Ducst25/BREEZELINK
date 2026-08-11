@@ -1,11 +1,18 @@
 # BreezeLink — Firmware node
 
-Hai node cảm biến cho **1 nhà** (khách hàng *Khách hàng*):
+Sáu thiết bị cho **1 nhà** (khách hàng *Khách hàng*):
 
 | Thư mục | Bo | Loại node | Hiện trên app/web |
 |---|---|---|---|
-| `esp32-indoor/` | **QR Box Advance Touch Screen** (ESP32‑WROOM‑32E‑N8 + màn 2.8") | **Trong nhà** — master + IR + màn cảm ứng | "Trong nhà" |
-| `esp32-outdoor/` | ESP32 DevKit V1 | **Ngoài trời** — slave ESP‑NOW | "Ngoài trời" |
+| `esp32-indoor/` | **QR Box Advance Touch Screen** (ESP32‑WROOM‑32E‑N8 + màn 2.8") | **Gateway** — thu ESP‑NOW, IR, màn cảm ứng, BLE tới UNO Q, **không cảm biến** | "Gateway trong nhà" |
+| `esp32-room/` | 4× **ESP32‑C3‑DevKitM‑1** + DHT22 | **Cảm biến phòng** — slave ESP‑NOW | "Cảm biến trong phòng" |
+| `esp32-outdoor/` | ESP32 DevKit V1 | **Ngoài trời** — slave ESP‑NOW | "Nút ngoài trời" |
+| (không ở đây) | Arduino UNO Q | Edge AI — nối gateway qua **Bluetooth**, xem [`../edge-ai/`](../edge-ai/) | — |
+
+> **GATEWAY KHÔNG CÒN ĐO NHIỆT ĐỘ.** Cả DHT22 lẫn SHT3x đã bỏ khỏi firmware của nó:
+> một cảm biến treo tường chỉ đo được *cái tường đó*, còn bốn góc phòng chênh nhau
+> 3–4 °C là chuyện thường. Số "trong nhà" nay là **trung vị** các góc còn tươi
+> (`esp32-indoor/src/room-registry.h`).
 
 > **CẢ HAI NODE ĐỀU LÀ ESP32.** Trước đây mỗi node một dòng chip (indoor ESP32‑S3,
 > outdoor ESP8266) nên hai bên dùng hai bộ API ESP‑NOW khác hẳn nhau — sửa giao
@@ -38,14 +45,17 @@ DHT có 2 loại: **module 3 chân** (đã có trở kéo — nối thẳng) ho�
 Muốn đổi chân: sửa `DHT_PIN` trong `src/config.h`. Nhớ đặt `DHT_TYPE` đúng loại —
 khai sai vẫn đọc được (checksum vẫn pass) nhưng ra số vô lý (~1.8°C / ~23%).
 
-### Node trong nhà (QR Box Advance) — SHT3x qua I²C, **KHÔNG có DHT**
+### Node góc phòng (ESP32‑C3‑DevKitM‑1) — DHT22 trên GPIO4
 
-Bo này dùng hết sạch GPIO cho màn/cảm ứng/RTC, **GPIO4 đã là I²C SCL** nên không
-còn chân nào cho một dây DHT. Nhiệt/ẩm đo bằng **SHT30/31/35 ở địa chỉ I²C 0x44**,
-câu vào bus I²C sẵn có (J1: chân 1 = 3V3, 2 = SCL, 3 = SDA, 6 = GND).
+Bốn bo giống hệt nhau, chỉ khác `DEVICE_UUID`. DATA → GPIO4, **trở kéo 4.7k lên 3.3V**,
+nuôi bằng **3.3V không phải 5V**. Chân phải tránh trên C3 và lý do:
+[`esp32-room/README.md`](esp32-room/README.md).
 
-Đừng thay bằng AHT20 — nó ở địa chỉ 0x38, **trùng chip cảm ứng FT6236**.
-Chi tiết: [`Interface/README.md` §3](Interface/README.md).
+### Gateway (QR Box Advance) — **KHÔNG cắm cảm biến nào**
+
+Bo này từng có tuỳ chọn SHT3x trên I²C 0x44; đã bỏ hẳn khỏi firmware. Cắm vào cũng
+không có tác dụng — không còn mã nào đọc nó, và có đọc thì cũng chỉ thêm một nguồn
+số thứ hai khiến màn nhảy qua lại giữa nhiệt độ của cái tường và nhiệt độ căn phòng.
 
 ---
 
@@ -76,11 +86,16 @@ cùng kênh). Với env đó chỉ `WIFI_SSID` có tác dụng, và cả khối 
 ## 3. Build & nạp (PlatformIO)
 
 ```bash
-# Node trong nhà (QR Box Advance) — USB-TTL cắm vào cổng P3
+# Gateway trong nhà (QR Box Advance) — USB-TTL cắm vào cổng P3
 cd esp32-indoor
 cp src/config.h.example src/config.h      # rồi điền như §2
 pio run -e qrbox-touch -t upload --upload-port COMx
 pio device monitor -p COMx -b 115200      # xem log
+
+# 4 node góc phòng — nạp LẦN LƯỢT, đổi DEVICE_UUID giữa mỗi lần
+cd esp32-room
+cp src/config.h.example src/config.h      # WIFI_SSID (chỉ dò kênh) + DEVICE_UUID
+pio run -e esp32c3-room -t upload --upload-port COMz
 
 # Node ngoài trời (ESP32 DevKit V1)
 cd esp32-outdoor
@@ -130,25 +145,24 @@ MQTT ... connected
 
 ---
 
-## 6. Node trong nhà `esp32-indoor/` (QR Box Advance + IR + màn cảm ứng)
+## 6. Gateway `esp32-indoor/` (QR Box Advance + IR + màn cảm ứng)
 
-Node này gộp **4 vai trò** vào một bo: đo nhiệt/ẩm (SHT3x) · điều khiển máy lạnh bằng
-hồng ngoại · làm master nhận ESP‑NOW từ node ngoài trời · hiển thị + điều khiển tại chỗ
-trên màn cảm ứng 2.8".
+Bo này gộp **5 vai trò** — nhưng **đo nhiệt độ không còn là một trong số đó**: thu ESP‑NOW
+từ 4 node góc phòng và node ngoài trời · trung chuyển lên MQTT hộ từng node · điều khiển
+máy lạnh bằng hồng ngoại · hiển thị + điều khiển tại chỗ trên màn 2.8" · nói chuyện với
+Arduino UNO Q qua Bluetooth. Cả năm đều là *chuyển tiếp* và *thi hành*; không vai trò nào
+tạo ra một phép đo.
 
 Thiết kế giao diện, cách đọc ngược sơ đồ chân từ schematic, và lý do phải tách hai lõi:
 [`Interface/README.md`](Interface/README.md).
 
-### 6.1 Vì sao gộp thay vì tách "indoor" và "indoor‑master"
+### 6.1 Vì sao gateway nối MQTT thẳng thay vì làm một slave nữa
 
-Hai ràng buộc từ backend, không phải lựa chọn thẩm mỹ:
-
-1. ~~**Mỗi org chỉ được có ĐÚNG 1 node `node_type=indoor`.**~~ — *đã sửa 21/07/2026.*
-   `get_device_by_org_and_node()` từng dùng `scalar_one_or_none()`, nên device "indoor" thứ
-   hai làm worker ném `MultipleResultsFound` và toàn bộ luồng điều khiển tự động đứng. Nay
-   nó **suy biến an toàn**: chọn node indoor cũ nhất + ghi log cảnh báo, không crash nữa.
-   Tạo nhiều node indoor giờ **không làm sập gì**, nhưng **chỉ node cũ nhất được điều khiển**
-   cho tới khi làm xong Phase 2 (quyết định comfort riêng cho từng phòng).
+1. **Đích của lệnh là một lookup, không phải suy luận.** `get_gateway_device()` chọn
+   `role=master` trước (và **từ chối** node `room` — chúng không có phiên MQTT nào), rồi mới
+   rơi về `node_type=indoor` cũ nhất. Nên **phải đặt vai trò master cho bo này trên web**;
+   không đặt thì hộ nào có hai hàng indoor sẽ bị lái nhầm node, và triệu chứng là lệnh
+   publish thành công mà máy lạnh không nhúc nhích.
 2. **Lệnh IR quá to để đi qua ESP‑NOW.** `command_publisher.py` gửi kèm `ir_raw` — mảng vài
    trăm mốc thời gian µs, cỡ vài KB. ESP‑NOW giới hạn **250 byte/gói**, muốn trung chuyển
    qua master thì phải tự viết giao thức chia mảnh + ghép lại + báo thiếu mảnh. Nối MQTT

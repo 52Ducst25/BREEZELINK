@@ -117,7 +117,27 @@ def _format_number(value, digits: int = 1) -> str:
     return f"{value:.{digits}f}"
 
 
+_NODE_TYPE_LABELS = {
+    "outdoor": "Nút ngoài trời",
+    "indoor": "Gateway trong nhà",
+    "room": "Cảm biến trong phòng",
+}
+
+
+def _node_type_label(node_type) -> str:
+    """Vietnamese name of a ``NodeType``, for every page that shows a node.
+
+    A filter rather than the inline ``'A' if x == 'outdoor' else 'B'`` this
+    replaces: that shape silently mislabels anything that is not the two kinds
+    it knew about, so adding the room sensors would have shown four corner
+    nodes as "Nút trong nhà" on three separate pages with nothing failing.
+    """
+    value = getattr(node_type, "value", node_type)
+    return _NODE_TYPE_LABELS.get(str(value), str(value))
+
+
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
+templates.env.filters["node_type"] = _node_type_label
 templates.env.filters["datetime"] = _format_datetime
 templates.env.filters["ago"] = _format_ago
 templates.env.filters["online"] = _is_online

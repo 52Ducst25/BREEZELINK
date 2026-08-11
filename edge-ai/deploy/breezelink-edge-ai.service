@@ -1,0 +1,34 @@
+[Unit]
+Description=BreezeLink Edge AI (comfort tại chỗ + dự phòng khi mất cloud)
+Documentation=file:///opt/breezelink/edge-ai/README.md
+# Chỉ CHỜ mạng, không YÊU CẦU: broker có thể nằm trong LAN và bật sau, còn dịch
+# vụ này tự nối lại theo backoff. Đặt Requires= sẽ biến một broker khởi động
+# chậm thành một dịch vụ không bao giờ chạy.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=breezelink
+Group=breezelink
+WorkingDirectory=/opt/breezelink/edge-ai
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=/opt/breezelink/edge-ai/.env
+ExecStart=/opt/breezelink/edge-ai/.venv/bin/python -m edge_ai.main
+
+# Restart=always chứ không on-failure: dịch vụ thoát 0 khi nhận SIGTERM, và một
+# lần dừng ngoài ý muốn vẫn phải quay lại. Ngoại lệ là lỗi cấu hình — nó thoát 1
+# và RestartSec=10 giữ nhịp thử lại đủ thưa để dòng log giải thích không bị trôi.
+Restart=always
+RestartSec=10
+
+# Siết quyền: dịch vụ này chỉ cần đọc mã nguồn của chính nó và mở một socket
+# MQTT. Nó KHÔNG cần ghi vào bất cứ đâu.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/opt/breezelink
+
+[Install]
+WantedBy=multi-user.target

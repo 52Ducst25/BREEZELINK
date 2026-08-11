@@ -22,16 +22,19 @@ static volatile uint32_t nRecv = 0, nDrop = 0;
 static void enqueue(const uint8_t *mac, const uint8_t *data, int len) {
   // Bỏ ngay gói không đúng khuôn: trên cùng một kênh có thể có ESP-NOW của hệ
   // khác, đọc bừa sẽ ra số rác rồi đẩy thẳng lên cloud.
-  if (len != (int)sizeof(AcEspNowPacket)) return;
-  const AcEspNowPacket *p = (const AcEspNowPacket *)data;
-  if (p->magic != AC_ESPNOW_MAGIC || p->version != AC_ESPNOW_VERSION) return;
+  //
+  // acEspNowParse() nhận CẢ v1 (43 byte) lẫn v2 (45 byte) — node ngoài trời đã
+  // lắp ngoài thực địa vẫn chạy v1 và firmware nó không có OTA, nên gateway phải
+  // hiểu được nó. Gói v1 được điền node_kind = OUTDOOR; xem espnow-message.h.
+  AcEspNowPacket parsed;
+  if (!acEspNowParse(data, len, &parsed)) return;
 
   uint8_t next = (uint8_t)((head + 1) % QUEUE_SIZE);
   if (next == tail) {           // đầy — thà bỏ gói mới còn hơn ghi đè gói chưa gửi
     nDrop++;
     return;
   }
-  memcpy(&queue[head].pkt, data, sizeof(AcEspNowPacket));
+  queue[head].pkt = parsed;
   if (mac) memcpy(queue[head].mac, mac, 6);
   else     memset(queue[head].mac, 0, 6);
   head = next;
@@ -60,7 +63,7 @@ void poll(Handler handler) {
     Slot s = queue[tail];
     tail = (uint8_t)((tail + 1) % QUEUE_SIZE);
     s.pkt.device_uuid[sizeof(s.pkt.device_uuid) - 1] = '\0';  // phòng gói thiếu '\0'
-    handler(s.pkt.device_uuid, s.mac, s.pkt.temp, s.pkt.humidity);
+    handler(s.pkt, s.mac);
   }
 }
 

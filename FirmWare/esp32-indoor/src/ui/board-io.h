@@ -27,23 +27,6 @@ bool buzzerEnabled();
 void beep(uint16_t ms = 40, uint16_t freq = 2700);
 void buzzerTick();
 
-// --- Cảm biến nhiệt/ẩm SHT3x (I2C 0x44) ---
-// ---------------------------------------------------------------------------
-//  THAY CHO DHT, không phải nâng cấp cho vui: trên bo này GPIO4 đã là I2C SCL,
-//  và không còn GPIO trống nào cho một dây DHT (Interface/README.md §3.1). Bus
-//  I2C thì đã sẵn trở kéo và đã chạy cho DS1307, thừa chỗ cho một địa chỉ nữa.
-//
-//  0x44 chọn có lý do: KHÔNG dùng AHT20 — nó ở 0x38, trùng chip cảm ứng FT6236.
-//
-//  CHỈ GỌI TỪ TÁC VỤ UI: bus I2C thuộc về tác vụ đó. loop() lấy số đo qua
-//  Ui::readIndoor() chứ không tự đọc bus.
-// ---------------------------------------------------------------------------
-bool sht3xBegin();
-bool sht3xPresent();
-/// Đo một lần. Trả false nếu chip không trả lời hoặc CRC sai — KHÔNG bao giờ
-/// trả số đoán. Chặn ~20ms (thời gian chuyển đổi của chip).
-bool sht3xRead(float &tempC, float &humidity);
-
 // --- DS1307 (I2C 0x68) ---
 struct Clock { uint8_t hh, mm, ss; };
 

@@ -1,0 +1,4 @@
+.pio/
+# config.h chứa ORG_ID của một khách hàng thật — không commit.
+# Bản mẫu là src/config.h.example.
+src/config.h

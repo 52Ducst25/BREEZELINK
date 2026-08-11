@@ -5,7 +5,7 @@ nhiệt độ/độ ẩm trong và ngoài nhà, một thuật toán comfort tín
 điện, và người dùng điều khiển máy lạnh qua ứng dụng điện thoại. Nhà quản trị (bên bán)
 quản lý khách hàng, thiết bị và phát hành bản cập nhật app qua một trang web riêng.
 
-Dự án gồm bốn phần chạy chung một backend:
+Dự án gồm năm phần chạy chung một backend:
 
 - **Web quản trị** (SSR, dành cho **nhà quản trị/bên bán**) — quản lý khách hàng, cấp mã
   kích hoạt, quản lý node, tinh chỉnh thuật toán, phát hành OTA.
@@ -13,9 +13,12 @@ Dự án gồm bốn phần chạy chung một backend:
   điều khiển điều hoà, tự cập nhật qua OTA.
 - **API + Worker** (FastAPI + MQTT) — phục vụ cả web lẫn app từ **một tầng nghiệp vụ duy
   nhất**, nên số liệu trên web và trên app không bao giờ lệch nhau.
-- **Firmware ESP32** (2 node mỗi hộ) — node **trong nhà** mang màn cảm ứng 2.8", đo
-  nhiệt/ẩm, phát hồng ngoại điều khiển máy lạnh và làm cầu nối lên cloud; node **ngoài
-  trời** đo nhiệt/ẩm ngoài trời rồi bắn về qua ESP-NOW, không cần WiFi.
+- **Firmware ESP32** (6 thiết bị mỗi hộ) — **4 node cảm biến** ở bốn góc phòng
+  (ESP32-C3 + DHT22) và **1 node ngoài trời**, tất cả bắn ESP-NOW về **1 gateway**
+  đặt gần máy lạnh; gateway mang màn cảm ứng 2.8", phát hồng ngoại và làm cầu nối
+  lên cloud — **nó không đo nhiệt độ**.
+- **Edge AI** (Arduino UNO Q) — nối gateway qua **Bluetooth**, tính comfort ngay
+  trong nhà và **tự lái máy lạnh khi mất kết nối cloud**; bình thường chỉ đề xuất.
 
 ---
 
@@ -56,16 +59,19 @@ Dự án gồm bốn phần chạy chung một backend:
 - **Số đo trực tiếp** — trong/ngoài nhà, biểu đồ lịch sử.
 - **Tự cập nhật OTA** — báo có bản mới, tải và cài trực tiếp.
 
-### Bảng điều khiển tại chỗ (node trong nhà)
+### Bảng điều khiển tại chỗ (gateway trong nhà)
 
-Màn cảm ứng 2.8" trên node trong nhà, dùng được cả khi mất mạng:
+Màn cảm ứng 2.8" trên gateway, dùng được cả khi mất mạng:
 
-- **Trang chủ** — nhiệt/ẩm trong nhà và ngoài trời, chế độ + nhiệt độ đặt hiện tại, huy
-  hiệu cho biết đang **TỰ ĐỘNG** hay **GHI ĐÈ**.
+- **Trang chủ** — nhiệt/ẩm trong nhà (trung vị các góc) và ngoài trời, chế độ + nhiệt độ
+  đặt hiện tại, huy hiệu cho biết đang **TỰ ĐỘNG** hay **GHI ĐÈ**. Thiếu góc nào thì hiện
+  thêm "3/4 GÓC" — đủ góc thì nhãn đó biến mất hẳn.
 - **Điều khiển** — chọn chế độ, chỉnh nhiệt độ, bắn hồng ngoại ngay tại chỗ. Tổ hợp chưa
   học mã thì nút bị làm mờ, không có phím chết.
-- **Thông tin** — 8 dòng chẩn đoán: WiFi, IP, sóng, MQTT, đếm gói ESP-NOW, tuổi số đo
-  ngoài trời, số mã IR, phiên bản firmware.
+- **Thông tin** — 8 dòng chẩn đoán: WiFi, IP, sóng, MQTT, **nhiệt độ từng góc phòng**,
+  tuổi số đo ngoài trời, số mã IR, phiên bản firmware. Dòng góc phòng phân biệt "—" (góc
+  mất kết nối) với "??" (góc còn sống nhưng cảm biến hỏng) — hai ca dẫn tới hai việc phải
+  làm khác hẳn nhau.
 - **Cài đặt** — độ sáng (giữ để chạy nhanh), âm báo, khởi động lại, **danh sách mã IR đã
   học** (xoá được từng mã), **nhật ký 8 lệnh gần nhất** từ máy chủ kèm kết quả thi hành.
 
@@ -87,10 +93,20 @@ Mọi thao tác khó lùi đều hỏi lại bằng một hộp xác nhận nêu
 
 ```mermaid
 flowchart LR
-  subgraph Edge["Phần cứng (nhà khách) — 2 node"]
+  subgraph Edge["Phần cứng (nhà khách) — 6 thiết bị"]
+    R0["ESP32-C3 · GÓC 0<br/>DHT22"]
+    R1["ESP32-C3 · GÓC 1<br/>DHT22"]
+    R2["ESP32-C3 · GÓC 2<br/>DHT22"]
+    R3["ESP32-C3 · GÓC 3<br/>DHT22"]
     OUT["ESP32 NGOÀI TRỜI · slave<br/>DHT22 · không dùng WiFi"]
-    ESP["ESP32 TRONG NHÀ · master<br/>màn cảm ứng 2.8 inch<br/>cảm biến T/RH + phát/học IR"]
+    ESP["GATEWAY TRONG NHÀ<br/>màn cảm ứng 2.8 inch<br/>phát/học IR · KHÔNG có cảm biến"]
+    UNOQ["Arduino UNO Q<br/>Edge AI · dự phòng cloud"]
+    R0 -->|ESP-NOW| ESP
+    R1 -->|ESP-NOW| ESP
+    R2 -->|ESP-NOW| ESP
+    R3 -->|ESP-NOW| ESP
     OUT -->|ESP-NOW broadcast| ESP
+    ESP <-->|Bluetooth GATT| UNOQ
   end
 
   subgraph Cloud["Server (Docker)"]
@@ -114,17 +130,44 @@ flowchart LR
   APP["App Flutter<br/>(khách hàng)"] -->|HTTPS| CF
 ```
 
-**Luồng dữ liệu:** node ngoài trời bắn số đo qua ESP-NOW về node trong nhà; node trong nhà
-đẩy cả hai bộ số lên MQTT → worker cập nhật trạng thái (Redis) + lịch sử (Postgres) và tính
-nhiệt độ đặt → phát lệnh IR về node trong nhà. API phục vụ web + app; Redis pub/sub đẩy cập
+**Luồng dữ liệu:** bốn node góc phòng và node ngoài trời đều bắn số đo qua ESP-NOW về
+gateway; gateway đứng tên **từng node** đẩy lên MQTT → worker lưu
+lịch sử (Postgres), lấy **trung vị** các góc còn tươi làm nhiệt độ trong nhà (Redis) và
+tính nhiệt độ đặt → phát lệnh IR về gateway. API phục vụ web + app; Redis pub/sub đẩy cập
 nhật realtime tới WebSocket. Cloudflare Tunnel là đường duy nhất từ internet vào — không
 cổng nào mở ra `0.0.0.0`.
 
+**Vì sao bốn cảm biến chứ không một:** một cảm biến treo tường không nói được nhiệt độ của
+phòng, nó nói nhiệt độ của **cái tường đó**. Góc có nắng chiếu, góc dưới miệng gió và góc
+sau tủ chênh nhau 3–4 °C là chuyện thường. Backend lấy **trung vị** (không phải trung bình
+cộng) nên một góc bất thường không kéo được nhiệt độ đặt đi — trung bình cộng thì có, vĩnh
+viễn, và triệu chứng duy nhất là "ở trong nhà thấy sai sai".
+
+**Vì sao mọi cảm biến đi ESP-NOW, còn Bluetooth chỉ dành cho UNO Q:** gói ESP-NOW chở
+được 250 byte nên mỗi node mang thẳng `device_uuid` 32 ký tự của chính nó — gateway
+**không giữ bảng tra nào**, thêm hay bớt một góc chỉ cần nạp bo mới. Gói BLE advertising
+cổ điển chỉ có 31 byte, chở không nổi uuid, nên sẽ buộc gateway giữ một mảng uuid và nạp
+lại mỗi lần đổi node; lệch một ô là số đo của góc A nộp lên cloud dưới tên góc B —
+biểu đồ vẫn có số, không lỗi ở đâu cả.
+
+Bluetooth thì đúng chỗ cho đường **gateway ↔ UNO Q**: nó **hai chiều** (UNO Q phải ra
+lệnh ngược), và GATT thương lượng được MTU hàng trăm byte nên chở lọt ảnh chụp cả bốn góc.
+
+**Vì sao UNO Q nối gateway bằng Bluetooth chứ không qua MQTT:** lớp dự phòng phải sống
+sót đúng cái sự cố nó sinh ra để chịu đựng. Đi qua broker nghĩa là khi mất mạng — đúng
+lúc cần nó nhất — nó cũng mất luôn đường tới gateway. BLE là liên kết trực tiếp giữa hai
+thiết bị đặt cùng phòng: không router, không internet, không broker.
+
 **Vì sao node ngoài trời không tự nối WiFi:** nó chỉ cần gửi 43 byte mỗi 15 giây. ESP-NOW
 bỏ được toàn bộ bắt tay WiFi/DHCP/TCP nên tốn ít điện hơn hẳn (quan trọng nếu chạy pin), và
-node đó **không cần tài khoản MQTT riêng** — node trong nhà đứng tên publish hộ. Đổi lại,
-mất node trong nhà là mất luôn số ngoài trời; bản dự phòng tự nối WiFi vẫn còn trong repo
+node đó **không cần tài khoản MQTT riêng** — gateway đứng tên publish hộ. Đổi lại,
+mất gateway là mất luôn số ngoài trời; bản dự phòng tự nối WiFi vẫn còn trong repo
 (`pio run -e esp32-wifi`) để tách lỗi khi ESP-NOW trục trặc.
+
+**Ba radio trên một ăng-ten:** gateway chạy đồng thời WiFi/MQTT, ESP-NOW và BLE trên
+cùng khối 2.4 GHz. Thứ tự ưu tiên được cài vào thiết kế: gateway **không quét BLE** — nó
+chỉ quảng bá và giữ một kết nối GATT, còn quét mới là thứ ăn sóng liên tục. MQTT là
+đường **duy nhất** để lệnh máy lạnh đi xuống nên nó được nhường trước.
 
 **Vì sao node trong nhà nối MQTT trực tiếp:** lệnh từ backend mang `ir_raw` — mảng vài trăm
 mốc thời gian µs, cỡ vài KB. ESP-NOW giới hạn 250 byte/gói nên trung chuyển qua master sẽ
@@ -161,8 +204,9 @@ Chống dao động: `deadband` (vùng trễ quanh nhiệt độ đặt) + `dwel
 | CSDL / cache | PostgreSQL 15, Redis 7 |
 | IoT | MQTT (EMQX 5 / Mosquitto), paho-mqtt |
 | App | Flutter (Dart), Dio, package_info_plus, url_launcher |
-| Firmware | C++ (Arduino-ESP32), PlatformIO, LVGL 8 + TFT_eSPI, IRremoteESP8266, ESP-NOW |
-| Phần cứng | ESP32-WROOM-32 · màn ST7789 2.8" cảm ứng · DHT22/SHT3x · DS1307 · LED IR |
+| Firmware | C++ (Arduino-ESP32), PlatformIO, LVGL 8 + TFT_eSPI, IRremoteESP8266, ESP-NOW, NimBLE |
+| Edge AI | Python 3.11+, bleak (BLE) — chạy trên Debian của Arduino UNO Q |
+| Phần cứng | ESP32-WROOM-32 (gateway) · 4× ESP32-C3-MINI-1 · ESP32 DevKit (ngoài trời) · Arduino UNO Q · màn ST7789 2.8" cảm ứng · DHT22 · DS1307 · LED IR |
 | Hạ tầng | Docker Compose, Cloudflare Tunnel |
 | Web admin | SSR Jinja2 + design system "Titanium Command" (CSS thuần, không CDN) |
 
@@ -185,13 +229,19 @@ AirConditioner/
 │   ├── lib/services/      #   API client, OTA, WebSocket…
 │   └── assets/icon/       #   Icon app
 ├── FirmWare/              # Firmware ESP32 (PlatformIO)
-│   ├── esp32-indoor/      #   Node TRONG NHÀ: master + IR + màn cảm ứng
+│   ├── esp32-indoor/      #   GATEWAY: IR + màn + thu ESP-NOW + BLE tới UNO Q (KHÔNG cảm biến)
 │   │   ├── src/ui/        #     Giao diện LVGL (chạy trên lõi 0)
-│   │   ├── src/ir-*.{h,cpp}  #  Phát/học IR + kho mã trong NVS
+│   │   ├── src/ir-*.{h,cpp}     #  Phát/học IR + kho mã trong NVS
+│   │   ├── src/unoq-link.*      #  GATT server cho Arduino UNO Q
+│   │   ├── src/room-registry.*  #  Bảng 4 góc + trung vị
 │   │   └── tools/         #     Sinh font/ảnh LVGL, đọc log serial
+│   ├── esp32-room/        #   4 NODE GÓC PHÒNG: ESP32-C3 + DHT22, slave ESP-NOW
 │   ├── esp32-outdoor/     #   Node NGOÀI TRỜI: slave ESP-NOW (+ bản WiFi dự phòng)
-│   ├── shared/            #   Khuôn gói tin ESP-NOW dùng chung hai node
+│   ├── shared/            #   Khuôn gói ESP-NOW + radio slave + giao thức BLE với UNO Q
 │   └── Interface/         #   Thiết kế giao diện + sơ đồ chân (README riêng)
+├── edge-ai/               # Dịch vụ Edge AI cho Arduino UNO Q
+│   ├── edge_ai/           #   room_store, predictor, cloud_watch, controller
+│   └── deploy/            #   Unit systemd
 ├── docker/                # Dockerfile + compose (local + vps)
 ├── scripts/               # deploy.sh, seed_demo.py
 ├── docs/                  # Tài liệu thiết kế
@@ -244,26 +294,38 @@ App mặc định trỏ tới `https://admin.vi-du.com` — đổi trong màn đ
 từng node). Lấy giá trị ở web quản trị → *Khách hàng* → mở node → mục **"Nạp firmware"**.
 
 ```bash
-# Node trong nhà (bo QR Box Advance, USB-TTL cắm vào cổng P3)
+# 1) GATEWAY trong nhà (bo QR Box Advance, USB-TTL cắm vào cổng P3)
 cd FirmWare/esp32-indoor
-cp src/config.h.example src/config.h        # rồi điền WiFi + ORG_ID/DEVICE_UUID/MQTT_PASSWORD
+cp src/config.h.example src/config.h   # WiFi + ORG_ID/DEVICE_UUID/MQTT_PASSWORD
 pio run -e qrbox-touch -t upload --upload-port COMx
 
-# Node ngoài trời (ESP32 DevKit V1) — MẶC ĐỊNH là bản ESP-NOW
+# 2) BỐN node góc phòng (ESP32-C3-DevKitM-1) — nạp LẦN LƯỢT, mỗi bo một DEVICE_UUID
+cd FirmWare/esp32-room
+cp src/config.h.example src/config.h   # WIFI_SSID (chỉ để dò kênh) + DEVICE_UUID của góc 1
+pio run -e esp32c3-room -t upload --upload-port COMy
+#   đổi DEVICE_UUID (+ ROOM_CORNER, thuần nhãn) rồi nạp bo thứ hai, ba, tư.
+
+# 3) Node ngoài trời (ESP32 DevKit V1) — MẶC ĐỊNH là bản ESP-NOW
 cd FirmWare/esp32-outdoor
 cp src/config.h.example src/config.h
-pio run -e esp32-espnow -t upload --upload-port COMy
+pio run -e esp32-espnow -t upload --upload-port COMz
 ```
 
-Bốn điều dễ mất thời gian nhất nếu không biết trước:
+Năm điều dễ mất thời gian nhất nếu không biết trước:
 
+- **Mỗi node góc phòng phải có `DEVICE_UUID` riêng** — lấy từ hàng devices của chính nó
+  trên web. `ROOM_CORNER` thì chỉ là **nhãn hiển thị**, hai bo trùng số góc là vô hại:
+  cả hai vẫn có topic riêng, vẫn vào trung vị, chỉ là màn ghi nhãn trùng nhau.
+  *Kiểm chắc chắn:* trang chủ trên màn gateway phải hiện đủ số góc, và trang Thông tin
+  liệt kê đủ ngần ấy nhiệt độ.
+- **`WIFI_SSID` phải giống hệt nhau ở CẢ SÁU thiết bị** và phải là băng 2.4 GHz.
+  Node cảm biến không đăng nhập WiFi — chúng chỉ *quét* đúng chuỗi tên này để biết
+  router đang ở kênh nào, vì ESP-NOW bắt buộc mọi bên cùng kênh. Lệch một ký tự (hoặc
+  điền tên băng 5 GHz) là node bám kênh mặc định, gói bay vào khoảng không, và vì
+  broadcast **không có ACK** nên không một dòng log nào ở bất kỳ đâu báo lỗi.
 - **Bo QR Box phải có nguồn riêng 9–24 VDC ở P2/P4.** Cắm mỗi USB-TTL vào P3 thì đủ để nạp
   nhưng không nuôi nổi màn lúc chạy — bo reset lặp và rất dễ chẩn đoán nhầm thành lỗi
   firmware. Phân biệt bằng mã reset: `POWERON_RESET` là nguồn, `SW_CPU_RESET` mới là phần mềm.
-- **`WIFI_SSID` phải là băng 2.4 GHz** và **giống hệt nhau ở cả hai node**. ESP32 không có
-  radio 5 GHz; còn node ngoài trời không đăng nhập WiFi mà chỉ *quét* đúng chuỗi tên này để
-  biết router đang ở kênh nào — ESP-NOW bắt buộc hai bên cùng kênh. Lệch tên là hỏng câm:
-  gói broadcast không có ACK nên không một dòng log nào báo lỗi.
 - **Mã IR sống trong NVS**, không mất khi nạp lại firmware (`pio run -t upload` không đụng
   phân vùng NVS) — nhưng `erase_flash` thì mất sạch.
 - **Đừng chạy `pio pkg install`** để thêm thư viện: nó ghi đè `platformio.ini` và xoá hết

@@ -23,9 +23,11 @@ from app.services import (
     live_events,
     redis_config_cache,
     redis_override_service,
+    redis_room_state_service,
     redis_state_service,
     telemetry_service,
 )
+from app.utils.mac_address import parse_mac
 from app.utils.mqtt_naming import ParsedTopic
 from app.workers import command_publisher
 
@@ -48,28 +50,6 @@ _MIN_PLAUSIBLE_EPOCH = 1_700_000_000
 
 class TelemetryValidationError(ValueError):
     """Raised when a reading is out of physically-plausible range."""
-
-
-def _parse_mac(raw) -> int | None:
-    """``"AA:BB:CC:DD:EE:FF"`` -> 48-bit int, or None if unusable.
-
-    ``devices.mac`` is a BIGINT (models/device.py), and the firmware reports a
-    human-readable MAC, so the conversion happens here. A master reporting its
-    MAC is also the signal that it really is on WiFi + MQTT; a slave's MAC is
-    forwarded by its master (the slave never connects itself).
-    """
-    if raw is None:
-        return None
-    if isinstance(raw, int):
-        return raw if 0 < raw < (1 << 48) else None
-    text = str(raw).replace(":", "").replace("-", "").strip()
-    if len(text) != 12:
-        return None
-    try:
-        value = int(text, 16)
-    except ValueError:
-        return None
-    return value or None  # all-zero MAC means "unknown", not a real address
 
 
 def _validate_ranges(payload: dict) -> tuple[float, float]:
@@ -133,11 +113,17 @@ async def handle_telemetry(client, topic: ParsedTopic, payload: dict) -> None:
         if device is None:
             logger.warning("No device registered for uuid=%s (org=%s)", topic.device_uuid, topic.org_id)
             return
-        is_indoor = device.node_type == NodeType.indoor
+        # Three node kinds now, and only ONE of them may advance the outdoor
+        # running mean. Deriving that from "not indoor" (as this did while the
+        # household had exactly two nodes) would let all four room sensors feed
+        # indoor temperatures into the outdoor EMA — the setpoint would then
+        # track the air conditioner's own output instead of the weather.
+        is_outdoor = device.node_type == NodeType.outdoor
+        is_room = device.node_type == NodeType.room
 
         # Set BEFORE persist_telemetry: that call commits, so the device row is
         # flushed in the same transaction as the reading.
-        mac = _parse_mac(payload.get("mac"))
+        mac = parse_mac(payload.get("mac"))
         if mac is not None and device.mac != mac:
             device.mac = mac
             logger.info("Device %s reported MAC %012X", topic.device_uuid, mac)
@@ -153,10 +139,38 @@ async def handle_telemetry(client, topic: ParsedTopic, payload: dict) -> None:
             watt=payload.get("watt"),
         )
 
-        if is_indoor:
-            await redis_state_service.set_indoor_state(topic.org_id, {"t": temp, "h": humidity})
-        else:
+        if is_outdoor:
             await redis_state_service.set_outdoor_state(topic.org_id, {"t": temp, "h": humidity})
+        elif is_room:
+            # A corner sensor is never the indoor reading on its own — it is one
+            # vote. Record the vote, then re-derive the household's indoor value
+            # from every fresh corner and write THAT into state:indoor, which is
+            # the only thing comfort_engine reads. Everything downstream stays
+            # untouched by the sensor count changing from 1 to 4 to 3-and-a-dead-one.
+            await redis_room_state_service.set_room_state(
+                topic.org_id, str(device.id), temp, humidity
+            )
+            rooms = await redis_room_state_service.aggregate_rooms(topic.org_id)
+            if rooms is None:
+                # Unreachable in practice (we just wrote a fresh sample), but the
+                # alternative to checking is writing None into the state hash and
+                # having the comfort engine read the string "None" as a temperature.
+                logger.warning("Org %s: no fresh room sensors right after ingest", topic.org_id)
+                return
+            await redis_state_service.set_indoor_state(
+                topic.org_id, {"t": rooms.temp, "h": rooms.humidity}
+            )
+            if rooms.stale:
+                logger.info(
+                    "Org %s indoor from %d room sensor(s), %d stale (>%.0fs)",
+                    topic.org_id, rooms.used, rooms.stale,
+                    redis_room_state_service.ROOM_MAX_AGE_SEC,
+                )
+        else:
+            # node_type=indoor: the gateway. Post-split firmware publishes no
+            # t/h of its own, so this branch only fires for boards still running
+            # the older firmware that read a DHT22 on the panel itself.
+            await redis_state_service.set_indoor_state(topic.org_id, {"t": temp, "h": humidity})
 
         # Realtime: nudge the WebSocket feed that this org's live state changed
         # (fresh telemetry, and a recomputed comfort preview downstream).
@@ -185,10 +199,11 @@ async def handle_telemetry(client, topic: ParsedTopic, payload: dict) -> None:
         available_temps = await ir_code_service.get_available_temps(session, topic.org_id)
 
         # H1 fix: only the outdoor node's own tick may advance/persist the
-        # running-mean EMA. Indoor ticks (~10x more frequent) still trigger
-        # compute() every time, but must reuse the already-persisted EMA
-        # unchanged — see comfort_engine.compute()'s ``is_outdoor_tick`` gate.
-        is_outdoor_tick = not is_indoor
+        # running-mean EMA. Indoor/room ticks (now ~4x more frequent still,
+        # one per corner) trigger compute() every time but must reuse the
+        # already-persisted EMA unchanged — see comfort_engine.compute()'s
+        # ``is_outdoor_tick`` gate.
+        is_outdoor_tick = is_outdoor
 
         inputs = ComfortInputs(
             cfg=cfg,
@@ -221,26 +236,24 @@ async def handle_telemetry(client, topic: ParsedTopic, payload: dict) -> None:
         if not changed:
             return
 
-        # Phase 1 keeps ONE comfort decision per household: an outdoor tick
-        # drives the org's (single) indoor node. Per-room decisions land in
-        # Phase 2 — this still resolves "the" indoor node the same way.
-        indoor_device = (
-            device
-            if is_indoor
-            else await telemetry_service.get_device_by_org_and_node(
-                session, topic.org_id, NodeType.indoor.value
+        # ONE comfort decision per household, delivered to the ONE node holding
+        # the IR blaster. Which node that is no longer follows from which node
+        # sent this reading: a room sensor has no IR hardware, so resolving the
+        # target must always go through the gateway lookup.
+        gateway = await telemetry_service.get_gateway_device(session, topic.org_id)
+        if gateway is None:
+            logger.warning(
+                "No gateway (indoor/master) device registered for org=%s — cannot publish command",
+                topic.org_id,
             )
-        )
-        if indoor_device is None:
-            logger.warning("No indoor device registered for org=%s — cannot publish command", topic.org_id)
             return
 
         await command_publisher.publish_command(
             client,
             session,
             org_id=topic.org_id,
-            device_id=indoor_device.id,
-            device_uuid=indoor_device.device_uuid,
+            device_id=gateway.id,
+            device_uuid=gateway.device_uuid,
             result=result,
             t_out=tout_raw if tout_raw is not None else tout,
             # M1 fix: audit trail must reflect reality. Unlike t_out (which

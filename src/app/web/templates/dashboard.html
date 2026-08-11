@@ -126,7 +126,7 @@
             {% endif %}
           </div>
           <div class="ac-device__meta">
-            {{ 'Nút ngoài trời' if n.device.node_type.value == 'outdoor' else 'Nút trong nhà' }}
+            {{ n.device.node_type | node_type }}
             {% if n.device.location %} · {{ n.device.location }}{% endif %}
           </div>
           {% if n.reading %}

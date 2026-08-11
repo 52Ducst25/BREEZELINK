@@ -1,8 +1,14 @@
 """Telemetry persistence + device lookup for the MQTT worker (Phase 4).
 
-2-node architecture (design): exactly one outdoor + one indoor device per
-org, so a device is uniquely identified by ``(org_id, node_type)`` — the
-worker never receives a ``device_id`` directly, only the topic's org/node.
+The worker never receives a ``device_id`` — only the topic's
+``bl/{org}/{device_uuid}/…``. Everything here turns those two strings into a
+verified ``devices`` row.
+
+The household is no longer the original outdoor+indoor pair: it is one outdoor
+sensor, one gateway (IR blaster + screen, no sensor of its own) and several room
+sensors. So ``(org_id, node_type)`` is no longer a unique key, and "which node
+do we send commands to" is answered by :func:`get_gateway_device` rather than by
+a node-type lookup.
 """
 
 import logging
@@ -13,7 +19,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.device import Device
-from app.models.enums import NodeType
+from app.models.enums import NodeRole, NodeType
 from app.models.telemetry import Telemetry
 
 logger = logging.getLogger("breezelink.telemetry_service")
@@ -21,39 +27,59 @@ logger = logging.getLogger("breezelink.telemetry_service")
 _DEFAULT_LIMIT = 200
 
 
-async def get_device_by_org_and_node(
-    session: AsyncSession, org_id: str, node_type: str
-) -> Device | None:
-    """Resolve ONE device of this node type for the org — the oldest if several.
+async def get_gateway_device(session: AsyncSession, org_id: str) -> Device | None:
+    """The household's gateway: the node holding the IR blaster and the cloud link.
 
-    Answers "which indoor node carries the IR blaster for this household".
+    Every "send this to the air conditioner" path resolves its target here —
+    the comfort worker, the override endpoint, the IR-learn endpoint. It is a
+    lookup, not an inference from whoever sent the last reading: since the room
+    sensors arrived, most telemetry comes from nodes with no IR hardware at all,
+    and picking the sender would address commands to a device that cannot
+    execute them (and would not report the failure, since it never subscribes).
 
-    The 2-node era could assume uniqueness and used ``scalar_one_or_none()``,
-    which raises ``MultipleResultsFound`` the moment a household has a SECOND
-    indoor node — something the admin form allows with a single click. That
-    exception surfaced as a 500 on every override / IR endpoint, and inside the
-    worker a broad ``except`` swallowed it, so automatic commands silently
-    stopped being published while the system still looked healthy. Failing that
-    way is worse than being approximate.
+    Two ways to be the gateway, in order:
 
-    Degrading to "oldest match" keeps the household behaving exactly as it did
-    before the extra node appeared, and the warning marks the ambiguity. Real
-    per-room decisions are Phase 2.
+    1. ``role == master`` — the vendor said so during provisioning, and
+       ``device_service.set_role`` guarantees at most one per household. Room
+       sensors are rejected here defensively: they reach the gateway over BLE
+       and never hold an MQTT session, so a mis-clicked master role on one would
+       send every command into a void.
+    2. ``node_type == indoor`` — households provisioned before roles existed.
+       Oldest first.
+
+    WHY NOT ``scalar_one_or_none()``: it raises ``MultipleResultsFound`` the
+    moment a household has two indoor rows, which the admin form allows with one
+    click. That surfaced as a 500 on every override/IR endpoint, and inside the
+    worker a broad ``except`` swallowed it — automatic commands silently stopped
+    while the system still looked healthy. Being approximate and saying so beats
+    failing that way.
     """
-    stmt = (
+    org_uuid = uuid.UUID(org_id)
+
+    master_stmt = (
         select(Device)
         .where(
-            Device.org_id == uuid.UUID(org_id),
-            Device.node_type == NodeType(node_type),
+            Device.org_id == org_uuid,
+            Device.role == NodeRole.master,
+            Device.node_type != NodeType.room,
         )
+        .order_by(Device.created_at.asc(), Device.id.asc())
+    )
+    masters = list((await session.execute(master_stmt)).scalars().all())
+    if masters:
+        return masters[0]
+
+    stmt = (
+        select(Device)
+        .where(Device.org_id == org_uuid, Device.node_type == NodeType.indoor)
         .order_by(Device.created_at.asc(), Device.id.asc())
     )
     rows = list((await session.execute(stmt)).scalars().all())
     if len(rows) > 1:
         logger.warning(
-            "Org %s has %d '%s' nodes; driving the oldest (%s). "
-            "Per-room control is Phase 2 — the others are not controlled.",
-            org_id, len(rows), node_type, rows[0].id,
+            "Org %s has %d 'indoor' nodes and no master assigned; driving the oldest (%s). "
+            "Set role=master on the real gateway to remove the ambiguity.",
+            org_id, len(rows), rows[0].id,
         )
     return rows[0] if rows else None
 

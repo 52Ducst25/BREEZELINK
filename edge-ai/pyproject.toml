@@ -1,0 +1,25 @@
+[project]
+name = "breezelink-edge-ai"
+version = "1.0.0"
+description = "Edge comfort inference + cloud-outage failover, runs on the Linux half of an Arduino UNO Q"
+requires-python = ">=3.11"
+# MỘT phụ thuộc duy nhất, có chủ đích. Đây là phần mềm chạy trên thiết bị ở nhà
+# khách, nơi mỗi gói thêm vào là một thứ nữa có thể vỡ lúc nâng cấp và một thứ
+# nữa phải vá khi có CVE. Thuật toán comfort lấy từ src/ của backend (thuần
+# Python, không phụ thuộc gì); hồi quy tuyến tính không cần numpy; và bố cục gói
+# BLE đọc bằng `struct` của thư viện chuẩn.
+#
+# bleak chứ không phải pybluez/dbus-python: nó là lớp bọc BlueZ được duy trì,
+# API bất đồng bộ khớp với vòng đời "kết nối lại mãi" ở ble_client.py, và không
+# cần biên dịch gì trên thiết bị.
+dependencies = ["bleak>=0.22"]
+
+[project.scripts]
+breezelink-edge-ai = "edge_ai.main:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["edge_ai*"]

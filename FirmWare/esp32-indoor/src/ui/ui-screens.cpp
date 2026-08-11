@@ -27,6 +27,7 @@ uint32_t  gToastUntil = 0;
 
 // --- TRANG CHU ---------------------------------------------------------------
 lv_obj_t *gInTemp, *gInHum, *gOutTemp, *gOutHum, *gOutDot, *gOutNote;
+lv_obj_t *gInSrc;   // "3/4 GÓC" — bao nhiêu cảm biến đang góp vào con trung vị
 lv_obj_t *gInSkel, *gOutSkel;   // che chỗ con số khi CHƯA có số đo
 lv_obj_t *gAcMode, *gAcSet, *gAcBadge, *gAcBadgeLbl, *gAcAge;
 
@@ -73,8 +74,12 @@ const char *const kModeLabel[4] = {"LẠNH", "KHÔ", "QUẠT", "TẮT"};
 bool  gModeOk[4] = {false, false, false, false};   // có mã IR trong NVS chưa
 
 // --- THONG TIN ---------------------------------------------------------------
+// Hàng "ESP-NOW" (bộ đếm gói) đã nhường chỗ cho "GÓC PHÒNG": bốn cảm biến là
+// thứ người đi lắp phải kiểm mỗi lần, còn bộ đếm gói chỉ dùng khi truy lỗi — nó
+// chuyển xuống dòng chân trang cùng MAC/kênh. Màn 320×240 chỉ đủ 8 hàng, nên
+// thêm hàng thứ 9 không phải là lựa chọn.
 const char *const kInfoRow[8] = {"WIFI", "IP", "SÓNG", "MQTT",
-                                 "ESP-NOW", "NGOÀI TRỜI", "MÃ IR", "FW"};
+                                 "GÓC PHÒNG", "NGOÀI TRỜI", "MÃ IR", "FW"};
 lv_obj_t *gInfoVal[8], *gInfoFoot;
 
 // --- CAI DAT -----------------------------------------------------------------
@@ -365,6 +370,10 @@ void buildHome() {
 
   lv_obj_t *cIn = card(p, PAD, 2, 152, 84);
   labelCaps(cIn, 10, 8, "TRONG NHÀ");
+  // Số góc đang bỏ phiếu, ngay cạnh tiêu đề. Con số trên thẻ này là TRUNG VỊ của
+  // bốn cảm biến, và "3/4" là thứ duy nhất trên trang chủ nói ra rằng một góc đã
+  // rụng — nếu không, phòng vẫn hiện một nhiệt độ trông hoàn toàn bình thường.
+  gInSrc = label(cIn, 104, 9, "", fontTiny(), textMuted());
   gInTemp = label(cIn, 10, 24, "", fontHero(), textMuted());
   label(cIn, 10, 64, "ĐỘ ẨM", fontTiny(), textMuted());
   gInHum = label(cIn, 100, 62, "--", fontLabel(), textPrimary());
@@ -1179,6 +1188,19 @@ void update(const Ui::Model &m) {
   fmtUnit(b, sizeof b, m.hIn, 0, " %");
   setText(gInHum, b);
 
+  // "3/4 GÓC", tô cảnh báo khi thiếu góc. Đủ góc thì để trống hẳn thay vì ghi
+  // "4/4": trạng thái bình thường không cần chiếm chỗ trên một màn 320px, và một
+  // nhãn chỉ xuất hiện khi có chuyện thì đọc được từ xa mà không cần đọc chữ.
+  if (m.roomSlots == 0) {
+    setText(gInSrc, "");
+  } else if (m.roomVoting >= m.roomSlots) {
+    setText(gInSrc, "");
+  } else {
+    snprintf(b, sizeof b, "%u/%u GÓC", (unsigned)m.roomVoting, (unsigned)m.roomSlots);
+    setText(gInSrc, b);
+    lv_obj_set_style_text_color(gInSrc, m.roomVoting ? warn() : err(), 0);
+  }
+
   lv_obj_set_style_bg_color(gOutDot, m.outOnline ? ok() : textMuted(), 0);
   if (m.outOnline) {
     fmtUnit(b, sizeof b, m.tOut, 1, "°C");
@@ -1302,9 +1324,22 @@ void update(const Ui::Model &m) {
   // tools/make_lvgl_fonts.ps1. Thiếu một cái là LVGL vẽ ô trống ở đúng chỗ đó VÀ
   // mỗi khung vẽ lại phun "glyph dsc. not found for U+xxxx" ra serial, đủ để
   // chôn mọi dòng log khác. Thêm ký tự mới vào chuỗi thì mở script kiểm dải.
-  snprintf(b, sizeof b, "nhận %lu · bỏ %lu",
-           (unsigned long)m.espnowRx, (unsigned long)m.espnowDrop);
-  setText(gInfoVal[4], b);
+  // TỪNG GÓC MỘT, không phải con trung vị — trang chủ đã có con đó. Đây là chỗ
+  // duy nhất trên bo trả lời được "góc nào đang lệch" và "góc nào đã rụng", và
+  // nó là câu hỏi đầu tiên khi người dùng bảo "máy chạy sai nhiệt độ".
+  // "—" = góc mất kết nối; "??" = còn sống nhưng cảm biến hỏng. Hai ca đó dẫn
+  // tới hai việc phải làm khác hẳn nhau nên không được hiện giống nhau.
+  {
+    size_t at = 0;
+    b[0] = '\0';
+    for (uint8_t i = 0; i < m.roomSlots && at < sizeof b - 8; i++) {
+      if (i) at += snprintf(b + at, sizeof b - at, " · ");
+      if (!m.roomOnline[i])      at += snprintf(b + at, sizeof b - at, "—");
+      else if (isnan(m.roomT[i])) at += snprintf(b + at, sizeof b - at, "??");
+      else                        at += snprintf(b + at, sizeof b - at, "%.1f", m.roomT[i]);
+    }
+    setText(gInfoVal[4], m.roomSlots ? b : "chưa khai node nào");
+  }
   if (m.outOnline) snprintf(b, sizeof b, "%lus trước", (unsigned long)m.outAgeSec);
   else             snprintf(b, sizeof b, "mất kết nối");
   setText(gInfoVal[5], b);
@@ -1313,7 +1348,13 @@ void update(const Ui::Model &m) {
   snprintf(b, sizeof b, "%s - %luh%02lum", m.fw ? m.fw : "?",
            (unsigned long)(m.uptimeSec / 3600), (unsigned long)((m.uptimeSec % 3600) / 60));
   setText(gInfoVal[7], b);
-  snprintf(b, sizeof b, "MAC %s · KÊNH %u", m.mac[0] ? m.mac : "?", (unsigned)m.channel);
+  // Bộ đếm gói ESP-NOW + trạng thái đường tới UNO Q, dồn xuống chân trang. Chỉ
+  // dùng khi truy lỗi, nhưng lúc đó chúng là thứ phân biệt "không nghe thấy gì"
+  // với "nghe thấy mà không xử lý kịp" — xem khối chẩn đoán ở cuối main.cpp.
+  snprintf(b, sizeof b, "MAC %s · KÊNH %u · NOW %lu/%lu · UNO Q %s",
+           m.mac[0] ? m.mac : "?", (unsigned)m.channel,
+           (unsigned long)m.espnowRx, (unsigned long)m.espnowDrop,
+           m.unoqUp ? "đã nối" : "chưa nối");
   setText(gInfoFoot, b);
 
   // --- lớp phủ học remote ---

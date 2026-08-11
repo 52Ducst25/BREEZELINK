@@ -18,10 +18,11 @@ router = APIRouter(prefix="/ir", tags=["ir"])
 
 
 async def _indoor_uuid(session: AsyncSession, org_id: str) -> str:
-    """device_uuid of the household's indoor node — the one whose IR receiver
-    does the learning. Per-device topics need it to address the right node.
-    (Phase 1 targets the single indoor node; per-room targeting is Phase 2.)"""
-    device = await telemetry_service.get_device_by_org_and_node(session, org_id, "indoor")
+    """device_uuid of the household's gateway — the only node with an IR
+    receiver, so the only one that can learn a remote code. Per-device topics
+    need it to address the right node. The room sensors have no IR hardware and
+    must never be picked here; ``get_gateway_device`` excludes them."""
+    device = await telemetry_service.get_gateway_device(session, org_id)
     if device is None:
         raise NotFoundError("Chưa có node trong nhà (indoor) cho tổ chức này")
     return device.device_uuid

@@ -230,11 +230,6 @@ TaskHandle_t      uiTask  = nullptr;
 
 struct Reply { char msg[40]; };
 
-// Số đo SHT3x: tác vụ UI ghi (nó sở hữu bus I2C), loop() đọc để gửi telemetry.
-// Spinlock chứ không mutex: chỉ chép hai float, ngắn hơn cả chi phí đổi tác vụ.
-portMUX_TYPE indoorMux = portMUX_INITIALIZER_UNLOCKED;
-float gIndoorT = NAN, gIndoorH = NAN;
-
 constexpr BaseType_t  kUiCore  = 0;      // loop() ở lõi 1; IR bit-bang không chịu bị xen
 // 10240 là con số của bản CHƯA CÓ ẢNH. Đường vẽ giờ có thêm giải mã ảnh, nhuộm
 // màu ảnh có alpha, và hai callback vẽ tay (tam giác + đường chéo cho góc vát) —
@@ -244,7 +239,6 @@ constexpr BaseType_t  kUiCore  = 0;      // loop() ở lõi 1; IR bit-bang khôn
 constexpr uint32_t    kUiStack = 16384;
 constexpr UBaseType_t kUiPrio  = 2;      // trên loopTask (1), dưới ngăn xếp WiFi (18+)
 constexpr uint32_t    kDrawMs   = 200;   // nhịp đổ số liệu; mắt không phân biệt nhanh hơn
-constexpr uint32_t    kSensorMs = 2000;  // SHT3x chuyển đổi ~20 ms, đo dày hơn là vô ích
 constexpr uint32_t    kMemLogMs = 15000; // đo heap LVGL; đủ thưa để không rác log
 
 // --- Cầu nối từ màn hình về loop() -------------------------------------------
@@ -289,7 +283,7 @@ void onSetting(Screens::Setting s) {
 
 // --- Tác vụ giao diện --------------------------------------------------------
 void uiTaskFn(void *) {
-  uint32_t lastTick = millis(), lastDraw = 0, lastSensor = 0, lastClock = 0, lastMem = 0;
+  uint32_t lastTick = millis(), lastDraw = 0, lastClock = 0, lastMem = 0;
   Model local;
 
   for (;;) {
@@ -319,17 +313,6 @@ void uiTaskFn(void *) {
         xSemaphoreGive(modelMx);
       }
       Screens::update(local);
-    }
-
-    if (now - lastSensor >= kSensorMs) {
-      lastSensor = now;
-      float t, h;
-      if (BoardIo::sht3xRead(t, h)) {
-        portENTER_CRITICAL(&indoorMux);
-        gIndoorT = t;
-        gIndoorH = h;
-        portEXIT_CRITICAL(&indoorMux);
-      }
     }
 
     if (now - lastClock >= 1000) {
@@ -432,13 +415,12 @@ bool begin() {
   BoardIo::buzzerBegin(BUZZER_PIN);
 
   // Touch::begin() gọi Wire.begin + ghim 100 kHz -> phải chạy TRƯỚC mọi thứ
-  // khác trên bus I2C (DS1307 và SHT3x nằm chung bus đó).
+  // khác trên bus I2C (DS1307 nằm chung bus đó).
   const bool touchOk =
       Touch::begin(I2C_SDA_PIN, I2C_SCL_PIN, TOUCH_RST_PIN, TOUCH_INT_PIN);
   Serial.printf("Cam ung: %s (SDA=%d SCL=%d RST=%d INT=%d)\n",
                 touchOk ? "OK" : "KHONG THAY CHIP tren bus I2C",
                 I2C_SDA_PIN, I2C_SCL_PIN, TOUCH_RST_PIN, TOUCH_INT_PIN);
-  BoardIo::sht3xBegin();
 
   tft.init();
 
@@ -554,23 +536,6 @@ void reply(const char *msg) {
   Reply r{};
   snprintf(r.msg, sizeof r.msg, "%s", msg ? msg : "ĐÃ GỬI");
   xQueueSend(replyQ, &r, 0);
-}
-
-bool readIndoor(float &tempC, float &humidity) {
-  portENTER_CRITICAL(&indoorMux);
-  const float t = gIndoorT, h = gIndoorH;
-  portEXIT_CRITICAL(&indoorMux);
-  if (isnan(t) || isnan(h)) return false;   // KHÔNG bao giờ trả 0.0 thay cho "không đo được"
-  tempC    = t;
-  humidity = h;
-  return true;
-}
-
-void setIndoor(float tempC, float humidity) {
-  portENTER_CRITICAL(&indoorMux);
-  gIndoorT = tempC;
-  gIndoorH = humidity;
-  portEXIT_CRITICAL(&indoorMux);
 }
 
 } // namespace Ui

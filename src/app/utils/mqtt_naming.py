@@ -44,6 +44,7 @@ from dataclasses import dataclass
 class NodeType(str, enum.Enum):
     outdoor = "outdoor"
     indoor = "indoor"
+    room = "room"
 
 
 class TopicKind(str, enum.Enum):
