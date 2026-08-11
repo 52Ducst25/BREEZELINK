@@ -807,8 +807,8 @@ static void runPanelCommand(const Ui::Command &c) {
   // Nói đúng chuyện vừa xảy ra, hai câu khác nhau cho hai kết cục khác nhau.
   // Câu cũ ("máy chủ sẽ giành lại quyền") giờ SAI khi gửi được — cổng ghi đè đã
   // đặt xong thì máy chủ không giành lại nữa cho tới khi hết hạn hoặc bấm TỰ ĐỘNG.
-  Ui::reply(ovOk ? "ĐÃ GỬI — bạn đang giữ quyền"
-                 : "ĐÃ PHÁT — nhưng máy chủ sẽ giành lại quyền");
+  Ui::reply(ovOk ? "ĐÃ GỬI"
+                 : "ĐÃ PHÁT");  
 }
 
 /// Dựng ảnh chụp cho màn. Bitmask mã IR tính ở đây vì NVS thuộc quyền lõi 1.
