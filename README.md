@@ -1,24 +1,27 @@
-# Aircon — Hệ thống điều hoà thích ứng
+# BreezeLink — Hệ thống điều hoà thích ứng
 
-Aircon là hệ thống điều khiển điều hoà **thích ứng theo khí hậu**: cảm biến ESP32 đo
-nhiệt độ/độ ẩm trong và ngoài nhà, một thuật toán comfort tính ra nhiệt độ đặt tiết kiệm
-điện, và người dùng điều khiển máy lạnh qua ứng dụng điện thoại. Nhà quản trị (bên bán)
-quản lý khách hàng, thiết bị và phát hành bản cập nhật app qua một trang web riêng.
+BreezeLink điều khiển điều hoà **thích ứng theo khí hậu**: cảm biến ESP32 đo nhiệt độ/độ ẩm
+ở bốn góc phòng và ngoài trời, một thuật toán comfort tính ra nhiệt độ đặt tiết kiệm điện,
+và người dùng điều khiển máy lạnh qua ứng dụng điện thoại. Bên bán quản lý khách hàng,
+thiết bị và phát hành bản cập nhật qua một trang web riêng.
+
+Điểm khác biệt so với một bộ điều nhiệt thông thường: **hệ thống chạy tiếp khi mất
+internet**. Một máy tính nhỏ đặt trong nhà (Arduino UNO Q) giữ bản sao của thuật toán, học
+mô hình nhiệt của chính căn phòng, và tự lái máy lạnh khi máy chủ im lặng quá lâu.
 
 Dự án gồm năm phần chạy chung một backend:
 
-- **Web quản trị** (SSR, dành cho **nhà quản trị/bên bán**) — quản lý khách hàng, cấp mã
-  kích hoạt, quản lý node, tinh chỉnh thuật toán, phát hành OTA.
-- **App Flutter** (dành cho **khách hàng**) — kích hoạt bằng mã, xem số đo trực tiếp,
-  điều khiển điều hoà, tự cập nhật qua OTA.
+- **Web quản trị** (SSR, cho **bên bán**) — quản lý khách hàng, cấp mã kích hoạt, quản lý
+  node, tinh chỉnh thuật toán, phát hành OTA.
+- **App Flutter** (cho **khách hàng**) — kích hoạt bằng mã, xem số đo trực tiếp, điều khiển
+  điều hoà, tự cập nhật qua OTA.
 - **API + Worker** (FastAPI + MQTT) — phục vụ cả web lẫn app từ **một tầng nghiệp vụ duy
   nhất**, nên số liệu trên web và trên app không bao giờ lệch nhau.
 - **Firmware ESP32** (6 thiết bị mỗi hộ) — **4 node cảm biến** ở bốn góc phòng
-  (ESP32-C3 + DHT22) và **1 node ngoài trời**, tất cả bắn ESP-NOW về **1 gateway**
-  đặt gần máy lạnh; gateway mang màn cảm ứng 2.8", phát hồng ngoại và làm cầu nối
-  lên cloud — **nó không đo nhiệt độ**.
-- **Edge AI** (Arduino UNO Q) — nối gateway qua **Bluetooth**, tính comfort ngay
-  trong nhà và **tự lái máy lạnh khi mất kết nối cloud**; bình thường chỉ đề xuất.
+  (ESP32-C3 + DHT22) và **1 node ngoài trời**, tất cả bắn ESP-NOW về **1 gateway** đặt gần
+  máy lạnh; gateway phát hồng ngoại và làm cầu nối lên cloud — **nó không đo nhiệt độ**.
+- **Edge AI** (Arduino UNO Q) — nối gateway qua **UART**, học mô hình nhiệt của phòng, và
+  **tự lái máy lạnh khi mất kết nối cloud**; bình thường chỉ đề xuất.
 
 ---
 
@@ -27,11 +30,12 @@ Dự án gồm năm phần chạy chung một backend:
 - [Tính năng](#tính-năng)
 - [Kiến trúc](#kiến-trúc)
 - [Thuật toán comfort](#thuật-toán-comfort)
+- [Edge AI: mô hình nhiệt của phòng](#edge-ai-mô-hình-nhiệt-của-phòng)
 - [Công nghệ](#công-nghệ)
 - [Cấu trúc dự án](#cấu-trúc-dự-án)
 - [Chạy trên máy local](#chạy-trên-máy-local)
 - [Biến môi trường](#biến-môi-trường)
-- [Triển khai lên server](#triển-khai-lên-server)
+- [Triển khai](#triển-khai)
 - [Hướng dẫn sử dụng](#hướng-dẫn-sử-dụng)
 - [Bảo mật](#bảo-mật)
 
@@ -39,53 +43,44 @@ Dự án gồm năm phần chạy chung một backend:
 
 ## Tính năng
 
-### Web quản trị (nhà quản trị)
+### Web quản trị (bên bán)
 
-- **Tổng quan (fleet view)** — toàn bộ node đã bán của mọi khách, gom theo khách hàng
-  (xếp A→Z, gập/mở), kèm biểu đồ trạng thái trực tuyến/ngoại tuyến.
-- **Khách hàng & Máy** — bán sản phẩm (tạo khách + node + mã kích hoạt), quản lý node
-  (thêm/sửa/xoá), cấp thêm mã, xoá mã dư, xem số đo từng node, tìm khách theo SĐT.
+- **Tổng quan** — toàn bộ node đã bán của mọi khách, gom theo khách hàng (xếp A→Z,
+  gập/mở), kèm biểu đồ trạng thái trực tuyến/ngoại tuyến.
+- **Khách hàng & Máy** — bán sản phẩm (tạo khách + node + mã kích hoạt), quản lý node, cấp
+  thêm mã, xem số đo từng node, tìm khách theo SĐT.
 - **Cấu hình thuật toán** — tinh chỉnh tham số comfort cho **từng khách**.
 - **Phiên bản app** — tải APK lên, phát hành OTA, xem lịch sử, rollback.
-- **Quản trị viên** — thêm/xoá tài khoản nhân viên.
-- Cập nhật realtime qua WebSocket, lưu không tải lại trang (AJAX + xác nhận trong app).
+- **Cài đặt** — chuyển giao diện Sáng / Tối / Theo hệ thống.
+- Cập nhật realtime qua WebSocket. Trang **vá DOM tại chỗ** thay vì vẽ lại, nên danh sách
+  không nháy, không tự gập, và không xoá mất chữ đang gõ dở khi có số liệu mới về.
 
 ### App khách hàng (Flutter)
 
-- **Kích hoạt bằng mã** — nhập mã được cấp khi mua máy để tạo tài khoản (nhập tên, SĐT,
-  email; thông tin tự hiện trên web quản trị).
+- **Kích hoạt bằng mã** — nhập mã được cấp khi mua máy để tạo tài khoản.
 - **Bảng điều khiển** — nhiệt độ đặt hiện tại + chuỗi tính toán (có thể kiểm chứng).
-- **Điều khiển** — chọn chế độ, ghi đè thủ công, học mã điều khiển hồng ngoại (IR learn).
+- **Điều khiển** — chọn chế độ, ghi đè thủ công, học mã hồng ngoại (IR learn).
 - **Số đo trực tiếp** — trong/ngoài nhà, biểu đồ lịch sử.
 - **Tự cập nhật OTA** — báo có bản mới, tải và cài trực tiếp.
 
-### Bảng điều khiển tại chỗ (gateway trong nhà)
+### Bảng điều khiển tại chỗ (gateway có màn)
 
-Màn cảm ứng 2.8" trên gateway, dùng được cả khi mất mạng:
+Màn cảm ứng 2.8" trên bản gateway QR Box, dùng được cả khi mất mạng: nhiệt/ẩm trong nhà
+(trung vị các góc) và ngoài trời, chế độ hiện tại, huy hiệu **TỰ ĐỘNG**/**GHI ĐÈ**, trang
+chẩn đoán 8 dòng (WiFi, MQTT, nhiệt độ **từng góc**, số mã IR, phiên bản firmware), danh
+sách mã IR đã học và nhật ký 8 lệnh gần nhất.
 
-- **Trang chủ** — nhiệt/ẩm trong nhà (trung vị các góc) và ngoài trời, chế độ + nhiệt độ
-  đặt hiện tại, huy hiệu cho biết đang **TỰ ĐỘNG** hay **GHI ĐÈ**. Thiếu góc nào thì hiện
-  thêm "3/4 GÓC" — đủ góc thì nhãn đó biến mất hẳn.
-- **Điều khiển** — chọn chế độ, chỉnh nhiệt độ, bắn hồng ngoại ngay tại chỗ. Tổ hợp chưa
-  học mã thì nút bị làm mờ, không có phím chết.
-- **Thông tin** — 8 dòng chẩn đoán: WiFi, IP, sóng, MQTT, **nhiệt độ từng góc phòng**,
-  tuổi số đo ngoài trời, số mã IR, phiên bản firmware. Dòng góc phòng phân biệt "—" (góc
-  mất kết nối) với "??" (góc còn sống nhưng cảm biến hỏng) — hai ca dẫn tới hai việc phải
-  làm khác hẳn nhau.
-- **Cài đặt** — độ sáng (giữ để chạy nhanh), âm báo, khởi động lại, **danh sách mã IR đã
-  học** (xoá được từng mã), **nhật ký 8 lệnh gần nhất** từ máy chủ kèm kết quả thi hành.
+Trang góc phòng phân biệt `—` (góc mất kết nối) với `??` (góc còn sống nhưng cảm biến
+hỏng) — hai ca dẫn tới hai việc phải làm khác hẳn nhau.
 
-Mọi thao tác khó lùi đều hỏi lại bằng một hộp xác nhận nêu đích danh việc sắp làm.
+### Trang theo dõi Edge AI (cổng 7000)
 
-### Điểm nổi bật kỹ thuật
+Chạy ngay trên UNO Q, không qua internet: nhiệt độ 4 góc, ai đang cầm lái, **hằng số thời
+gian của phòng**, công suất lạnh đo được, sai số dự báo so với mốc "phòng đứng yên", biểu
+đồ 6 giờ qua và đường dự báo thời tiết 12 giờ tới.
 
-- **Một tầng nghiệp vụ, hai giao diện** — web SSR và app JSON dùng chung service, số liệu
-  không trôi lệch.
-- **Đa khách hàng (multi-tenant)** — mọi truy vấn khoá theo tổ chức; nhà quản trị là vai
-  trò duy nhất nhìn xuyên khách hàng (cờ `is_sysadmin`).
-- **OTA cho app** — APK lưu trên volume Docker, sống sót qua mỗi lần deploy.
-- **Kích hoạt bằng mã một lần** — chống tương tranh bằng khoá hàng (`SELECT ... FOR
-  UPDATE`), một mã chỉ tạo được một tài khoản.
+Trang **không tải gì từ bên ngoài** — không CDN, không phông chữ web, biểu đồ vẽ tay bằng
+canvas. Một trang theo dõi chỉ hiện được lúc có internet là thứ hỏng đúng vào lúc cần nhất.
 
 ---
 
@@ -93,20 +88,20 @@ Mọi thao tác khó lùi đều hỏi lại bằng một hộp xác nhận nêu
 
 ```mermaid
 flowchart LR
-  subgraph Edge["Phần cứng (nhà khách) — 6 thiết bị"]
-    R0["ESP32-C3 · GÓC 0<br/>DHT22"]
-    R1["ESP32-C3 · GÓC 1<br/>DHT22"]
-    R2["ESP32-C3 · GÓC 2<br/>DHT22"]
-    R3["ESP32-C3 · GÓC 3<br/>DHT22"]
-    OUT["ESP32 NGOÀI TRỜI · slave<br/>DHT22 · không dùng WiFi"]
-    ESP["GATEWAY TRONG NHÀ<br/>màn cảm ứng 2.8 inch<br/>phát/học IR · KHÔNG có cảm biến"]
-    UNOQ["Arduino UNO Q<br/>Edge AI · dự phòng cloud"]
+  subgraph Edge["Phần cứng (nhà khách)"]
+    R0["ESP32-C3 · GÓC 1<br/>DHT22"]
+    R1["ESP32-C3 · GÓC 2<br/>DHT22"]
+    R2["ESP32-C3 · GÓC 3<br/>DHT22"]
+    R3["ESP32-C3 · GÓC 4<br/>DHT22"]
+    OUT["ESP32 NGOÀI TRỜI<br/>DHT22 · không dùng WiFi"]
+    ESP["GATEWAY TRONG NHÀ<br/>phát/học IR · KHÔNG có cảm biến"]
+    UNOQ["Arduino UNO Q<br/>Edge AI · mô hình nhiệt"]
     R0 -->|ESP-NOW| ESP
     R1 -->|ESP-NOW| ESP
     R2 -->|ESP-NOW| ESP
     R3 -->|ESP-NOW| ESP
-    OUT -->|ESP-NOW broadcast| ESP
-    ESP <-->|Bluetooth GATT| UNOQ
+    OUT -->|ESP-NOW| ESP
+    ESP <-->|UART D0/D1| UNOQ
   end
 
   subgraph Cloud["Server (Docker)"]
@@ -126,73 +121,182 @@ flowchart LR
   API <--> RD
   CF --> API
 
-  WEB["Web quản trị<br/>(nhà quản trị)"] -->|HTTPS| CF
-  APP["App Flutter<br/>(khách hàng)"] -->|HTTPS| CF
+  WEB["Web quản trị"] -->|HTTPS| CF
+  APP["App Flutter"] -->|HTTPS| CF
 ```
 
-**Luồng dữ liệu:** bốn node góc phòng và node ngoài trời đều bắn số đo qua ESP-NOW về
-gateway; gateway đứng tên **từng node** đẩy lên MQTT → worker lưu
-lịch sử (Postgres), lấy **trung vị** các góc còn tươi làm nhiệt độ trong nhà (Redis) và
-tính nhiệt độ đặt → phát lệnh IR về gateway. API phục vụ web + app; Redis pub/sub đẩy cập
-nhật realtime tới WebSocket. Cloudflare Tunnel là đường duy nhất từ internet vào — không
-cổng nào mở ra `0.0.0.0`.
+**Luồng dữ liệu:** bốn node góc phòng và node ngoài trời bắn số đo qua ESP-NOW về gateway;
+gateway đứng tên **từng node** đẩy lên MQTT → worker lưu lịch sử (Postgres), lấy **trung
+vị** các góc còn tươi làm nhiệt độ trong nhà (Redis) và tính nhiệt độ đặt → phát lệnh IR về
+gateway. Cloudflare Tunnel là đường duy nhất từ internet vào — không cổng nào mở ra
+`0.0.0.0`.
 
-**Vì sao bốn cảm biến chứ không một:** một cảm biến treo tường không nói được nhiệt độ của
-phòng, nó nói nhiệt độ của **cái tường đó**. Góc có nắng chiếu, góc dưới miệng gió và góc
-sau tủ chênh nhau 3–4 °C là chuyện thường. Backend lấy **trung vị** (không phải trung bình
-cộng) nên một góc bất thường không kéo được nhiệt độ đặt đi — trung bình cộng thì có, vĩnh
-viễn, và triệu chứng duy nhất là "ở trong nhà thấy sai sai".
+### Vì sao bốn cảm biến chứ không một
 
-**Vì sao mọi cảm biến đi ESP-NOW, còn Bluetooth chỉ dành cho UNO Q:** gói ESP-NOW chở
-được 250 byte nên mỗi node mang thẳng `device_uuid` 32 ký tự của chính nó — gateway
-**không giữ bảng tra nào**, thêm hay bớt một góc chỉ cần nạp bo mới. Gói BLE advertising
-cổ điển chỉ có 31 byte, chở không nổi uuid, nên sẽ buộc gateway giữ một mảng uuid và nạp
-lại mỗi lần đổi node; lệch một ô là số đo của góc A nộp lên cloud dưới tên góc B —
-biểu đồ vẫn có số, không lỗi ở đâu cả.
+Một cảm biến treo tường không nói được nhiệt độ của phòng, nó nói nhiệt độ của **cái tường
+đó**. Góc có nắng chiếu, góc dưới miệng gió và góc sau tủ chênh nhau 3–4 °C là chuyện
+thường.
 
-Bluetooth thì đúng chỗ cho đường **gateway ↔ UNO Q**: nó **hai chiều** (UNO Q phải ra
-lệnh ngược), và GATT thương lượng được MTU hàng trăm byte nên chở lọt ảnh chụp cả bốn góc.
+Backend lấy **trung vị**, không phải trung bình cộng — nên một góc bất thường không kéo
+được nhiệt độ đặt đi. Trung bình cộng thì có, vĩnh viễn, và triệu chứng duy nhất là "ở
+trong nhà thấy sai sai".
 
-**Vì sao UNO Q nối gateway bằng Bluetooth chứ không qua MQTT:** lớp dự phòng phải sống
-sót đúng cái sự cố nó sinh ra để chịu đựng. Đi qua broker nghĩa là khi mất mạng — đúng
-lúc cần nó nhất — nó cũng mất luôn đường tới gateway. BLE là liên kết trực tiếp giữa hai
-thiết bị đặt cùng phòng: không router, không internet, không broker.
+### Vì sao cảm biến đi ESP-NOW
 
-**Vì sao node ngoài trời không tự nối WiFi:** nó chỉ cần gửi 43 byte mỗi 15 giây. ESP-NOW
-bỏ được toàn bộ bắt tay WiFi/DHCP/TCP nên tốn ít điện hơn hẳn (quan trọng nếu chạy pin), và
-node đó **không cần tài khoản MQTT riêng** — gateway đứng tên publish hộ. Đổi lại,
-mất gateway là mất luôn số ngoài trời; bản dự phòng tự nối WiFi vẫn còn trong repo
-(`pio run -e esp32-wifi`) để tách lỗi khi ESP-NOW trục trặc.
+Gói ESP-NOW chở được 250 byte nên mỗi node mang thẳng `device_uuid` 32 ký tự của chính nó
+— gateway **không giữ bảng tra nào**, thêm hay bớt một góc chỉ cần nạp bo mới.
 
-**Ba radio trên một ăng-ten:** gateway chạy đồng thời WiFi/MQTT, ESP-NOW và BLE trên
-cùng khối 2.4 GHz. Thứ tự ưu tiên được cài vào thiết kế: gateway **không quét BLE** — nó
-chỉ quảng bá và giữ một kết nối GATT, còn quét mới là thứ ăn sóng liên tục. MQTT là
-đường **duy nhất** để lệnh máy lạnh đi xuống nên nó được nhường trước.
+Gói BLE advertising cổ điển chỉ có 31 byte, chở không nổi uuid, nên sẽ buộc gateway giữ một
+mảng uuid và nạp lại mỗi lần đổi node. Lệch một ô là số đo của góc A nộp lên cloud dưới tên
+góc B — biểu đồ vẫn có số, không lỗi ở đâu cả.
 
-**Vì sao node trong nhà nối MQTT trực tiếp:** lệnh từ backend mang `ir_raw` — mảng vài trăm
-mốc thời gian µs, cỡ vài KB. ESP-NOW giới hạn 250 byte/gói nên trung chuyển qua master sẽ
-phải tự viết giao thức chia mảnh; MQTT thì broker đã lo sẵn.
+Node ngoài trời cũng vậy: nó chỉ cần gửi 43 byte mỗi 5 giây, và ESP-NOW bỏ được toàn bộ bắt
+tay WiFi/DHCP/TCP nên tốn ít điện hơn hẳn. Nó cũng **không cần tài khoản MQTT riêng** —
+gateway đứng tên publish hộ.
+
+### Vì sao gateway ↔ UNO Q là UART chứ không phải Bluetooth
+
+Bản đầu dùng BLE GATT. Đo trên bo thật:
+
+```
+Gateway, BLE bật:   0,31 gói ESP-NOW/giây
+Gateway, BLE tắt:   0,80 gói/giây      ← đúng bằng 4 node × 5 giây
+```
+
+Bật Bluetooth thì ESP32 **bắt buộc** phải bật ngủ WiFi — nó `abort()` chứ không chạy kém
+đi. Mà radio ngủ thì gói ESP-NOW đến đúng lúc đó là mất, không ai đệm hộ, và broadcast
+không có ACK nên node vẫn báo "đã phát". Node ngoài trời rơi ~50% và nhấp nháy
+ONLINE/OFFLINE.
+
+Tức là đường BLE ăn mất **~60% khả năng thu của chính cái gateway nó phục vụ**. UART không
+đụng tới radio nên lấy lại toàn bộ. Cái giá là một sợi dây, và hai bo phải nằm cạnh nhau.
+
+Mất luôn cả một mớ lộn xộn kèm theo: không quét, không ghép đôi, không thương lượng MTU,
+không NimBLE ~100 KB flash, không ai tranh ăng-ten 2.4 GHz.
+
+> **Đấu dây** (đối chiếu `Research/Uno_Q/ABX00162-full-pinout.pdf`):
+> `GPIO18 → D0` (PB7, USART1_RX) · `GPIO17 ← D1` (PB6, USART1_TX) · GND chung.
+>
+> **Đừng nối vào chân ghi "RX"/"TX"** trên hàng chân kia — đó là `SOC_SE4_RX/TX`, đi thẳng
+> vào Qualcomm và chạy **1,8 V**. Hàng chân số không có chữ RX/TX nào, nên đây là chỗ rất
+> dễ cắm nhầm, và nhầm là hỏng chân SoC.
+
+### Vì sao UNO Q không nối qua MQTT
+
+Lớp dự phòng phải sống sót đúng cái sự cố nó sinh ra để chịu đựng. Đi qua broker nghĩa là
+khi mất mạng — đúng lúc cần nó nhất — nó cũng mất luôn đường tới gateway. UART là dây nối
+trực tiếp giữa hai bo đặt cạnh nhau: không router, không internet, không broker.
+
+### Hai radio trên một ăng-ten
+
+Gateway chạy đồng thời WiFi/MQTT và ESP-NOW trên cùng khối 2.4 GHz. Gateway **không quét
+WiFi** khi đang chạy (quét là thứ ăn sóng liên tục), và vòng lặp chính **không bao giờ
+chặn**: `serviceNetwork()` thử kết nối lại theo nhịp rồi trả về ngay. Bản trước gọi thẳng
+`connectWifi()` trong `loop()`, và mất WiFi là chết luôn cả ESP-NOW, UART lẫn hồng ngoại.
 
 ---
 
 ## Thuật toán comfort
 
-Nhiệt độ đặt được tính theo mô hình **adaptive comfort** (de Dear & Brager, ASHRAE
-RP-884), không phải một con số cố định:
+Nhiệt độ đặt được tính theo mô hình **adaptive comfort** (de Dear & Brager, ASHRAE RP-884),
+không phải một con số cố định:
 
-1. **Trung bình trượt ngoài trời** (`T_rm`) — làm mượt nhiệt độ ngoài trời bằng EMA
-   (trọng số `ema_alpha`), tránh nhảy theo từng biến động tức thời.
+1. **Trung bình trượt ngoài trời** (`T_rm`) — làm mượt bằng EMA (`ema_alpha`).
 2. **Điểm trung tính** — `T_neutral = 0.31 · T_rm + 17.8` (hợp lệ khi `10 ≤ T_rm ≤ 33.5`).
 3. **Bù trừ độ ẩm** — dưới 60%RH không phạt; 60–75% trừ dần theo `humid_slope`; trên 75%
    phạt nặng hơn (bay hơi mồ hôi kém hiệu quả).
-4. **Lịch đêm** — cộng thêm `night_offset` trong khung giờ `night_start`→`night_end`.
-5. **Giới hạn an toàn** — kẹp kết quả trong `[clamp_min, clamp_max]`.
+4. **Lịch đêm** — cộng `night_offset` trong khung `night_start`→`night_end`.
+5. **Giới hạn an toàn** — kẹp trong `[clamp_min, clamp_max]`.
+6. **Bám mã IR** — làm tròn về nhiệt độ gần nhất mà hộ đó **đã học mã**.
 
-Các tham số ở bước 1, 3, 4, 5 **tinh chỉnh được cho từng khách** trong trang *Cấu hình
-thuật toán*. Hằng số hồi quy (0.31 / 17.8) là khoa học cố định, không chỉnh.
+Tham số ở bước 1, 3, 4, 5 tinh chỉnh được cho **từng khách**. Hằng số hồi quy (0.31 / 17.8)
+là khoa học cố định, không chỉnh.
 
-Chống dao động: `deadband` (vùng trễ quanh nhiệt độ đặt) + `dwell_sec` (thời gian giữ chế
-độ tối thiểu) bảo vệ block máy nén khỏi bật/tắt liên tục.
+Chống dao động ba lớp: EMA đầu vào, `deadband` (vùng trễ quanh nhiệt độ đặt), và
+`dwell_sec` (thời gian giữ chế độ tối thiểu) bảo vệ block máy nén khỏi bật/tắt liên tục.
+
+> `clamp_max` **trên 28,7 °C là vô tác dụng**: công thức RP-884 kẹp `T_rm` ở 33,5 nên
+> `T_neutral` không bao giờ vượt `0.31 × 33.5 + 17.8 = 28,185`; cộng `night_offset` là trần
+> thật 28,685.
+
+---
+
+## Edge AI: mô hình nhiệt của phòng
+
+Chạy trên nửa Linux của Arduino UNO Q. **Một mô hình duy nhất, bốn tham số:**
+
+```
+T_in[k+1] = a·T_in[k] + b·T_out[k] + c·u[k] + d
+
+u[k] = max(0, T_in[k] − T_set[k])  khi COOL, ngược lại 0
+```
+
+Ba con số vật lý rút ra được — thứ mà mô hình hộp đen không cho:
+
+| | Ý nghĩa |
+|---|---|
+| `τ = −Δt/ln(a)` | hằng số thời gian của phòng |
+| `b/(1−a)` | nắng ngoài trời ăn vào phòng bao nhiêu |
+| `−c/(1−a)` | công suất lạnh thực tế — **tụt dần nghĩa là máy yếu đi hoặc bẩn lọc** |
+
+### Vì sao đúng bốn tham số
+
+Đây là ràng buộc của **dữ liệu**, không phải sở thích. Nhìn "12.644 điểm đo" rồi kết luận
+đủ cho mạng nơ-ron là sai, vì các điểm không độc lập: hai số đo cách nhau một phút trong
+một phòng có hằng số thời gian hàng chục phút thì gần như là cùng một số.
+
+Số mẫu **độc lập** ≈ thời lượng ÷ τ. Hai ngày dữ liệu bốn góc ÷ τ≈45 phút ≈ **60 sự kiện
+nhiệt độc lập**. Một MLP 32→64→3 có ~2.400 tham số — cần khoảng **hai năm** tích luỹ với
+nhịp hiện tại.
+
+### Ba nhịp khác nhau
+
+| Tầng | Nhịp |
+|---|---|
+| Gateway đẩy ảnh chụp | 5 giây |
+| Ghi vào lịch sử | 60 giây (trung bình 12 ảnh chụp) |
+| Mô hình cập nhật | 300 giây (lấy mỗi mẫu thứ 5) |
+
+Hai nhịp sau **không tuỳ tiện**. Đo trên dữ liệu giả có đáp án (τ thật 45 phút):
+
+```
+Δt = 60s, không trung bình:  τ = 24 phút   (sai 47%)
+Δt = 300s, có trung bình:    τ = 47 phút   (sai 5%)
+```
+
+Nguyên nhân là **sai lệch suy giảm** (errors-in-variables): nhiễu cảm biến nằm trong chính
+biến hồi quy `T_in[k]`, nên nó kéo `a` xuống một cách **có hệ thống**. Hai hệ số kia gần
+như không hề hấn gì, nên triệu chứng rất dễ bị bỏ qua. Trung bình 12 mẫu giảm nhiễu
+√12 ≈ 3,5 lần; bước 300 giây cho tín hiệu gấp 5 lần so với bước 60 giây.
+
+### Chỉ đề xuất, cho tới khi tự chứng minh
+
+`PredictionScore` chấm mỗi dự báo 15 phút so với **mốc "phòng đứng yên"**, và chỉ báo
+`ĐÁNG TIN` khi sai số < 0,3 °C **và** thắng mốc đó ít nhất 20%. Một mô hình chỉ ngang mốc
+đó thì mọi phép tính của nó là công cốc, dù sai số tuyệt đối nghe có vẻ nhỏ.
+
+Cho tới lúc đó — và bất cứ khi nào `EDGE_ADVISORY_ONLY=1` — node **chỉ gửi đề xuất**.
+Gateway chỉ bắn hồng ngoại khi nhận `kind=COMMAND`; mọi nhánh không đủ điều kiện đều rơi về
+`ADVICE` một cách an toàn thay vì phải nhớ chặn.
+
+### Ai được phép ra lệnh
+
+Bất đối xứng có chủ đích: **giành lái** chỉ sau 300 giây máy chủ im lặng, **nhả lái** ngay
+khi gateway nghe thấy máy chủ trở lại. Chậm giành thì mất vài phút không thích ứng; chậm
+nhả thì hai bên tranh máy nén. Hai cái giá đó không bằng nhau.
+
+Con số im lặng do **gateway đo** — nó giữ phiên MQTT nên biết chắc chắn hơn.
+
+### Lịch sử cục bộ
+
+SQLite đặt cạnh dịch vụ (`python/data/`), ~30 MB/năm ở nhịp một mẫu mỗi phút.
+`synchronous=FULL`, không phải `NORMAL`: đo thực tế thì WAL ở mức NORMAL chỉ fsync mỗi
+**~5,5 giờ** — tức là mất điện có thể mất trọn cả quá trình học. Ở mức FULL, mất điện chỉ
+mất tối đa mẫu đang ghi dở.
+
+Khởi động lại thì mô hình **nạp lại toàn bộ lịch sử**: đủ 120 cặp thì khớp mẻ một phát,
+chưa đủ thì phát lại từng mẫu qua RLS. Nên thời gian tích luỹ **cộng dồn** qua các lần mất
+điện thay vì đặt lại về 0.
 
 ---
 
@@ -202,11 +306,11 @@ Chống dao động: `deadband` (vùng trễ quanh nhiệt độ đặt) + `dwel
 |---|---|
 | Backend | Python 3.12, FastAPI, SQLAlchemy 2 (async), Alembic |
 | CSDL / cache | PostgreSQL 15, Redis 7 |
-| IoT | MQTT (EMQX 5 / Mosquitto), paho-mqtt |
+| IoT | MQTT (EMQX 5), paho-mqtt |
 | App | Flutter (Dart), Dio, package_info_plus, url_launcher |
-| Firmware | C++ (Arduino-ESP32), PlatformIO, LVGL 8 + TFT_eSPI, IRremoteESP8266, ESP-NOW, NimBLE |
-| Edge AI | Python 3.11+, bleak (BLE) — chạy trên Debian của Arduino UNO Q |
-| Phần cứng | ESP32-WROOM-32 (gateway) · 4× ESP32-C3-MINI-1 · ESP32 DevKit (ngoài trời) · Arduino UNO Q · màn ST7789 2.8" cảm ứng · DHT22 · DS1307 · LED IR |
+| Firmware | C++ (Arduino-ESP32), PlatformIO, LVGL 8 + TFT_eSPI, IRremoteESP8266, ESP-NOW |
+| Edge AI | Python 3.13, numpy, SQLite, Arduino App Lab (`web_ui`, RouterBridge) |
+| Phần cứng | ESP32-S3 hoặc ESP32-WROOM-32 (gateway) · 4× ESP32-C3 · ESP32 DevKit (ngoài trời) · Arduino UNO Q · DHT22 · LED IR |
 | Hạ tầng | Docker Compose, Cloudflare Tunnel |
 | Web admin | SSR Jinja2 + design system "Titanium Command" (CSS thuần, không CDN) |
 
@@ -225,27 +329,27 @@ AirConditioner/
 │   ├── models/            #   ORM (SQLAlchemy)
 │   └── alembic/           #   Migration CSDL
 ├── app-flutter/           # App khách hàng (Flutter)
-│   ├── lib/screens/       #   Màn hình: auth, dashboard, control, devices…
-│   ├── lib/services/      #   API client, OTA, WebSocket…
-│   └── assets/icon/       #   Icon app
 ├── FirmWare/              # Firmware ESP32 (PlatformIO)
-│   ├── esp32-indoor/      #   GATEWAY: IR + màn + thu ESP-NOW + BLE tới UNO Q (KHÔNG cảm biến)
+│   ├── esp32-indoor/      #   GATEWAY có màn (QR Box): IR + LVGL + ESP-NOW + UART
 │   │   ├── src/ui/        #     Giao diện LVGL (chạy trên lõi 0)
-│   │   ├── src/ir-*.{h,cpp}     #  Phát/học IR + kho mã trong NVS
-│   │   ├── src/unoq-link.*      #  GATT server cho Arduino UNO Q
-│   │   ├── src/room-registry.*  #  Bảng 4 góc + trung vị
-│   │   └── tools/         #     Sinh font/ảnh LVGL, đọc log serial
-│   ├── esp32-room/        #   4 NODE GÓC PHÒNG: ESP32-C3 + DHT22, slave ESP-NOW
-│   ├── esp32-outdoor/     #   Node NGOÀI TRỜI: slave ESP-NOW (+ bản WiFi dự phòng)
-│   ├── shared/            #   Khuôn gói ESP-NOW + radio slave + giao thức BLE với UNO Q
-│   └── Interface/         #   Thiết kế giao diện + sơ đồ chân (README riêng)
+│   │   ├── src/ir-*        #     Phát/học IR + kho mã trong NVS
+│   │   ├── src/unoq-link.* #     Đường UART tới Arduino UNO Q
+│   │   └── src/room-registry.*  # Bảng 4 góc + trung vị
+│   ├── esp32-s3-gateway/  #   GATEWAY không màn (ESP32-S3): dùng lại nguồn esp32-indoor
+│   ├── esp32-room/        #   4 NODE GÓC PHÒNG (env ss1..ss4, mỗi node một UUID)
+│   ├── esp32-outdoor/     #   Node NGOÀI TRỜI (+ bản WiFi dự phòng)
+│   ├── shared/            #   Khuôn gói ESP-NOW + radio slave + giao thức UART với UNO Q
+│   └── Interface/         #   Thiết kế giao diện + sơ đồ chân
 ├── edge-ai/               # Dịch vụ Edge AI cho Arduino UNO Q
-│   ├── edge_ai/           #   room_store, predictor, cloud_watch, controller
-│   └── deploy/            #   Unit systemd
+│   ├── edge_ai/           #   thermal_model, history_store, weather, dashboard,
+│   │                      #   prediction_score, cloud_watch, controller, bridge_client
+│   ├── applab/BreezeLink/ #   App của Arduino App Lab (sketch + python + assets)
+│   └── deploy/            #   Bộ dựng payload + unit systemd
+├── Icon/                  # Ảnh gốc sinh ra MỌI icon của dự án
+├── Research/              # Tài liệu tham chiếu (ASHRAE, sơ đồ chân UNO Q)
 ├── docker/                # Dockerfile + compose (local + vps)
-├── scripts/               # deploy.sh, seed_demo.py
-├── docs/                  # Tài liệu thiết kế
-└── .env.example           # Mẫu biến môi trường
+├── scripts/               # deploy.sh, push-unoq-app.sh, seed_demo.py
+└── docs/                  # Tài liệu thiết kế
 ```
 
 ---
@@ -257,20 +361,18 @@ AirConditioner/
 ### 1. Backend + web quản trị
 
 ```bash
-# 1. Tạo .env từ mẫu và ĐẶT JWT_SECRET thật (app từ chối chạy nếu còn giá trị mặc định)
 cp .env.example .env
 #   sửa JWT_SECRET và MQTT_PASS thành giá trị của bạn
+#   (app từ chối chạy nếu JWT_SECRET còn giá trị mặc định)
 
-# 2. Bật toàn bộ stack (Postgres, Redis, MQTT, API, Worker)
 docker compose -f docker/docker-compose.yml up -d --build
 
-# 3. Tạo dữ liệu demo (1 tài khoản quản trị + 1 khách mẫu)
-#    scripts/ không nằm trong image nên đưa script vào python của container qua stdin:
+# dữ liệu demo — scripts/ không nằm trong image nên đưa qua stdin:
 docker compose -f docker/docker-compose.yml exec -T api python - < scripts/seed_demo.py
 ```
 
 - Web quản trị: **http://localhost:8201/web/login**
-- API docs (Swagger): **http://localhost:8201/docs**
+- API docs: **http://localhost:8201/docs**
 - Migration `alembic upgrade head` **tự chạy** khi container API khởi động.
 
 ### 2. App Flutter
@@ -278,65 +380,84 @@ docker compose -f docker/docker-compose.yml exec -T api python - < scripts/seed_
 ```bash
 cd app-flutter
 flutter pub get
-flutter run                 # chạy trên máy/emulator
-# hoặc build APK:
-flutter build apk --release # -> build/app/outputs/flutter-apk/app-release.apk
+flutter run
+flutter build apk --release      # -> build/app/outputs/flutter-apk/app-release.apk
 ```
 
-App mặc định trỏ tới `https://admin.vi-du.com` — đổi trong màn đăng nhập, hoặc sửa
-`_kDefaultBaseUrl` trong `lib/app/auth_gate.dart`.
+**Đổi icon toàn dự án:** thay `Icon/1.png` rồi
+
+```bash
+python scripts/generate-icons.py            # sinh 25 file: favicon web, iOS, PWA, trang :7000
+python scripts/generate-icons.py --check    # chỉ liệt kê, không ghi đè
+cd app-flutter && dart run flutter_launcher_icons   # riêng Android có lớp adaptive
+```
+
+Script tự dò ô vuông cắt bằng hàm khoảng cách và **giữ đúng kích thước cũ của từng file** —
+mỗi nền tảng có luật riêng, đổi kích thước một file là làm hỏng đúng nền tảng ấy theo cách
+chỉ lộ ra lúc đóng gói.
 
 ### 3. Firmware ESP32
 
-**Yêu cầu:** PlatformIO (CLI hoặc extension VS Code).
-
-`config.h` **không có trong repo** (bị `.gitignore` vì chứa mật khẩu WiFi + token MQTT của
-từng node). Lấy giá trị ở web quản trị → *Khách hàng* → mở node → mục **"Nạp firmware"**.
+`config.h` **không có trong repo** (bị ignore vì chứa mật khẩu WiFi + token MQTT). Lấy giá
+trị ở web quản trị → *Khách hàng* → mở node → **"Nạp firmware"**.
 
 ```bash
-# 1) GATEWAY trong nhà (bo QR Box Advance, USB-TTL cắm vào cổng P3)
-cd FirmWare/esp32-indoor
-cp src/config.h.example src/config.h   # WiFi + ORG_ID/DEVICE_UUID/MQTT_PASSWORD
-pio run -e qrbox-touch -t upload --upload-port COMx
+# GATEWAY — chọn MỘT trong hai bo:
+cd FirmWare/esp32-indoor      && pio run -e qrbox-touch   -t upload   # bản có màn
+cd FirmWare/esp32-s3-gateway  && pio run -e esp32s3-gateway -t upload # bản không màn
 
-# 2) BỐN node góc phòng (ESP32-C3-DevKitM-1) — nạp LẦN LƯỢT, mỗi bo một DEVICE_UUID
+# 4 NODE GÓC PHÒNG — nodes.ini khai từng bo, nạp lần lượt
 cd FirmWare/esp32-room
-cp src/config.h.example src/config.h   # WIFI_SSID (chỉ để dò kênh) + DEVICE_UUID của góc 1
-pio run -e esp32c3-room -t upload --upload-port COMy
-#   đổi DEVICE_UUID (+ ROOM_CORNER, thuần nhãn) rồi nạp bo thứ hai, ba, tư.
+cp nodes.ini.example nodes.ini    # điền DEVICE_UUID của từng góc
+pio run -e ss1 -t upload && pio run -e ss2 -t upload   # ...ss3, ss4
 
-# 3) Node ngoài trời (ESP32 DevKit V1) — MẶC ĐỊNH là bản ESP-NOW
-cd FirmWare/esp32-outdoor
-cp src/config.h.example src/config.h
-pio run -e esp32-espnow -t upload --upload-port COMz
+# NODE NGOÀI TRỜI
+cd FirmWare/esp32-outdoor && pio run -e esp32-espnow -t upload
 ```
 
-Năm điều dễ mất thời gian nhất nếu không biết trước:
+Sáu điều dễ mất thời gian nhất nếu không biết trước:
 
-- **Mỗi node góc phòng phải có `DEVICE_UUID` riêng** — lấy từ hàng devices của chính nó
-  trên web. `ROOM_CORNER` thì chỉ là **nhãn hiển thị**, hai bo trùng số góc là vô hại:
-  cả hai vẫn có topic riêng, vẫn vào trung vị, chỉ là màn ghi nhãn trùng nhau.
-  *Kiểm chắc chắn:* trang chủ trên màn gateway phải hiện đủ số góc, và trang Thông tin
-  liệt kê đủ ngần ấy nhiệt độ.
-- **`WIFI_SSID` phải giống hệt nhau ở CẢ SÁU thiết bị** và phải là băng 2.4 GHz.
-  Node cảm biến không đăng nhập WiFi — chúng chỉ *quét* đúng chuỗi tên này để biết
-  router đang ở kênh nào, vì ESP-NOW bắt buộc mọi bên cùng kênh. Lệch một ký tự (hoặc
-  điền tên băng 5 GHz) là node bám kênh mặc định, gói bay vào khoảng không, và vì
-  broadcast **không có ACK** nên không một dòng log nào ở bất kỳ đâu báo lỗi.
-- **Bo QR Box phải có nguồn riêng 9–24 VDC ở P2/P4.** Cắm mỗi USB-TTL vào P3 thì đủ để nạp
-  nhưng không nuôi nổi màn lúc chạy — bo reset lặp và rất dễ chẩn đoán nhầm thành lỗi
-  firmware. Phân biệt bằng mã reset: `POWERON_RESET` là nguồn, `SW_CPU_RESET` mới là phần mềm.
-- **Mã IR sống trong NVS**, không mất khi nạp lại firmware (`pio run -t upload` không đụng
-  phân vùng NVS) — nhưng `erase_flash` thì mất sạch.
-- **Đừng chạy `pio pkg install`** để thêm thư viện: nó ghi đè `platformio.ini` và xoá hết
-  chú thích. Thêm tay vào `lib_deps` rồi để `pio run` tự tải.
-
-Xem log:
+- **Mỗi node góc phòng phải có `DEVICE_UUID` riêng.** `ROOM_CORNER` chỉ là **nhãn hiển
+  thị**, hai bo trùng số góc là vô hại.
+- **`WIFI_SSID` phải giống hệt nhau ở CẢ SÁU thiết bị** và phải là băng 2.4 GHz. Node cảm
+  biến không đăng nhập WiFi — chúng chỉ *quét* đúng chuỗi tên này để biết router đang ở
+  kênh nào, vì ESP-NOW bắt buộc mọi bên cùng kênh. Lệch một ký tự là gói bay vào khoảng
+  không, và vì broadcast **không có ACK** nên không một dòng log nào báo lỗi.
+- **Công suất phát của node C3 để 8 dBm, không phải 19,5 dBm.** Mức cao trên bo cấp nguồn
+  qua USB phát ra sóng méo không giải mã được — gateway nhận 0 gói, đúng như khi hỏng dây.
+- **Bo QR Box phải có nguồn riêng 9–24 VDC ở P2/P4.** Cắm mỗi USB-TTL vào P3 đủ để nạp
+  nhưng không nuôi nổi màn lúc chạy. Phân biệt bằng mã reset: `POWERON_RESET` là nguồn,
+  `SW_CPU_RESET` mới là phần mềm.
+- **Mã IR sống trong NVS**, không mất khi nạp lại firmware — nhưng `erase_flash` thì mất sạch.
+- **Đừng chạy `pio pkg install`**: nó ghi đè `platformio.ini` và xoá hết chú thích.
 
 ```bash
-pio device monitor -p COMx -b 115200          # có RESET bo -> xem được log khởi động
-python tools/read_serial.py COMx 30           # KHÔNG reset -> giữ trạng thái tích luỹ khi truy lỗi
+pio device monitor -p COMx -b 115200    # có RESET bo -> xem được log khởi động
+
+# KHÔNG reset -> giữ nguyên trạng thái đã tích luỹ, dùng khi đang truy lỗi
+python FirmWare/esp32-indoor/tools/read_serial.py COMx 30
 ```
+
+### 4. Edge AI trên Arduino UNO Q
+
+Chạy như một App của **Arduino App Lab**:
+
+```bash
+python edge-ai/deploy/build-applab-app.py      # gom edge_ai + lát cắt comfort
+bash scripts/push-unoq-app.sh edge-ai/applab/BreezeLink
+```
+
+Rồi bấm **Run** trong App Lab. Trang theo dõi ở `http://<ip-bo>:7000`.
+
+Cấu hình nằm ở `edge-ai/applab/BreezeLink/python/.env` (**không** vào git):
+
+| Biến | Ý nghĩa |
+|---|---|
+| `EDGE_ORG_ID` | Băm thành `link_key` mà gateway kiểm. Sai một ký tự là mọi lệnh bị từ chối **lặng lẽ**. |
+| `EDGE_IR_TEMPS` | Các mức COOL hộ đã học mã. Để trống thì edge tự học bằng quan sát — và danh sách lấp một nửa **nguy hiểm hơn** danh sách rỗng. |
+| `EDGE_COMFORT_CONFIG` | Cấu hình comfort thật của hộ. Để trống thì edge tính bằng mặc định và **lặng lẽ lệch** với máy chủ. |
+| `EDGE_LAT` / `EDGE_LON` | Toạ độ lấy dự báo thời tiết. |
+| `EDGE_ADVISORY_ONLY` | `1` = chỉ đề xuất, không bao giờ bắn IR. |
 
 ---
 
@@ -355,92 +476,61 @@ Khai báo trong `.env` (xem `.env.example`). Quan trọng nhất:
 
 ---
 
-## Triển khai lên server
+## Triển khai
 
-Script `scripts/deploy.sh` đồng bộ **chỉ thư mục `src/`**, rebuild container và kiểm tra
-sức khoẻ — **không bao giờ đụng `docker/.env`** (token tunnel), có xác nhận trước khi chạy.
+`scripts/deploy.sh` đồng bộ **chỉ thư mục `src/`**, rebuild container và kiểm tra sức khoẻ
+— **không bao giờ đụng `docker/.env`** (token tunnel).
 
 ```bash
-# deploy (hỏi xác nhận)
-scripts/deploy.sh
-
-# deploy không hỏi (dùng cho tự động hoá của bạn)
-scripts/deploy.sh --yes
-
-# đổi server đích qua biến môi trường
-AC_HOST=1.2.3.4 AC_USER=user scripts/deploy.sh
+scripts/deploy.sh              # hỏi xác nhận
+scripts/deploy.sh --yes        # không hỏi
+AC_HOST=1.2.3.4 scripts/deploy.sh
 ```
 
-Xác thực dùng SSH thông thường (khoá SSH hoặc gõ mật khẩu khi ssh hỏi) — **không** lưu mật
-khẩu trong script. Mỗi lần deploy gây gián đoạn ~30–40 giây (cloudflared khởi động lại).
+Mỗi lần deploy gián đoạn ~30–40 giây (cloudflared khởi động lại). Script chờ tới 60 giây
+cho tunnel gắn lại trước khi kết luận — hỏi một lần ngay sau đó gần như chắc chắn gặp 502
+và báo thất bại cho một lần deploy đã thành công.
+
+> **Sửa `app.css` hoặc `app.js` thì không phải nhớ gì thêm.** Chuỗi phá đệm `?v=` được băm
+> từ chính nội dung file, nên nó tự đổi. Trước đây là một hằng số gõ tay, và nó từng khiến
+> một bản vá deploy xong mà trình duyệt vẫn chạy bản cũ thêm 4 tiếng.
 
 ### Đổi tên miền
 
-**Thiết bị không ảnh hưởng.** ESP32 nối MQTT bằng **IP trần** (`MQTT_PUBLIC_HOST`), không
-qua tên miền — đổi domain thì hai node vẫn chạy y nguyên, không phải nạp lại. (Mặt trái:
-đổi **IP của VPS** mới là việc phải đi nạp lại từng node.)
+**Thiết bị không ảnh hưởng** — ESP32 nối MQTT bằng **IP trần**, không qua tên miền.
 
 > ⚠️ **App đã cài trên máy khách mới là chỗ nguy hiểm.** App lưu base URL vào
-> `SharedPreferences`, và **giá trị đã lưu luôn thắng giá trị mặc định**:
-> `prefs.getString(_kBaseUrlKey) ?? _kDefaultBaseUrl`.
->
-> Nên phát hành bản mới với `_kDefaultBaseUrl` mới **không cứu được khách cũ** — mặc định
-> chỉ dùng khi chưa có gì được lưu. Bản mới phải kèm một đoạn **di trú một lần**: thấy URL
-> đã lưu là domain cũ thì ghi đè thành domain mới.
->
-> Và nếu tắt domain cũ trước khi khách kịp cập nhật thì họ mất luôn đường nhận bản sửa —
-> `/app/update.json` cũng nằm ở đúng domain vừa chết. Không đẩy được bản vá qua chính cái
-> kênh mà việc đổi domain vừa làm hỏng; khách phải tự gõ URL mới ở màn đăng nhập hoặc cài
-> lại APK bằng tay.
+> `SharedPreferences`, và **giá trị đã lưu luôn thắng giá trị mặc định**. Phát hành bản mới
+> với `_kDefaultBaseUrl` mới **không cứu được khách cũ** — bản mới phải kèm một đoạn **di
+> trú một lần**. Và nếu tắt domain cũ trước khi khách kịp cập nhật thì họ mất luôn đường
+> nhận bản sửa, vì `/app/update.json` cũng nằm ở đúng domain vừa chết.
 
-Chín chỗ phải đổi:
-
-| Chỗ | Ghi chú |
-|---|---|
-| **Cloudflare Tunnel ingress** | **Ngoài repo** — sửa trên dashboard. Đây mới là thứ thật sự định tuyến |
-| `docker/.env`: `RESET_PASSWORD_URL_BASE` | Sai → link đặt lại mật khẩu trỏ vào domain chết |
-| `docker/.env`: `SMTP_FROM` | Phải là sender **đã xác minh** ở nhà cung cấp SMTP — đổi domain là phải xác minh lại |
-| `src/app/config.py` | Hai giá trị mặc định tương ứng |
-| `app-flutter/lib/app/auth_gate.dart` | `_kDefaultBaseUrl` + đoạn di trú nói trên |
-| `scripts/deploy.sh` | `AC_URL` — health-check ở cuối script |
-| `src/app/main.py`, `README.md`, `scripts/seed_demo.py` | Tài liệu + tài khoản demo |
-
-Cách làm an toàn — mấu chốt là **một Cloudflare Tunnel gắn được nhiều hostname**, tất cả
-trỏ về cùng `http://localhost:8000`, nên hai tên chạy song song được mà không phải cắt đứt:
+Cách làm an toàn — mấu chốt là **một Cloudflare Tunnel gắn được nhiều hostname**:
 
 1. Thêm hostname mới vào **đúng tunnel đang chạy** → hai tên cùng sống
-2. Đổi `RESET_PASSWORD_URL_BASE` + `SMTP_FROM` trong `docker/.env` trên server, restart api
+2. Đổi `RESET_PASSWORD_URL_BASE` + `SMTP_FROM` trong `docker/.env`, restart api
 3. Phát hành app mới (default mới + đoạn di trú) — **qua domain cũ, lúc nó còn sống**
-4. Theo dõi cột **phiên bản app** trong web quản trị (`users.app_version`, ghi lại mỗi lần
-   đăng nhập) để biết chính xác khách nào đã lên bản mới
+4. Theo dõi cột **phiên bản app** trong web quản trị để biết khách nào đã lên bản mới
 5. Chỉ khi không còn ai dùng bản cũ mới gỡ hostname cũ
 
-Chưa bán cho ai thì bỏ hết năm bước trên, đổi thẳng.
-
-**Chuyển sang *path* (`vi-du.com/aircon`) thay vì subdomain là việc khác hẳn** — nặng hơn
-nhiều: toàn bộ route đang gắn ở gốc (`/web`, `/api/v1`, `/app`, `/web-static`), phải đặt
-`root_path` cho FastAPI và sửa mọi link tuyệt đối trong template lẫn app.
+Chưa bán cho ai thì bỏ hết năm bước, đổi thẳng.
 
 ---
 
 ## Hướng dẫn sử dụng
 
-### Nhà quản trị (web)
+### Bên bán (web)
 
-1. **Đăng nhập** `/web/login` bằng tài khoản quản trị.
-2. **Bán sản phẩm** — vào *Khách hàng & Máy* → "Tạo sản phẩm + sinh mã", nhập số node.
-   Hệ thống tạo một mã kích hoạt gắn với sản phẩm (chưa cần nhập tên/SĐT khách).
-3. **Đưa mã cho khách** — khách nhập mã trong app; tên, SĐT, email của khách **tự hiện**
-   trên web.
-4. **Quản lý** — bấm vào khách để sửa/thêm/xoá node, cấp thêm mã, xoá mã dư, chỉnh cấu
-   hình thuật toán, xem số đo từng node.
-5. **Phát hành app** — vào *Phiên bản app* → tải APK lên với version code tăng dần. App
-   của khách sẽ tự báo có bản mới.
+1. **Đăng nhập** `/web/login`.
+2. **Bán sản phẩm** — *Khách hàng & Máy* → "Tạo sản phẩm + sinh mã", nhập số node.
+3. **Đưa mã cho khách** — khách nhập mã trong app; tên, SĐT, email **tự hiện** trên web.
+4. **Quản lý** — sửa/thêm/xoá node, cấp thêm mã, chỉnh cấu hình thuật toán, xem số đo.
+5. **Phát hành app** — *Phiên bản app* → tải APK với version code tăng dần.
 
 ### Khách hàng (app)
 
-1. Cài app → màn đăng nhập → "Mới mua máy? Kích hoạt bằng mã".
-2. Nhập **mã kích hoạt** + email + mật khẩu (+ tên, SĐT không bắt buộc) → tạo tài khoản.
+1. Cài app → "Mới mua máy? Kích hoạt bằng mã".
+2. Nhập **mã kích hoạt** + email + mật khẩu → tạo tài khoản.
 3. Dùng bảng điều khiển để xem nhiệt độ đặt, số đo trực tiếp và điều khiển máy lạnh.
 4. Khi có bản cập nhật, app tự hiện hộp thoại tải bản mới.
 
@@ -449,13 +539,16 @@ nhiều: toàn bộ route đang gắn ở gốc (`/web`, `/api/v1`, `/app`, `/we
 ## Bảo mật
 
 - Bí mật thật (**token tunnel, JWT secret, mật khẩu DB, MQTT**) nằm trong `.env` /
-  `docker/.env` — **được `.gitignore` loại khỏi repo**. Trong repo chỉ có `.env.example`
-  là mẫu placeholder.
-- **`FirmWare/*/src/config.h` bị ignore** — mỗi node có mật khẩu WiFi của khách và một cặp
-  `DEVICE_UUID`/`MQTT_PASSWORD` riêng. Repo chỉ có `config.h.example` là mẫu rỗng.
+  `docker/.env` — **được `.gitignore` loại khỏi repo**.
+- **`FirmWare/*/src/config.h` và `esp32-room/nodes.ini` bị ignore** — mỗi node có mật khẩu
+  WiFi của khách và một cặp `DEVICE_UUID`/`MQTT_PASSWORD` riêng.
+- **`edge-ai/applab/BreezeLink/python/.env` bị ignore** — chứa `EDGE_ORG_ID` của hộ.
 - APK, keystore ký app, khoá riêng đều bị ignore.
 - Trang quản trị **chỉ dành cho nhân viên** (`is_sysadmin`); khách hàng dùng app.
-- Xoá khách hàng yêu cầu gõ đúng tên để xác nhận (thao tác cascade, không hoàn tác).
+- Xoá khách hàng yêu cầu gõ đúng tên để xác nhận (cascade, không hoàn tác).
+- `link_key` giữa UNO Q và gateway **không phải xác thực** — nó chặn được một UNO Q của hộ
+  khác vô tình nối nhầm, không chặn được kẻ cố ý. Mối đe doạ ở đây (ai đó cầm được dây UART
+  trong nhà bạn) không tương xứng với chi phí siết chặt.
 
 > Nếu bạn tự triển khai bản riêng, hãy tạo `docker/.env` **trực tiếp trên server** với
 > `CF_TUNNEL_TOKEN`, `JWT_SECRET`, `POSTGRES_PASSWORD`… của riêng bạn — không commit.
