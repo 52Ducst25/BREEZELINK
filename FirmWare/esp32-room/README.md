@@ -28,15 +28,34 @@ nối GATT thật (hai chiều, MTU thương lượng được) và không bị 
 
 ## Nạp firmware
 
+Bốn bo chạy **cùng một firmware**, khác nhau đúng hai giá trị (`DEVICE_UUID`,
+`ROOM_CORNER`). Nên chúng là **bốn env**, không phải bốn thư mục:
+
 ```bash
 cd FirmWare/esp32-room
-cp src/config.h.example src/config.h    # điền WIFI_SSID + DEVICE_UUID
-pio run -e esp32c3-room -t upload --upload-port COMx
-pio device monitor -p COMx -b 115200
+cp src/config.h.example src/config.h     # WIFI_SSID + FW_VERSION, dùng chung cả 4 bo
+cp nodes.ini.example nodes.ini           # danh tính từng bo
+
+pio run -e ss1 -t upload --upload-port COM30
+pio run -e ss4 -t upload --upload-port COM33
+pio device monitor -e ss1 --port COM30
+
+pio run                                   # dựng cả 4 — kiểm một thay đổi có gãy bo nào không
 ```
 
+Mỗi env có thư mục build riêng (`.pio/build/ss1…`), nên nạp bo này không phải dựng lại bo kia.
+
+**Vì sao không tách bốn thư mục:** tách là bốn bản sao của `main.cpp` +
+`room-sensor.cpp`. Sửa một lỗi phải sửa bốn lần, và lần thứ tư sẽ có người quên — rồi
+một góc phòng chạy bản cũ mà không ai nhận ra, vì nó **vẫn gửi số đo bình thường**.
+
+**Vì sao danh tính rời khỏi `config.h`:** file đó chỉ có một, mà bốn bo thì khác nhau.
+Nạp bo thứ ba nghĩa là sửa file rồi nạp, sửa lại rồi nạp bo thứ tư — và không cách nào
+nhìn vào thư mục mà biết nó đang giữ danh tính của bo nào.
+
 `DEVICE_UUID` lấy ở web admin → **Khách hàng** → mở node *Cảm biến phòng* → mục
-**Nạp firmware**. Mỗi góc là một hàng device riêng, nên **mỗi bo một uuid khác nhau**.
+**Nạp firmware**. Mỗi góc là một hàng device riêng, nên **mỗi bo một uuid khác nhau** —
+trùng uuid là hai bo cùng ghi đè lên một hàng device và biểu đồ nhảy loạn không lý do.
 
 ## Ba điều dễ mất thời gian nhất
 

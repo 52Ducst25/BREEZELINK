@@ -49,6 +49,9 @@
 #include "unoq-link.h"
 #include "ir-io.h"
 #include "ir-store.h"
+// Nhật ký từng gói vào/ra. TẮT trừ khi biên dịch với -D GATEWAY_TRACE=1, và khi
+// tắt thì mọi lời gọi dưới đây bị trình biên dịch xoá sạch (thân hàm rỗng).
+#include "serial-trace.h"
 // Bo QR Box Advance Touch Screen: màn 2.8" chạy trên TÁC VỤ RIÊNG Ở LÕI 0.
 // Thiết kế giao diện + lý do phải tách lõi: ../../Interface/README.md và ui.h.
 // loop() dưới đây không vẽ một pixel nào — nó chỉ đổ số liệu sang và rút lệnh về.
@@ -211,12 +214,18 @@ static void publishSlaveTelemetry(const char *uuid, const uint8_t mac[6],
   const String topic = String("bl/") + ORG_ID + "/" + uuid + "/telemetry";
   const bool ok = mqtt.publish(topic.c_str(), (const uint8_t *)buf, n, false);
   Serial.printf("[relay] %s t=%.1f h=%.0f -> %s\n", uuid, t, h, ok ? "da chuyen" : "LOI");
+  SerialTrace::mqttOut(topic.c_str(), (const uint8_t *)buf, n, ok);
 }
 
 /// Một gói vừa tới từ bất kỳ node slave nào — góc phòng hoặc ngoài trời.
 static void onSlavePacket(const AcEspNowPacket &pkt, const uint8_t mac[6]) {
   const char *uuid = pkt.device_uuid;
   const bool isRoom = (pkt.node_kind == AC_NODE_ROOM);
+
+  // TRƯỚC MỌI THỨ KHÁC: ghi lại gói đúng như nó tới. Các nhánh dưới đây lọc NaN,
+  // chặn theo nhịp, bỏ qua bảng đầy — nên đặt trace sau chúng là mất đúng những
+  // gói cần nhìn nhất khi đi tìm mất sóng.
+  SerialTrace::packetIn(pkt, mac);
 
   // MỌI gói đều tính là nhịp tim -> phát hiện mất kết nối nhanh. Kể cả gói
   // KHÔNG có số đo (NaN, do cảm biến slave lỗi): node vẫn sống, chỉ cảm biến
@@ -484,6 +493,10 @@ static void takeCommand(JsonDocument &doc) {
 }
 
 static void onMessage(char *topic, byte *payload, unsigned int len) {
+  // Ghi TRƯỚC khi bóc JSON: gói hỏng khuôn cũng là gói đã tới, mà nhánh lỗi bên
+  // dưới chỉ in tên lỗi chứ không in nội dung — đúng lúc cần nhìn nội dung nhất.
+  SerialTrace::mqttIn(topic, payload, len);
+
   JsonDocument doc;
   DeserializationError err = deserializeJson(doc, payload, len);
   if (err) {
@@ -518,6 +531,7 @@ static void publishState() {
   char buf[160];
   size_t n = serializeJson(doc, buf);
   bool ok = mqtt.publish(tState.c_str(), (const uint8_t *)buf, n, true);
+  SerialTrace::mqttOut(tState.c_str(), (const uint8_t *)buf, n, ok);
   Serial.printf("[state] ack=%s mode=%s setpoint=%d -> %s\n",
                 pending.reqId, pending.mode, pending.setpoint, ok ? "da gui" : "GUI LOI");
 }
@@ -595,14 +609,22 @@ static void wifiDiagnose() {
   WiFi.scanDelete();
 }
 
+/// Số lần thử WiFi lúc KHỞI ĐỘNG trước khi chạy tiếp mà không có mạng.
+///
+/// CÓ GIỚI HẠN, KHÔNG CHỜ MÃI. Bản trước chờ vô hạn ở đây với lý do "không có
+/// mạng thì node chẳng làm được gì" — lý do đó SAI, và nó là lỗi nghiêm trọng
+/// nhất từng có trong file này (xem serviceNetwork bên dưới). Không có mạng thì
+/// node vẫn thu được ESP-NOW, vẫn nói chuyện được với UNO Q qua UART, và vẫn bắn
+/// được hồng ngoại — tức là vẫn điều khiển được máy lạnh. Đó chính xác là thứ
+/// lớp edge sinh ra để làm.
+static const uint8_t WIFI_BOOT_ATTEMPTS = 3;
+
 static void connectWifi() {
   if (WiFi.status() == WL_CONNECTED) return;
   WiFi.mode(WIFI_STA);
 
-  // Vẫn chặn tới khi vào được mạng — không có mạng thì node chẳng làm được gì —
-  // nhưng cứ 20 giây lại nói ra MỘT LÝ DO thay vì rải dấu chấm im lặng.
-  for (uint8_t attempt = 1;; attempt++) {
-    Serial.printf("WiFi -> \"%s\" (lan %u) ", WIFI_SSID, attempt);
+  for (uint8_t attempt = 1; attempt <= WIFI_BOOT_ATTEMPTS; attempt++) {
+    Serial.printf("WiFi -> \"%s\" (lan %u/%u) ", WIFI_SSID, attempt, WIFI_BOOT_ATTEMPTS);
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     const uint32_t deadline = millis() + WIFI_ATTEMPT_MS;
     while (WiFi.status() != WL_CONNECTED && (int32_t)(millis() - deadline) < 0) {
@@ -610,37 +632,103 @@ static void connectWifi() {
       Serial.print(".");
     }
     if (WiFi.status() == WL_CONNECTED) break;
-    wifiDiagnose();
+    // Quét CHỈ ĐƯỢC PHÉP Ở ĐÂY, lúc ESP-NOW chưa dựng. scanNetworks() nhảy khắp
+    // các kênh và bỏ radio lại ở kênh cuối — gọi nó sau khi ESP-NOW đã chạy là
+    // kéo gateway ra khỏi kênh của các node, và không một dòng log nào báo.
+    if (attempt < WIFI_BOOT_ATTEMPTS) wifiDiagnose();
   }
 
-  // BẮT BUỘC cho node master: tắt tiết kiệm điện WiFi.
-  // ESP32 mặc định bật modem sleep khi đã vào mạng — radio ngủ giữa các beacon.
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.printf("\nKHONG VAO DUOC WiFi sau %u lan — CHAY TIEP KHONG CO MANG.\n"
+                  "  ESP-NOW, UART toi UNO Q va hong ngoai van hoat dong; chi mat\n"
+                  "  duong len cloud. serviceNetwork() se thu lai nen trong loop().\n",
+                  WIFI_BOOT_ATTEMPTS);
+    return;
+  }
+
+  // TẮT tiết kiệm điện WiFi. BẮT BUỘC cho node master, và giờ làm được vì đường
+  // tới UNO Q đã chuyển sang UART — không còn Bluetooth để ràng buộc.
+  //
+  // ESP32 mặc định bật modem sleep khi đã vào mạng: radio ngủ giữa các beacon.
   // Lưu lượng WiFi thường không sao vì router ĐỆM HỘ trong lúc ngủ, nhưng gói
-  // ESP-NOW từ slave thì KHÔNG ai đệm: đến đúng lúc radio ngủ là mất luôn, mà
-  // broadcast lại không có ACK nên slave vẫn tưởng gửi thành công. Triệu chứng:
-  // chạy tốt vài phút rồi master "điếc" hẳn dù MQTT vẫn bình thường.
+  // ESP-NOW từ slave thì KHÔNG ai đệm — đến đúng lúc radio ngủ là mất luôn, mà
+  // broadcast không có ACK nên slave vẫn tưởng gửi thành công.
+  //
+  // ĐÃ ĐO CÁI GIÁ ĐÓ, đừng bật lại vì bất kỳ lý do gì:
+  //     modem sleep BẬT (thời BLE):  0,31 gói/giây
+  //     modem sleep TẮT:             0,80 gói/giây  ← đúng 4 node × 5 giây
+  // Node ngoài trời khi đó rơi ~50% và nhấp nháy ONLINE/OFFLINE liên tục.
+  //
+  // Hệ quả: KHÔNG bao giờ bật lại Bluetooth trên bo này. Chip từ chối chạy WiFi +
+  // BT với modem sleep tắt — nó abort() chứ không chạy kém đi
+  // (`Should enable WiFi modem sleep when both WiFi and Bluetooth are enabled`),
+  // và bo sẽ lặp khởi động lại vô hạn mỗi ~6 giây.
   WiFi.setSleep(false);
 
   Serial.printf(" OK  IP=%s  RSSI=%d dBm\n", WiFi.localIP().toString().c_str(), (int)WiFi.RSSI());
 }
 
-static void connectMqtt() {
+/// MỘT lần thử nối MQTT. Trả true nếu vào được.
+static bool mqttTryConnect() {
   String cid = String("breezelink_") + DEVICE_UUID;  // = mqtt_naming.client_id()
-  while (!mqtt.connected()) {
-    Serial.print("MQTT ... ");
-    // LWT (will): topic=status, qos=1, retain=true, payload="offline".
-    if (mqtt.connect(cid.c_str(), MQTT_USERNAME, MQTT_PASSWORD,
-                     tStatus.c_str(), 1, true, "offline")) {
-      Serial.println("connected");
-      mqtt.publish(tStatus.c_str(), "online", true);  // retained -> web thấy "Trực tuyến"
-      // QoS1: lệnh điều khiển máy lạnh không được phép rơi âm thầm.
-      mqtt.subscribe(tCmd.c_str(), 1);
-    } else {
-      // rc=-2 mạng lỗi; rc=4 sai user/pass; rc=5 chưa được cấp quyền trên broker.
-      Serial.printf("that bai rc=%d (thu lai sau 2s)\n", mqtt.state());
-      delay(2000);
-    }
+  // LWT (will): topic=status, qos=1, retain=true, payload="offline".
+  if (mqtt.connect(cid.c_str(), MQTT_USERNAME, MQTT_PASSWORD,
+                   tStatus.c_str(), 1, true, "offline")) {
+    Serial.println("MQTT ... connected");
+    mqtt.publish(tStatus.c_str(), "online", true);  // retained -> web thấy "Trực tuyến"
+    // QoS1: lệnh điều khiển máy lạnh không được phép rơi âm thầm.
+    mqtt.subscribe(tCmd.c_str(), 1);
+    return true;
   }
+  // rc=-2 mạng lỗi; rc=4 sai user/pass; rc=5 chưa được cấp quyền trên broker.
+  Serial.printf("MQTT ... that bai rc=%d\n", mqtt.state());
+  return false;
+}
+
+/// Bao lâu thử nối lại một lần khi đang mất mạng (ms).
+static const uint32_t NET_RETRY_MS = 15000UL;
+
+/// Giữ WiFi/MQTT sống mà KHÔNG CHẶN loop(). Gọi mỗi vòng.
+///
+/// ĐÂY LÀ CHỖ SỬA LỖI NGHIÊM TRỌNG NHẤT CỦA FILE NÀY.
+///
+/// Bản trước gọi thẳng connectWifi() + connectMqtt() trong loop(), mà cả hai đều
+/// là vòng lặp CHỜ VÔ HẠN. Hệ quả: mất WiFi là loop() không bao giờ quay lại —
+///
+///   ESP-NOW ngừng thu   -> 4 góc phòng và node ngoài trời biến mất
+///   UART ngừng đẩy      -> UNO Q không còn ảnh chụp nào để tính
+///   lệnh UNO Q không ai đọc -> edge không lái được máy lạnh
+///   IR ngừng thi hành   -> kể cả lệnh đã nằm trong hàng đợi
+///
+/// Tức là mất mạng làm CHẾT luôn lớp dự phòng sinh ra để chịu đựng đúng sự cố
+/// đó. Cả kiến trúc edge-ai dựa trên giả định "gateway vẫn chạy khi mất cloud",
+/// và giả định đó sai ngay trong vòng lặp chính.
+///
+/// Nay: thử lại theo nhịp, không chờ, và TUYỆT ĐỐI KHÔNG QUÉT. scanNetworks()
+/// nhảy khắp các kênh và bỏ radio lại ở kênh cuối — gọi nó khi ESP-NOW đang chạy
+/// là tự cắt đứt đường thu của chính mình, âm thầm.
+static void serviceNetwork() {
+  static uint32_t lastTry = 0;
+  const uint32_t now = millis();
+
+  if (WiFi.status() != WL_CONNECTED) {
+    if (now - lastTry >= NET_RETRY_MS) {
+      lastTry = now;
+      Serial.println("[net] mat WiFi — thu noi lai (khong chan vong lap)");
+      WiFi.begin(WIFI_SSID, WIFI_PASSWORD);   // đặt lệnh rồi đi tiếp, không chờ
+    }
+    return;   // chưa có WiFi thì cũng chưa thể có MQTT
+  }
+
+  if (!mqtt.connected()) {
+    if (now - lastTry >= NET_RETRY_MS) {
+      lastTry = now;
+      mqttTryConnect();   // MỘT lần; hỏng thì vòng sau thử tiếp
+    }
+    return;
+  }
+
+  mqtt.loop();
 }
 
 void setup() {
@@ -673,7 +761,9 @@ void setup() {
   // sau ~22s. Ưu tiên ỔN ĐỊNH: hạ xuống 3-5s thì chỉ cần mạng chớp một nhịp là
   // broker cắt phiên rồi client nối lại, trạng thái lật online/offline liên tục.
   mqtt.setKeepAlive(15);
-  connectMqtt();
+  // MỘT lần lúc khởi động. Hỏng thì KHÔNG chặn — serviceNetwork() trong loop()
+  // sẽ thử lại nền, và mọi thứ không cần mạng (ESP-NOW, UART, IR) chạy ngay.
+  if (WiFi.status() == WL_CONNECTED) mqttTryConnect();
 
   // ESP-NOW khởi tạo SAU khi WiFi đã kết nối: nó dùng đúng kênh WiFi đang bám,
   // nên phải để WiFi chốt kênh trước thì slave (đang dò kênh router) mới gặp.
@@ -684,18 +774,13 @@ void setup() {
     Serial.println("ESP-NOW KHOI TAO LOI — se khong nhan duoc so lieu tu node ngoai troi");
   }
 
-  // BLE khởi tạo SAU WiFi + ESP-NOW: cả ba dùng chung một khối radio 2.4GHz, và
-  // bộ đồng tồn tại chia thời gian tốt hơn khi WiFi đã vào mạng và chốt kênh
-  // xong. Dựng BLE trước lúc WiFi còn đang dò kênh thì hai bên tranh nhau đúng
-  // giai đoạn nhạy cảm nhất.
+  // UART tới UNO Q. Thứ tự không còn quan trọng như thời BLE (nó không đụng
+  // radio), nhưng giữ ở đây để log khởi động đọc theo đúng chiều dữ liệu chảy.
   //
-  // BLE Ở ĐÂY CHỈ ĐỂ NÓI CHUYỆN VỚI ARDUINO UNO Q, không liên quan gì tới cảm
-  // biến — số đo phòng đi ESP-NOW. Nên hỏng BLE thì mất lớp edge AI, KHÔNG mất
+  // ĐƯỜNG NÀY CHỈ ĐỂ NÓI CHUYỆN VỚI ARDUINO UNO Q, không liên quan gì tới cảm
+  // biến — số đo phòng đi ESP-NOW. Nên hỏng nó thì mất lớp edge AI, KHÔNG mất
   // nhiệt độ trong nhà; đó là lý do dòng dưới không chặn khởi động.
-  if (!UnoQLink::begin(ORG_ID, "BreezeLink-GW")) {
-    Serial.println("BLE KHOI TAO LOI — mat duong toi UNO Q (edge AI). "
-                   "Cam bien va dieu khien van chay binh thuong.");
-  }
+  UnoQLink::begin(ORG_ID);
   // Tự suy ra đường đi thay vì ghi cứng: cặp UART_1 (GPIO2/15) ra P3 qua TXS0104
   // nên phụ thuộc EN_LEVEL_SHIFT, còn lại nối 3.3V thẳng. Bản trước ghi cứng
   // "qua TXS0104" từ hồi IR phát còn ở GPIO15, và dòng log đó tiếp tục khẳng
@@ -927,6 +1012,7 @@ static void pushUnoQSnapshot() {
   acUnoQSealSnapshot(&snap);
 
   UnoQLink::publish(snap);
+  SerialTrace::snapshotOut(snap, UnoQLink::connected());
 }
 
 /// Thi hành (hoặc chỉ ghi nhận) thứ UNO Q vừa gửi sang.
@@ -1068,9 +1154,10 @@ static void pushUiModel() {
 }
 
 void loop() {
-  connectWifi();
-  if (!mqtt.connected()) connectMqtt();
-  mqtt.loop();
+  // KHÔNG BAO GIỜ gọi connectWifi()/mqttTryConnect() thẳng ở đây — cả hai đều
+  // chờ. serviceNetwork() thử lại theo nhịp rồi trả về ngay, để phần dưới luôn
+  // chạy được kể cả khi mất mạng hoàn toàn. Xem chú thích của nó cho lý do.
+  serviceNetwork();
 
   // Rút lệnh người dùng bấm MỖI VÒNG (nút phải phản hồi ngay), nhưng ảnh chụp
   // trạng thái chỉ đẩy sang giao diện theo nhịp 200ms — đúng nhịp vẽ lại của màn
@@ -1165,4 +1252,9 @@ void loop() {
                   (unsigned long)EspNowRelay::droppedCount(),
                   RoomRegistry::knownCount(), RoomRegistry::onlineCount());
   }
+
+  // Bảng Δ trung bình theo từng node. Bộ đếm tổng ở trên nói "có mất gói không";
+  // bảng này nói "node NÀO đang mất" — hai câu hỏi khác nhau, và câu thứ hai mới
+  // dẫn tới chỗ cần sửa.
+  SerialTrace::summary();
 }

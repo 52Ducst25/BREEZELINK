@@ -33,22 +33,20 @@
 #define DEVICE_UUID    "DAN_DEVICE_UUID"
 #define FW_VERSION     "gateway-2.0"
 
-// -------- 4) Bảng node cảm biến góc phòng --------
-//  THỨ TỰ LÀ HỢP ĐỒNG: ô số i phải là device_uuid của bo đã nạp ROOM_NODE_ID = i.
+// -------- 4) Node cảm biến góc phòng: KHÔNG PHẢI KHAI GÌ Ở ĐÂY --------
+//  Trước đây chỗ này có một mảng ROOM_NODE_UUIDS, và thêm/bớt một góc là phải
+//  nạp lại gateway. Nó đã bỏ khi các node góc chuyển sang ESP-NOW: gói ESP-NOW
+//  chở được 250 byte nên mỗi node mang thẳng device_uuid 32 ký tự của chính nó
+//  (../../shared/espnow-message.h). Gateway cứ thế publish hộ vào topic của node
+//  đó — nó không cần biết trước có bao nhiêu góc, cũng không cần biết góc nào là
+//  góc nào.
 //
-//  Vì sao gateway phải giữ bảng này thay vì để node tự khai như ESP-NOW: gói BLE
-//  chỉ có 20 byte (advertising cổ điển giới hạn 31 byte), không nhét nổi một
-//  uuid 32 ký tự — xem shared/ble-mesh-message.h. Đánh đổi: thêm/bớt node phòng
-//  là PHẢI nạp lại gateway.
+//  Kèm theo đó là mất hẳn một lớp lỗi: mảng cũ lệch một ô thì số đo của góc A
+//  được nộp lên cloud dưới tên góc B, biểu đồ vẫn có số, không lỗi ở đâu cả, và
+//  hai góc bị hoán tên vĩnh viễn.
 //
-//  LỆCH MỘT Ô LÀ HỎNG CÂM: số đo của góc A được nộp lên cloud dưới tên góc B.
-//  Biểu đồ vẫn có số, không lỗi ở đâu cả, chỉ là hai góc bị hoán tên vĩnh viễn.
-//  Trang web "Nạp firmware" của bất kỳ node phòng nào in sẵn cả mảng này — chép
-//  nguyên cụm thay vì gõ tay từng uuid.
-//
-//  Ô để chuỗi rỗng "" = chưa lắp góc đó; gateway bỏ qua node_id tương ứng.
-#define ROOM_NODE_UUIDS { "DAN_UUID_GOC_0", "DAN_UUID_GOC_1", \
-                          "DAN_UUID_GOC_2", "DAN_UUID_GOC_3" }
+//  Node góc phòng cấu hình ở ../../esp32-room/src/config.h — mỗi bo một
+//  DEVICE_UUID riêng, lấy trên web ở mục "Nạp firmware" của chính node đó.
 
 // ============================================================================
 //  Phần cứng — bo QR Box Advance Touch Screen

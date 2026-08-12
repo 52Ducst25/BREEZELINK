@@ -4,24 +4,33 @@
 #include <string.h>
 
 // ============================================================================
-//  Đường Bluetooth giữa GATEWAY (trong nhà) và ARDUINO UNO Q (edge AI)
+//  Đường UART giữa GATEWAY (trong nhà) và ARDUINO UNO Q (edge AI)
 // ----------------------------------------------------------------------------
-//  AI LÀ AI:
-//    gateway = PERIPHERAL (GATT server) — nó quảng bá và chờ
-//    UNO Q   = CENTRAL (GATT client)    — nó quét, kết nối, đọc/ghi
+//  TRƯỚC ĐÂY LÀ BLUETOOTH. Bỏ vì một phép đo, không phải vì sở thích:
 //
-//  Chia vai như vậy vì hai lý do, không phải quy ước tuỳ tiện:
-//    1. UNO Q chạy Debian + BlueZ, một central đầy đủ và dễ lập trình (bleak).
-//       ESP32 làm peripheral là khuôn mẫu chuẩn và nhẹ nhất cho nó.
-//    2. Gateway phải luôn sẵn sàng cho MỘT client bất kỳ đến lấy dữ liệu. Nếu
-//       gateway đi tìm UNO Q thì mỗi lần UNO Q khởi động lại, gateway phải quét
-//       và kết nối lại — mà quét BLE trên gateway là thứ tranh sóng trực tiếp
-//       với WiFi/MQTT, đường DUY NHẤT để lệnh máy lạnh đi xuống.
+//    Gateway, BLE bật:   0,31 gói ESP-NOW/giây
+//    Gateway, BLE tắt:   0,80 gói/giây   ← đúng bằng 4 node × 5 giây
 //
-//  VÌ SAO GATT CHỨ KHÔNG PHẢI ADVERTISING NHƯ CÁC NODE CẢM BIẾN:
-//    đây là đường HAI CHIỀU — UNO Q phải gửi lệnh ngược về gateway. Advertising
-//    chỉ đi một chiều, và trần 31 byte của nó không chở nổi ảnh chụp 4 góc phòng.
-//    GATT có MTU thương lượng được tới hàng trăm byte và có kênh ghi ngược.
+//  Bật Bluetooth thì chip BẮT BUỘC phải bật ngủ WiFi — nó abort chứ không chạy
+//  kém đi (`Should enable WiFi modem sleep when both WiFi and Bluetooth are
+//  enabled`). Mà radio ngủ thì gói ESP-NOW đến đúng lúc đó là mất, không ai đệm
+//  hộ, và broadcast không có ACK nên node vẫn báo "đã phát". Node ngoài trời rơi
+//  ~50% và nhấp nháy ONLINE/OFFLINE; tắt BLE là vào sạch, 0 gói rơi.
+//
+//  Tức là BLE ăn mất ~60% khả năng thu của chính cái gateway nó phục vụ. UART
+//  không đụng tới radio nên lấy lại toàn bộ. Cái giá là một sợi dây, và hai bo
+//  phải nằm cạnh nhau.
+//
+//  MẤT LUÔN CẢ MỘT MỚ LỘN XỘN: không quét, không ghép đôi, không thương lượng
+//  MTU (ảnh chụp 39 byte từng bị nghi cắt cụt vì BlueZ báo MTU 23), không NimBLE
+//  ~100KB flash, không ai tranh ăng-ten 2.4GHz.
+//
+//  KHUÔN GÓI GIỮ NGUYÊN từ bản BLE — đó là phần đắt nhất và nó không dính gì tới
+//  đường ống. Chỉ thêm CRC cho gói lệnh (xem AcUnoQCommandHeader).
+//
+//  ĐỒNG BỘ KHUNG: gói có kích thước cố định, mở đầu bằng `magic`, kết bằng CRC.
+//  Bên nhận chờ thấy magic rồi gom đủ byte; sai thì trượt một byte tìm lại. Nhờ
+//  vậy nhiễu trên dây hay cắm dây giữa chừng đều tự phục hồi.
 //
 //  NHỊ PHÂN CHỨ KHÔNG JSON: firmware không có bộ phân tích JSON nào rảnh cho
 //  đường này (ArduinoJson đang dành cho MQTT với bộ đệm 12KB), và struct packed
@@ -33,22 +42,18 @@
 // ============================================================================
 
 #define AC_UNOQ_MAGIC   0xAC
-#define AC_UNOQ_VERSION 1
+// 2 = bản UART (gói lệnh có thêm crc8). Bản 1 là BLE và KHÔNG tương thích:
+// gói lệnh v1 dài 12 byte, v2 dài 13. Bên nhận kiểm `version` nên hai bên lệch
+// phiên bản sẽ bị từ chối thẳng thay vì đọc lệch trường rồi ra lệnh sai.
+#define AC_UNOQ_VERSION 2
 
 /// Số góc phòng gateway báo cáo được trong một ảnh chụp. 4 là lắp thật; để 8 thì
 /// ảnh chụp phình lên vô ích, còn để 4 mà lắp 5 thì góc thứ 5 biến mất khỏi màn
 /// UNO Q trong im lặng — nên con số này khớp đúng số ô của RoomRegistry.
 #define AC_UNOQ_MAX_ROOMS 4
 
-// --- UUID dịch vụ + đặc tính -------------------------------------------------
-//  UUID 128-bit riêng, KHÔNG mượn UUID 16-bit chuẩn của Bluetooth SIG: dịch vụ
-//  này không phải "Environmental Sensing" chuẩn, và giả làm nó sẽ khiến mọi app
-//  BLE phổ thông diễn giải sai các byte.
-#define AC_UNOQ_SERVICE_UUID   "4f1c9a00-1c3e-4d5a-9b21-7e6d0a3f8c10"
-/// Ảnh chụp gateway -> UNO Q. READ + NOTIFY.
-#define AC_UNOQ_SNAPSHOT_UUID  "4f1c9a01-1c3e-4d5a-9b21-7e6d0a3f8c10"
-/// Lệnh/đề xuất UNO Q -> gateway. WRITE.
-#define AC_UNOQ_COMMAND_UUID   "4f1c9a02-1c3e-4d5a-9b21-7e6d0a3f8c10"
+// UUID dịch vụ/đặc tính của bản BLE đã bỏ — UART không có khái niệm đó. Chúng
+// từng ở đây; xem lịch sử git nếu cần quay lại Bluetooth.
 
 // --- Quy ước mã hoá giá trị --------------------------------------------------
 //  Nhiệt độ ×100 vào int16 (dải -327.68..327.67 °C), độ ẩm ×100 vào uint16.
@@ -75,7 +80,7 @@ enum AcUnoQMode : uint8_t {
 #define AC_UNOQ_FLAG_OVERRIDE    0x04  ///< người dùng đang giữ quyền (panel/app)
 #define AC_UNOQ_FLAG_OUT_ONLINE  0x08  ///< node ngoài trời còn nhịp tim
 
-/// Ảnh chụp gateway -> UNO Q. 44 byte.
+/// Ảnh chụp gateway -> UNO Q. 39 byte.
 ///
 /// Mang CẢ số từng góc LẪN trung vị, dù UNO Q tự tính lại được: trung vị là con
 /// số gateway ĐANG hiển thị trên tường, và nếu UNO Q tự tính ra một con khác thì
@@ -106,7 +111,7 @@ typedef struct __attribute__((packed)) {
   uint8_t  crc8;
 } AcUnoQSnapshot;
 
-/// Lệnh/đề xuất UNO Q -> gateway. 12 byte.
+/// Lệnh/đề xuất UNO Q -> gateway. 13 byte.
 typedef struct __attribute__((packed)) {
   uint8_t  magic;
   uint8_t  version;
@@ -116,7 +121,19 @@ typedef struct __attribute__((packed)) {
   uint8_t  reserved;   // giữ chỗ cho căn byte; phải = 0
   uint16_t seq;        // tăng mỗi lệnh — gateway bỏ bản lặp
   uint32_t link_key;   // = acEspNowSiteKey(ORG_ID), xem chú thích bên dưới
+  uint8_t  crc8;       // Dallas/Maxim trên 12 byte đứng trước
 } AcUnoQCommandHeader;
+
+/// VÌ SAO GÓI LỆNH CÓ CRC CÒN BẢN BLE THÌ KHÔNG:
+///
+/// Bản BLE dựa vào tầng liên kết của Bluetooth để đảm bảo toàn vẹn — hợp lý, vì
+/// BLE tự kiểm CRC24 mỗi gói và loại gói hỏng trước khi tới tầng ứng dụng.
+/// UART KHÔNG CÓ GÌ NHƯ VẬY: dây nhiễu, cắm rút giữa chừng, hai đầu lệch baud —
+/// tất cả đều đẩy byte rác lên thẳng.
+///
+/// Với ảnh chụp thì một bit lật chỉ làm sai một số đo trong một nhịp. Với LỆNH
+/// thì nó đổi `setpoint` hoặc `mode` rồi đi thẳng ra máy lạnh, và không có ai
+/// đứng giữa để thấy sai. Nên gói lệnh phải tự chứng minh mình nguyên vẹn.
 
 /// `kind` TÁCH ĐỀ XUẤT KHỎI LỆNH, và đây là ranh giới quan trọng nhất của giao
 /// thức này: bình thường UNO Q chỉ ADVICE (gateway ghi log + hiện lên màn, KHÔNG
@@ -169,6 +186,21 @@ static inline void acUnoQSealSnapshot(AcUnoQSnapshot *s) {
   s->crc8 = acUnoQCrc8((const uint8_t *)s, (uint8_t)(sizeof(*s) - 1));
 }
 
+static inline void acUnoQSealCommand(AcUnoQCommandHeader *c) {
+  c->crc8 = acUnoQCrc8((const uint8_t *)c, (uint8_t)(sizeof(*c) - 1));
+}
+
+/// Gói lệnh có nguyên vẹn không. Bên GỬI seal, bên NHẬN check — cặp này phải đi
+/// cùng nhau, quên một bên là mọi lệnh bị từ chối (hoặc tệ hơn: mọi lệnh được
+/// nhận kể cả gói hỏng).
+static inline bool acUnoQCheckCommand(const AcUnoQCommandHeader *c) {
+  return c->crc8 == acUnoQCrc8((const uint8_t *)c, (uint8_t)(sizeof(*c) - 1));
+}
+
+static inline bool acUnoQCheckSnapshot(const AcUnoQSnapshot *s) {
+  return s->crc8 == acUnoQCrc8((const uint8_t *)s, (uint8_t)(sizeof(*s) - 1));
+}
+
 // --- mã hoá / giải mã giá trị ------------------------------------------------
 
 static inline int16_t acUnoQEncodeTemp(float celsius) {
@@ -200,6 +232,6 @@ static inline uint16_t acUnoQEncodeRh(float percent) {
 #ifdef __cplusplus
 static_assert(sizeof(AcUnoQSnapshot) == 39,
               "AcUnoQSnapshot doi kich thuoc — cap nhat edge-ai/edge_ai/protocol.py cho khop");
-static_assert(sizeof(AcUnoQCommandHeader) == 12,
+static_assert(sizeof(AcUnoQCommandHeader) == 13,
               "AcUnoQCommandHeader doi kich thuoc — cap nhat edge-ai/edge_ai/protocol.py cho khop");
 #endif

@@ -27,7 +27,27 @@ static void enqueue(const uint8_t *mac, const uint8_t *data, int len) {
   // lắp ngoài thực địa vẫn chạy v1 và firmware nó không có OTA, nên gateway phải
   // hiểu được nó. Gói v1 được điền node_kind = OUTDOOR; xem espnow-message.h.
   AcEspNowPacket parsed;
-  if (!acEspNowParse(data, len, &parsed)) return;
+  if (!acEspNowParse(data, len, &parsed)) {
+    // KÊU LÊN, ĐỪNG IM. Bản trước `return` thẳng, nên gói sai khuôn không vào bất
+    // kỳ bộ đếm nào — và "nhan 0, rot 0" trông y hệt ca KHÔNG CÓ GÓI NÀO TỚI.
+    // Hai ca đó cần đi tìm ở hai chỗ hoàn toàn khác nhau: một bên là sóng/kênh,
+    // bên kia là khuôn gói lệch giữa hai firmware. Đã mất thời gian vì đúng chỗ
+    // này một lần.
+    //
+    // In thưa dần: 3 gói đầu rồi mỗi 50 gói, để một node hàng xóm phát ESP-NOW
+    // liên tục không nhấn chìm log.
+    static uint32_t nBad = 0;
+    if (++nBad <= 3 || nBad % 50 == 0) {
+      Serial.printf("[espnow] bo goi LA: %d byte", len);
+      if (mac) Serial.printf(" tu %02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2],
+                             mac[3], mac[4], mac[5]);
+      if (len >= 2) Serial.printf(" · magic=0x%02X version=%u", data[0], data[1]);
+      Serial.printf(" (mong doi %u hoac %u byte, magic=0x%02X)\n",
+                    (unsigned)AC_ESPNOW_V1_SIZE, (unsigned)sizeof(AcEspNowPacket),
+                    AC_ESPNOW_MAGIC);
+    }
+    return;
+  }
 
   uint8_t next = (uint8_t)((head + 1) % QUEUE_SIZE);
   if (next == tail) {           // đầy — thà bỏ gói mới còn hơn ghi đè gói chưa gửi
@@ -55,6 +75,9 @@ static void onRecv(const uint8_t *mac, const uint8_t *data, int len) {
 
 bool begin() {
   if (esp_now_init() != ESP_OK) return false;
+  // ĐÃ THỬ VÀ KHÔNG PHẢI: khai thêm peer quảng bá ở phía nhận không làm callback
+  // chạy. Nhận broadcast đúng là không cần peer — ghi lại ở đây để lần sau khỏi
+  // thử lại cùng một thứ.
   return esp_now_register_recv_cb(onRecv) == ESP_OK;
 }
 

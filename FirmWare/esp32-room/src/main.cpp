@@ -33,7 +33,29 @@
 /// một hàng telemetry trong Postgres.
 ///
 /// 15s khớp TELEMETRY_MS của gateway.
-static const unsigned long PUBLISH_PERIOD_MS = 15000UL;
+///
+/// Cho phép ép nhanh hơn lúc truy lỗi bằng `-D ROOM_PUBLISH_MS=3000`: đo mất gói
+/// ở nhịp 15s cần hàng phút mới đủ mẫu, mà lúc đang dò sóng thì chờ lâu là mất
+/// hẳn khả năng thử-sai. KHÔNG dùng nhịp nhanh khi chạy thật — mỗi gói là một
+/// hàng telemetry trong Postgres.
+///
+/// 5 GIÂY, KHÔNG PHẢI 15. Đây là NHỊP TIM, không phải nhịp ghi dữ liệu:
+/// gateway đã tự chặn việc đẩy lên cloud ở 15s (SlaveWatch::RELAY_INTERVAL_MS),
+/// nên phát dày hơn KHÔNG sinh thêm một hàng telemetry nào trong Postgres.
+///
+/// Vì sao phải dày: broadcast ESP-NOW không có ACK nên gói rơi là mất hẳn, và
+/// gateway phải chia sóng 2.4GHz với WiFi + Bluetooth nên tỉ lệ rơi là đáng kể
+/// (đo được: mất khoảng hai phần ba số gói khi BLE bật). Với nhịp 15s và ngưỡng
+/// mất kết nối 20s của SlaveWatch, chỉ cần RƠI MỘT GÓI là node bị báo mất kết
+/// nối — đo trên bàn thì bốn góc nhấp nháy online/offline liên tục. 5s cho phép
+/// rơi ba nhịp liên tiếp mà vẫn được coi là còn sống.
+///
+/// Con số này khớp với giả định đã ghi sẵn trong slave-watch.h ("nhịp tim dày,
+/// ngưỡng rộng"); bản 15s trước đây là chỗ lệch khỏi thiết kế đó.
+#ifndef ROOM_PUBLISH_MS
+#define ROOM_PUBLISH_MS 5000UL
+#endif
+static const unsigned long PUBLISH_PERIOD_MS = ROOM_PUBLISH_MS;
 
 /// Nhịp in dòng tổng kết ra serial. Thưa hơn nhịp gửi nhiều: bo này chạy hàng
 /// tháng không ai cắm cáp, log dày chỉ tổ trôi mất dòng đáng đọc lúc truy lỗi.
@@ -87,15 +109,39 @@ void loop() {
     }
   }
 
+#if defined(ESPNOW_SNIFF) && ESPNOW_SNIFF
+  // Báo cáo NGHE NGÓNG mỗi 5s, tách khỏi nhịp log 60s: lúc đang dò sóng thì chờ
+  // một phút cho mỗi lần thử là hết kiên nhẫn trước khi hết giả thuyết.
+  {
+    static unsigned long lastSniffLog = 0;
+    static uint32_t      lastSniffCount = 0;
+    if (now - lastSniffLog >= 5000UL) {
+      lastSniffLog = now;
+      const uint32_t c = EspNowSlaveRadio::sniffed();
+      Serial.printf("  <nghe> tong %lu goi (+%lu tu 5s truoc) · gan nhat [%s] · kenh that=%d\n",
+                    (unsigned long)c, (unsigned long)(c - lastSniffCount),
+                    EspNowSlaveRadio::sniffedLast(), EspNowSlaveRadio::channel());
+      lastSniffCount = c;
+    }
+  }
+#endif
+
   if (now - lastLog >= LOG_PERIOD_MS) {
     lastLog = now;
     float t = NAN, h = NAN;
     RoomSensor::read(t, h);
     // "da phat" KHÔNG có nghĩa là gateway đã nhận: broadcast không có ACK. Muốn
     // biết chắc thì xem log gateway hoặc xem web có số của node này không.
-    Serial.printf("[room goc %d] t=%.1f h=%.0f · da phat %lu goi · kenh=%d · up=%lus\n",
+    Serial.printf("[room goc %d] t=%.1f h=%.0f · da phat %lu goi · kenh=%d · up=%lus",
                   ROOM_CORNER, t, h, (unsigned long)sentCount,
                   EspNowSlaveRadio::channel(), now / 1000UL);
+#if defined(ESPNOW_SNIFF) && ESPNOW_SNIFF
+    // Chỉ có khi build kèm -D ESPNOW_SNIFF=1 (xem espnow-slave-radio.h).
+    Serial.printf(" · NGHE duoc %lu goi tu node khac [%s]",
+                  (unsigned long)EspNowSlaveRadio::sniffed(),
+                  EspNowSlaveRadio::sniffedLast());
+#endif
+    Serial.println();
   }
 
   delay(10);   // nhường CPU — ESP32-C3 chỉ có MỘT lõi

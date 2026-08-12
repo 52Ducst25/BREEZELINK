@@ -22,17 +22,22 @@
 //  và vì broadcast KHÔNG CÓ ACK nên không một dòng log nào ở bất kỳ đâu báo lỗi.
 #define WIFI_SSID   "TEN_WIFI_2G"
 
-// -------- 2) Định danh node (khớp hàng devices trên web) --------
-#define DEVICE_UUID "DAN_DEVICE_UUID"
 #define FW_VERSION  "room-1.0"
 
-// -------- 3) Nhãn góc hiển thị trên màn tại chỗ --------
-//  0..3 cho bốn góc. CHỈ LÀ NHÃN: định danh thật là DEVICE_UUID ở trên.
+// -------- 2) DEVICE_UUID và ROOM_CORNER KHÔNG CÒN Ở ĐÂY --------
+//  Chúng nằm trong `nodes.ini` (cùng thư mục với platformio.ini), mỗi node một
+//  env riêng, và tới đây qua build_flags.
 //
-//  Nên hai bo trùng số ở đây là VÔ HẠI — cả hai vẫn có topic riêng, vẫn vào
-//  trung vị, chỉ là màn hình ghi nhãn trùng nhau. Đặt đúng thì người đi bảo trì
-//  đọc màn là biết ngay góc nào đang lệch mà không phải tra uuid.
-#define ROOM_CORNER 0
+//  VÌ SAO CHUYỂN: file này CHỈ CÓ MỘT, mà bốn bo thì khác nhau đúng hai dòng đó.
+//  Nạp bo thứ ba nghĩa là sửa file rồi nạp, sửa lại rồi nạp bo thứ tư — và không
+//  cách nào nhìn vào thư mục mà biết nó đang giữ danh tính của bo nào. Đã có lần
+//  nạp nhầm uuid của SS2 lên bo SS4 vì đúng chuyện đó.
+//
+//  Nay mỗi bo một lệnh, không sửa file nào:
+//      pio run -e ss1 -t upload --upload-port COM30
+//
+//  Những gì còn ở đây là thứ CẢ BỐN BO DÙNG CHUNG (tên WiFi, phiên bản firmware)
+//  — đó cũng là ranh giới để quyết định thứ mới thuộc về file nào.
 
 // ============================================================================
 //  Phần cứng
