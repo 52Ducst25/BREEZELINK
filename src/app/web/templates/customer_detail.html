@@ -238,17 +238,17 @@
   <div class="form-row">
     <div class="form-group">
       <label class="form-label" for="ema_alpha">Trọng số EMA (T trung bình ngoài trời)</label>
-      <input class="input" id="ema_alpha" type="number" name="ema_alpha" step="0.01" min="0.01" max="1" value="{{ cfg.ema_alpha }}" required>
+      <input class="input" id="ema_alpha" type="number" name="ema_alpha" step="0.01" min="0.01" max="1" value="{{ cfg.ema_alpha|field }}" required>
       <span class="form-help">Càng gần 1 càng bám sát nhiệt độ ngoài trời tức thời; càng gần 0 càng mượt.</span>
     </div>
     <div class="form-group">
       <label class="form-label" for="deadband">Vùng trễ (°C)</label>
-      <input class="input" id="deadband" type="number" name="deadband" step="0.1" min="0" value="{{ cfg.deadband }}" required>
+      <input class="input" id="deadband" type="number" name="deadband" step="0.1" min="0" value="{{ cfg.deadband|field }}" required>
       <span class="form-help">Sai lệch quanh nhiệt độ đặt trước khi đổi chế độ, tránh nhảy COOL/FAN liên tục.</span>
     </div>
     <div class="form-group">
       <label class="form-label" for="dwell_sec">Thời gian giữ chế độ tối thiểu (giây)</label>
-      <input class="input" id="dwell_sec" type="number" name="dwell_sec" step="1" min="0" value="{{ cfg.dwell_sec }}" required>
+      <input class="input" id="dwell_sec" type="number" name="dwell_sec" step="1" min="0" value="{{ cfg.dwell_sec|field }}" required>
       <span class="form-help">Bảo vệ block máy nén khỏi bật/tắt liên tục.</span>
     </div>
   </div>
@@ -257,11 +257,11 @@
   <div class="form-row">
     <div class="form-group">
       <label class="form-label" for="dry_rh">Ngưỡng %RH kích hoạt HÚT ẨM</label>
-      <input class="input" id="dry_rh" type="number" name="dry_rh" step="0.1" min="0" max="100" value="{{ cfg.dry_rh }}" required>
+      <input class="input" id="dry_rh" type="number" name="dry_rh" step="0.1" min="0" max="100" value="{{ cfg.dry_rh|field }}" required>
     </div>
     <div class="form-group">
       <label class="form-label" for="humid_slope">Hệ số bù trừ độ ẩm (°C / %RH)</label>
-      <input class="input" id="humid_slope" type="number" name="humid_slope" step="0.01" min="0" value="{{ cfg.humid_slope }}" required>
+      <input class="input" id="humid_slope" type="number" name="humid_slope" step="0.01" min="0" value="{{ cfg.humid_slope|field }}" required>
       <span class="form-help">Số độ trừ khỏi nhiệt độ mục tiêu cho mỗi %RH vượt 60%.</span>
     </div>
   </div>
@@ -270,11 +270,11 @@
   <div class="form-row">
     <div class="form-group">
       <label class="form-label" for="clamp_min">Nhiệt độ mục tiêu thấp nhất (°C)</label>
-      <input class="input" id="clamp_min" type="number" name="clamp_min" step="0.1" value="{{ cfg.clamp_min }}" required>
+      <input class="input" id="clamp_min" type="number" name="clamp_min" step="0.1" value="{{ cfg.clamp_min|field }}" required>
     </div>
     <div class="form-group">
       <label class="form-label" for="clamp_max">Nhiệt độ mục tiêu cao nhất (°C)</label>
-      <input class="input" id="clamp_max" type="number" name="clamp_max" step="0.1" value="{{ cfg.clamp_max }}" required>
+      <input class="input" id="clamp_max" type="number" name="clamp_max" step="0.1" value="{{ cfg.clamp_max|field }}" required>
     </div>
   </div>
 
@@ -282,23 +282,23 @@
   <div class="form-row">
     <div class="form-group">
       <label class="form-label" for="night_start">Giờ bắt đầu (0-23)</label>
-      <input class="input" id="night_start" type="number" name="night_start" step="1" min="0" max="23" value="{{ cfg.night_start }}" required>
+      <input class="input" id="night_start" type="number" name="night_start" step="1" min="0" max="23" value="{{ cfg.night_start|field }}" required>
     </div>
     <div class="form-group">
       <label class="form-label" for="night_end">Giờ kết thúc (0-23)</label>
-      <input class="input" id="night_end" type="number" name="night_end" step="1" min="0" max="23" value="{{ cfg.night_end }}" required>
+      <input class="input" id="night_end" type="number" name="night_end" step="1" min="0" max="23" value="{{ cfg.night_end|field }}" required>
       <span class="form-help">Có thể vượt qua nửa đêm, ví dụ 23 → 6.</span>
     </div>
     <div class="form-group">
       <label class="form-label" for="night_offset">Cộng thêm vào mục tiêu ban đêm (°C)</label>
-      <input class="input" id="night_offset" type="number" name="night_offset" step="0.1" value="{{ cfg.night_offset }}" required>
+      <input class="input" id="night_offset" type="number" name="night_offset" step="0.1" value="{{ cfg.night_offset|field }}" required>
     </div>
   </div>
 
   <h3 class="ac-form-group-title">Ghi đè thủ công</h3>
   <div class="form-group ac-field--narrow">
     <label class="form-label" for="override_hours">Tự động hết hạn sau (giờ)</label>
-    <input class="input" id="override_hours" type="number" name="override_hours" step="1" min="1" value="{{ cfg.override_hours }}" required>
+    <input class="input" id="override_hours" type="number" name="override_hours" step="1" min="1" value="{{ cfg.override_hours|field }}" required>
     <span class="form-help">Sau khi người dùng chỉnh tay, hệ thống tự quay lại chế độ tự động sau khoảng thời gian này.</span>
   </div>
 

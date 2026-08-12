@@ -27,6 +27,15 @@
   {# Anti-FOUC: apply the saved rail-collapsed state to <html> BEFORE first
      paint so reloading a page never flashes the wide rail then snaps narrow. #}
   <script>try{if(localStorage.getItem("ac_rail_collapsed")==="1"){document.documentElement.classList.add("rail-collapsed");}}catch(e){}</script>
+  {# Cùng lý do, cho giao diện sáng/tối. PHẢI nội tuyến trong <head> và PHẢI
+     chạy trước khi <body> được vẽ: đặt trong app.js (nằm cuối <body>) thì mỗi
+     lần tải trang sẽ loé lên nền trắng rồi mới chuyển tối — và đó là thứ khó
+     chịu nhất với người dùng đã cố ý chọn giao diện tối.
+
+     "auto" (mặc định) đi theo cài đặt của hệ điều hành. Ghi thẳng thuộc tính
+     data-theme thay vì để CSS đọc prefers-color-scheme, để một biến duy nhất
+     quyết định — CSS chỉ cần biết html[data-theme="dark"]. #}
+  <script>try{var t=localStorage.getItem("ac_theme")||"auto";if(t==="auto"){t=window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";}document.documentElement.setAttribute("data-theme",t);}catch(e){}</script>
 </head>
 <body class="{% if user %}has-rail{% endif %}">
 <a class="skip-link" href="#main">Bỏ qua, đến nội dung chính</a>
@@ -83,6 +92,14 @@
         <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
       </svg>
       <span class="ac-rail__label">Quản trị viên</span>
+    </a>
+
+    <a class="ac-rail__item {% if nav == 'settings' %}is-active{% endif %}" href="/web/settings" title="Cài đặt">
+      <svg viewBox="0 0 24 24" width="20" height="20" class="ac-rail__ico" aria-hidden="true">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+      <span class="ac-rail__label">Cài đặt</span>
     </a>
   </nav>
 

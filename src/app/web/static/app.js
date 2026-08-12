@@ -17,6 +17,173 @@
 // browser sends the httpOnly session cookie on the handshake automatically
 // (same-origin), no ?token= needed (see api/v1/ws_routes.py).
 
+// Vá DOM tại chỗ thay vì thay cả khối #main.
+//
+// TRƯỚC ĐÂY LÀ `main.innerHTML = fresh.innerHTML`, và nó đẻ ra ba lỗi mà mỗi
+// lỗi từng được vá riêng một lần:
+//
+//   1. NHÁY. ds/animations/cards.css cho mọi `.card-grid > .card` chạy
+//      `card-enter` (mờ 0 -> 1, trượt lên 20px). Thay DOM là huỷ và tạo lại
+//      từng thẻ, nên animation vào-trang chạy lại — cả bảng chớp một cái mỗi
+//      lần có số liệu mới, tức là vài giây một lần.
+//   2. Trạng thái gập/mở của <details> biến mất theo phần tử cũ.
+//   3. Chữ đang gõ dở trong form bị xoá.
+//
+// Ba cái cùng một gốc: PHÁ HUỶ PHẦN TỬ. Vá tại chỗ giải quyết cả ba, và kèm
+// theo giữ luôn vị trí cuộn, ô đang focus, vùng bôi đen và nội dung canvas —
+// mỗi thứ đó nếu đi tiếp đường cũ lại cần thêm một bản vá nữa.
+//
+// CÁCH LÀM: đi song song hai cây. Nút cùng loại và cùng tên thẻ thì đi sâu vào
+// trong và chỉ sửa chỗ khác; khác nhau mới thay nút đó. Trên trang này gần như
+// mọi thứ đều khớp, nên thực tế chỉ vài nút VĂN BẢN chứa nhiệt độ bị chạm tới,
+// và trình duyệt chỉ vẽ lại đúng chỗ đó.
+
+
+// Chọn giao diện sáng/tối (trang /web/settings).
+//
+// Việc ÁP DỤNG giao diện đã xong từ trước — base.html chạy một script nội tuyến
+// trong <head> để đặt data-theme trước lần vẽ đầu tiên. Ở đây chỉ lo phần đổi
+// lựa chọn: ghi vào localStorage, đặt lại thuộc tính, và đánh dấu nút đang chọn.
+//
+// GẮN LẠI SAU MỖI LẦN THAY #main. Trang cài đặt nằm trong #main, mà mỗi lần đẩy
+// WebSocket là cả khối đó bị thay mới — listener gắn vào nút cũ chết theo. Uỷ
+// quyền lên document thì chỉ gắn một lần và sống mãi.
+var acTheme = (function () {
+  var KEY = "ac_theme";
+
+  function saved() {
+    try { return localStorage.getItem(KEY) || "auto"; } catch (e) { return "auto"; }
+  }
+
+  function apply(choice) {
+    var effective = choice;
+    if (choice === "auto") {
+      effective = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    }
+    document.documentElement.setAttribute("data-theme", effective);
+    // Đánh dấu nút nào đang chọn — theo LỰA CHỌN chứ không theo giao diện đang
+    // hiện. Chọn "Theo hệ thống" lúc máy đang tối thì phải sáng ô "Theo hệ
+    // thống", không phải ô "Tối".
+    var opts = document.querySelectorAll(".ac-theme-opt");
+    for (var i = 0; i < opts.length; i++) {
+      opts[i].setAttribute("aria-checked",
+        opts[i].getAttribute("data-theme") === choice ? "true" : "false");
+    }
+  }
+
+  document.addEventListener("click", function (e) {
+    var btn = e.target.closest ? e.target.closest(".ac-theme-opt") : null;
+    if (!btn) return;
+    var choice = btn.getAttribute("data-theme");
+    try { localStorage.setItem(KEY, choice); } catch (err) {}
+    apply(choice);
+  });
+
+  // Máy đổi sáng/tối trong lúc trang đang mở (hẹn giờ ban đêm của hệ điều hành)
+  // thì trang phải theo — nhưng chỉ khi người dùng để "auto".
+  try {
+    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function () {
+      if (saved() === "auto") apply("auto");
+    });
+  } catch (e) {}
+
+  document.addEventListener("DOMContentLoaded", function () { apply(saved()); });
+  return { apply: apply, saved: saved };
+})();
+
+// Chặn việc làm mới trực tiếp ghi đè lên thứ người dùng đang gõ dở.
+//
+// VẤN ĐỀ: mỗi lần đẩy WebSocket đều làm `main.innerHTML = ...`. Trên trang khách
+// hàng có form Cấu hình thuật toán, nên đang sửa "Vùng trễ" mà node gửi số liệu
+// về là ô đó bị thay bằng giá trị cũ của máy chủ — chữ vừa gõ biến mất, không
+// báo gì. Node gửi mỗi vài giây nên gần như KHÔNG THỂ sửa xong một ô.
+//
+// DỪNG HẲN VIỆC LÀM MỚI, không cố khôi phục từng ô sau khi thay. Khôi phục nghe
+// có vẻ hay hơn nhưng nó trộn số của máy chủ với số người dùng đang gõ trong
+// cùng một form, và không ai nhìn vào biết ô nào thuộc bên nào. Trang đứng yên
+// vài chục giây trong lúc sửa là cái giá đúng.
+//
+// Bắt ở pha CAPTURE trên document: form được vẽ lại liên tục, nên gắn listener
+// vào từng ô là gắn vào những phần tử sắp bị vứt đi.
+var acFormGuard = (function () {
+  var dirty = false;
+  function touch(e) {
+    var t = e.target;
+    if (!t) return;
+    var tag = t.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") dirty = true;
+  }
+  document.addEventListener("input", touch, true);
+  document.addEventListener("change", touch, true);
+  return {
+    isDirty: function () { return dirty; },
+    clear: function () { dirty = false; }
+  };
+})();
+
+var acMorph = (function () {
+  // Thuộc tính KHÔNG đồng bộ vì chúng là trạng thái của NGƯỜI DÙNG, không phải
+  // của máy chủ. `open` là cái quan trọng nhất: máy chủ luôn render nhóm
+  // toàn-ngoại-tuyến ở trạng thái mở, nên đồng bộ nó sẽ bung lại đúng cái nhóm
+  // mà người dùng vừa cố ý đóng.
+  var SKIP = { open: 1 };
+
+  function syncAttrs(from, to) {
+    var i, a;
+    for (i = to.attributes.length - 1; i >= 0; i--) {
+      a = to.attributes[i];
+      if (SKIP[a.name]) continue;
+      if (from.getAttribute(a.name) !== a.value) from.setAttribute(a.name, a.value);
+    }
+    // Duyệt NGƯỢC khi xoá: removeAttribute làm danh sách co lại ngay lập tức,
+    // nên duyệt xuôi sẽ nhảy cóc qua thuộc tính kế tiếp.
+    for (i = from.attributes.length - 1; i >= 0; i--) {
+      a = from.attributes[i];
+      if (SKIP[a.name]) continue;
+      if (!to.hasAttribute(a.name)) from.removeAttribute(a.name);
+    }
+  }
+
+  function same(a, b) {
+    return a.nodeType === b.nodeType && a.nodeName === b.nodeName;
+  }
+
+  function morph(from, to) {
+    if (from.nodeType === 3 || from.nodeType === 8) {   // văn bản / chú thích
+      if (from.nodeValue !== to.nodeValue) from.nodeValue = to.nodeValue;
+      return;
+    }
+    if (from.nodeType !== 1) return;
+    syncAttrs(from, to);
+
+    // KHÔNG đi vào trong ô nhập. Thuộc tính `value` chỉ là giá trị MẶC ĐỊNH;
+    // sau khi người dùng gõ, trình duyệt giữ giá trị thật ở thuộc tính JS chứ
+    // không ở HTML. Trên trang này ô nhập là cấu hình do người dùng sửa, không
+    // phải số liệu trực tiếp, nên máy chủ không có gì mới để nói về chúng.
+    var tag = from.nodeName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+    var a = from.firstChild, b = to.firstChild, nextA, nextB;
+    while (a || b) {
+      // Lấy nút kế TRƯỚC khi đụng vào cây, vì mọi thao tác dưới đây đều làm
+      // nextSibling của nút hiện tại đổi nghĩa.
+      if (!b) { nextA = a.nextSibling; from.removeChild(a); a = nextA; continue; }
+      if (!a) { nextB = b.nextSibling; from.appendChild(b); b = nextB; continue; }
+      nextA = a.nextSibling;
+      nextB = b.nextSibling;
+      if (same(a, b)) {
+        morph(a, b);
+      } else {
+        from.replaceChild(b, a);
+      }
+      a = nextA;
+      b = nextB;
+    }
+  }
+
+  return { apply: morph };
+})();
+
 (function () {
   // Rail collapse/expand (DESKTOP), persisted so base.html's inline <head>
   // script can apply it before first paint (no flash of the wrong rail width).
@@ -74,6 +241,10 @@
   var MIN_GAP_MS = 5000;
 
   function swap(html) {
+    // KIỂM LẠI Ở ĐÂY, không chỉ ở refresh(). Một lần làm mới được hẹn giờ TRƯỚC
+    // khi người dùng chạm vào ô nhập vẫn sẽ nổ sau đúng MIN_GAP_MS — và nó xoá
+    // mất chữ vừa gõ. Đây là chốt cuối, ngay trước lệnh ghi đè.
+    if (acFormGuard.isDirty()) return;
     var doc = new DOMParser().parseFromString(html, "text/html");
     var fresh = doc.getElementById("main");
     if (!fresh) return;
@@ -86,7 +257,10 @@
     // replayed its intro on every push. Removed once, here, because the
     // entrance is a one-time page-load effect by definition.
     main.classList.remove("page-content-stagger");
-    main.innerHTML = fresh.innerHTML;
+    acMorph.apply(main, fresh);
+    // Nút chọn giao diện: máy chủ render chúng ở trạng thái chưa chọn vì nó
+    // không biết lựa chọn nằm trong localStorage của trình duyệt.
+    acTheme.apply(acTheme.saved());
     lastAt = Date.now();
   }
 
@@ -105,6 +279,9 @@
     // time to paint pixels nobody sees. Remember instead, and catch up once
     // on the way back.
     if (document.hidden) { missedWhileHidden = true; return; }
+    // Đang có chữ gõ dở trong một form: thà để trang cũ vài chục giây còn hơn
+    // xoá mất thứ người dùng vừa gõ. Mở lại ngay khi lưu xong.
+    if (acFormGuard.isDirty()) return;
     if (pending) return; // already scheduled -- this push folds into it
     var wait = Math.max(0, MIN_GAP_MS - (Date.now() - lastAt));
     pending = setTimeout(function () {
@@ -204,9 +381,10 @@
     var doc = new DOMParser().parseFromString(html, "text/html");
     var fresh = doc.getElementById("main");
     if (!fresh) return;
-    var y = window.scrollY; // keep the viewport where it was, not scrolled to top
+    // Vá tại chỗ nên trang không nhảy về đầu — không cần nhớ scrollY nữa.
     main.classList.remove("page-content-stagger");
-    main.innerHTML = fresh.innerHTML;
+    acMorph.apply(main, fresh);
+    acTheme.apply(acTheme.saved());
 
     // The header sits OUTSIDE #main, so a save that changes it (uploading or
     // removing your avatar) would leave the old picture in the top bar. The
@@ -217,8 +395,6 @@
     var head = document.querySelector(".header-actions");
     var freshHead = doc.querySelector(".header-actions");
     if (head && freshHead) head.innerHTML = freshHead.innerHTML;
-
-    window.scrollTo(0, y);
   }
 
   // In-app Yes/No box, styled like the toast — replaces the browser's native
@@ -285,6 +461,9 @@
           var err = url && url.searchParams.get("err");
           if (err) { toast(false, err); return; }
           toast(true, okMsg);
+          // Đã lưu xong: những gì trên màn hình giờ đúng bằng những gì máy chủ
+          // giữ, nên không còn gì để bảo vệ — mở lại luồng cập nhật trực tiếp.
+          acFormGuard.clear();
           if (mode === "refresh") {
             swapMain(text); // the response IS the fresh page
           } else if (mode === "redirect" && url) {

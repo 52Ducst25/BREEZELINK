@@ -19,6 +19,92 @@
  */
 
 /* ============================================================
+   BỘ CHỌN GIAO DIỆN (trang /web/settings)
+   ============================================================ */
+.ac-theme-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-3);
+}
+.ac-theme-opt {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: var(--space-4);
+  background: var(--bg-primary);
+  border: 2px solid var(--border-subtle);
+  border-radius: var(--radius-md, 8px);
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+.ac-theme-opt:hover { border-color: var(--border-default); }
+.ac-theme-opt svg { fill: none; stroke: currentColor; stroke-width: 2; }
+.ac-theme-opt b { font-size: 15px; }
+.ac-theme-opt small { color: var(--text-muted); }
+
+/* Viền dày + màu nhấn, KHÔNG chỉ tô nền: người mù màu vẫn phải phân biệt được
+   ô đang chọn, và độ dày viền là tín hiệu không phụ thuộc màu. */
+.ac-theme-opt[aria-checked="true"] {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+.ac-theme-opt[aria-checked="true"] small { color: var(--text-secondary); }
+
+/* ============================================================
+   GIAO DIỆN TỐI
+
+   GHI ĐÈ Ở TẦNG TOKEN NGỮ NGHĨA, KHÔNG SỬA TỪNG THÀNH PHẦN. Bộ thiết kế
+   đã tách sẵn hai tầng: `foundation/colors.css` giữ màu thô, còn
+   `semantic/colors.css` gán chúng vào vai trò (--bg-primary, --text-muted,
+   --border-subtle...). Mọi thành phần — thẻ, nút, ô nhập, viên trạng thái —
+   đều chỉ đọc tầng ngữ nghĩa. Nên đảo mười mấy biến ở đây là cả giao diện
+   theo, kể cả những trang viết sau này.
+
+   Cách còn lại là thêm `html[data-theme="dark"] .card { ... }` cho từng
+   thành phần. Nó chạy được đúng một hôm: trang nào viết sau mà quên thêm
+   luật sẽ hiện ra một thẻ trắng loá giữa nền tối, và không có gì nhắc.
+
+   MÀU THƯƠNG HIỆU GIỮ NGUYÊN (xanh dương, cam, xanh lá, đỏ, hổ phách): chúng
+   mang ý nghĩa trạng thái nhiệt và trạng thái kết nối. Đổi chúng theo giao
+   diện là đổi luôn thứ người dùng đã học cách đọc.
+
+   `color-scheme` không phải cho đẹp: nó bảo trình duyệt vẽ thanh cuộn, ô
+   chọn ngày, và menu thả xuống bằng bảng màu tối. Thiếu nó thì các thứ đó
+   vẫn trắng và lộ ra ngay.
+   ============================================================ */
+html[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg-primary: #0f1115;      /* nền trang */
+  --bg-secondary: #171a21;    /* thẻ, bảng */
+  --bg-elevated: #1d212a;     /* hộp thoại, thứ nổi lên trên */
+  --bg-subtle: #14171d;
+  --bg-inverse: var(--color-white);
+
+  --text-primary: #e6e9ef;
+  --text-secondary: #c3c9d6;
+  --text-muted: #8b93a7;
+  --text-inverse: #0f1115;
+  --text-code: #9aa3b8;
+
+  --border-subtle: #232833;
+  --border-default: #2f3542;
+  --border-strong: #454d5e;
+
+  /* Nền tối cần màu nhấn sáng hơn một bậc: xanh #0055ff trên nền #0f1115 có
+     độ tương phản dưới 3:1, đọc chữ trắng trên nút đó rất mệt. */
+  --accent-primary: #3b82f6;
+  --accent-primary-hover: #60a5fa;
+
+  --overlay-light: rgba(23, 26, 33, 0.95);
+  --overlay-dark: rgba(0, 0, 0, 0.85);
+  --overlay-scrim: rgba(0, 0, 0, 0.7);
+}
+
+/* ============================================================
    THERMAL COLOUR MAPPING
 
    dashboard_view.py computes a `level` string (cold/neutral/warm/hot/

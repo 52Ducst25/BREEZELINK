@@ -76,11 +76,18 @@
 {% else %}
 <div class="ac-fleet-list">
   {% for g in groups %}
-  {# <details>, not a JS accordion: app.js replaces #main's innerHTML on every
-     WebSocket push, which would strip any hand-attached listener and slam every
-     panel shut mid-read. The browser owns this state natively, and it keeps
-     working with JS off. `open` on all-offline groups so the thing that needs
-     attention is not the thing hidden behind a click. #}
+  {# <details>, not a JS accordion: the browser owns this state natively and it
+     keeps working with JS off. `open` on all-offline groups so the thing that
+     needs attention is not the thing hidden behind a click.
+
+     Trạng thái gập/mở sống sót qua các lần cập nhật trực tiếp vì app.js VÁ DOM
+     TẠI CHỖ thay vì thay cả khối — phần tử <details> không bao giờ bị huỷ, và
+     acMorph cố ý không đồng bộ thuộc tính `open` (nó là trạng thái của người
+     dùng, không phải của máy chủ).
+
+     Từng có một `data-keep-open` ở đây để ghi/khôi phục trạng thái quanh mỗi
+     lần thay DOM. Bỏ đi vì việc vá tại chỗ làm nó thừa — và một thuộc tính chết
+     kèm chú thích mô tả cơ chế không còn tồn tại thì tệ hơn là không có gì. #}
   <details class="ac-group card chamfer-sm {% if g.all_offline and g.nodes %}ac-group--alert{% endif %}"
            {% if g.all_offline and g.nodes %}open{% endif %}>
     <summary class="ac-group__head">
