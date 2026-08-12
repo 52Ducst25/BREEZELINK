@@ -1,11 +1,11 @@
 {
-    "name": "aircon_app",
-    "short_name": "aircon_app",
+    "name": "BreezeLink",
+    "short_name": "BreezeLink",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#000507",
+    "theme_color": "#2AAAB6",
+    "description": "Điều khiển điều hòa thích nghi theo nhiệt độ trong nhà và ngoài trời.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

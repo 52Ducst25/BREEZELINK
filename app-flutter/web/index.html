@@ -18,18 +18,22 @@
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
+  <meta name="description" content="Điều khiển điều hòa thích nghi theo nhiệt độ trong nhà và ngoài trời.">
+  <meta name="theme-color" content="#2AAAB6">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="aircon_app">
+  <meta name="apple-mobile-web-app-title" content="BreezeLink">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
-  <!-- Favicon -->
-  <link rel="icon" type="image/png" href="favicon.png"/>
+  <!-- Favicon. 192px chứ không phải favicon.png 16px: bản 16px là của khuôn mẫu
+       Flutter, và trên màn hình nét cao nó bị phóng to lên trông nhoè. Trình
+       duyệt tự chọn cỡ phù hợp khi được khai đúng `sizes`. -->
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/Icon-192.png"/>
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon.png"/>
 
-  <title>aircon_app</title>
+  <title>BreezeLink</title>
   <link rel="manifest" href="manifest.json">
 </head>
 <body>
