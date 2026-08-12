@@ -18,22 +18,29 @@ WHAT IT DELIBERATELY DOES NOT DO: override the cloud while the cloud is alive.
 See cloud_watch.py — two commanders is worse than a slow one.
 """
 
+import asyncio
 import json
 import logging
 import os
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 from edge_ai.cloud_watch import CloudWatch
+from edge_ai.dashboard import Dashboard, build_state
 from edge_ai.comfort_bridge import (
     ComfortConfig,
     ComfortInputs,
     NoIrCodesError,
     compute,
 )
+from edge_ai.history_store import HistoryStore
 from edge_ai.predictor import find_anomalies, fit_trend
+from edge_ai.prediction_score import PredictionScore
 from edge_ai.protocol import KIND_ADVICE, KIND_COMMAND, Mode, Snapshot
 from edge_ai.room_store import RoomStore
+from edge_ai.thermal_model import ThermalModel
+from edge_ai.weather import WeatherForecast
 
 logger = logging.getLogger("edge.control")
 
@@ -81,6 +88,29 @@ class Controller:
         self._cloud = CloudWatch(settings.takeover_after_sec)
         self._cfg = self._load_cfg()
 
+        # --- C: lịch sử cục bộ, --- A: mô hình nhiệt, --- B: dự báo thời tiết.
+        # Thứ tự khởi tạo không tuỳ tiện: mô hình khớp mẻ NGAY từ lịch sử đã có,
+        # nên sau một lần khởi động lại nó dùng được luôn thay vì học lại từ đầu.
+        self._history = HistoryStore(settings.history_db, settings.history_days)
+        self._model = ThermalModel()
+        self._model.load_history(self._history.recent(hours=settings.history_days * 24))
+        self._score = PredictionScore(_FORECAST_MIN)
+
+        self._weather: WeatherForecast | None = None
+        self._weather_busy = False
+        if settings.lat is not None and settings.lon is not None:
+            self._weather = WeatherForecast(
+                settings.lat, settings.lon,
+                cache_path=Path(settings.history_db).with_name("weather-cache.json"),
+            )
+        else:
+            logger.info("EDGE_LAT/EDGE_LON chưa đặt — không có dự báo, mô hình sẽ "
+                        "giả định nhiệt độ ngoài trời đứng yên khi nhìn xa")
+
+        # Trang theo dõi cổng 7000. Tự tắt nếu không chạy trong App Lab.
+        self._dash = Dashboard(self._history)
+        self._dash.start()
+
         # Trạng thái mà bản MQTT trước phải tự dựng bằng cách nghe lén cả bốn
         # loại topic. Nay gateway gửi thẳng trong mỗi ảnh chụp — nó là bên THẬT
         # SỰ biết máy lạnh đang ở chế độ nào, vì chính nó bắn khung IR ra.
@@ -89,10 +119,11 @@ class Controller:
         self._last_switch_ts = 0.0
         self._tout_ema: float | None = None
 
-        # Nhiệt độ mà hộ này thật sự có mã IR. Chỉ biết được bằng cách QUAN SÁT
-        # máy chủ ra lệnh — đoán một dải liên tục sẽ sinh ra lệnh mà gateway
-        # lặng lẽ không phát nổi vì chưa học mã.
+        # Nhiệt độ quan sát được từ ảnh chụp. CHỈ dùng khi EDGE_IR_TEMPS trống —
+        # xem _available_temps() cho lý do không trộn hai nguồn.
         self._seen_temps: set[int] = set()
+        self._narrow_warned = False
+        self._log_countdown = 1
 
     # -- config ---------------------------------------------------------------
 
@@ -114,6 +145,12 @@ class Controller:
         self._store.ingest(snapshot)
         self._cloud.update(snapshot.cloud_silence_sec)
 
+        # Ghi xuống đĩa theo nhịp 60s (tự giới hạn bên trong), rồi nạp CHÍNH mẫu
+        # đó vào mô hình. Một nguồn, một nhịp — không có đường thứ hai để lệch.
+        row = self._history.ingest(snapshot)
+        if row is not None:
+            self._model.observe(row)
+
         # Trạng thái máy lạnh: lấy từ gateway, không tự suy. Chỉ một MODE thật sự
         # đổi mới khởi động lại đồng hồ dwell của máy nén; đổi riêng nhiệt độ đặt
         # thì không, nếu không việc chuyển chế độ sẽ bị đóng băng.
@@ -126,6 +163,40 @@ class Controller:
             # báo đã thi hành là một bằng chứng "hộ này có mã cho nhiệt độ đó".
             if snapshot.ac_mode is Mode.COOL:
                 self._seen_temps.add(snapshot.ac_setpoint)
+
+    # -- những nhiệt độ ra lệnh được ------------------------------------------
+
+    def _available_temps(self) -> list[int]:
+        """Các mức COOL hộ này có mã IR.
+
+        ƯU TIÊN DANH SÁCH KHAI TAY, và khi có nó thì KHÔNG trộn thêm mức quan sát
+        được. Trộn nghe có vẻ rộng lượng nhưng sai: mức quan sát được đến từ
+        `snapshot.ac_setpoint`, tức là trạng thái gateway đang hiện — mà người
+        dùng bấm điều khiển tay cũng làm đổi số đó. Trộn vào là biến một lần bấm
+        tay thành "hộ này có mã cho mức đó", trong khi có thể không.
+
+        Không khai thì rơi về tự học, và lúc đó phải kêu to: xem chú thích
+        EDGE_IR_TEMPS trong config.py — danh sách lấp một nửa khiến
+        nearest_captured_temp() lặng lẽ ép mục tiêu về mức duy nhất nó biết.
+        """
+        if self._s.ir_temps:
+            return list(self._s.ir_temps)
+
+        observed = sorted(self._seen_temps)
+        if not observed:
+            logger.info(
+                "Chưa biết hộ này học những mức nào (EDGE_IR_TEMPS trống, chưa "
+                "thấy máy chủ ra lệnh COOL) — chỉ đề xuất, không ra lệnh"
+            )
+        elif len(observed) < 3 and not self._narrow_warned:
+            self._narrow_warned = True
+            logger.warning(
+                "CHỈ BIẾT %d mức (%s) vì đang tự học bằng quan sát. Mọi mục tiêu "
+                "sẽ bị ép về những mức này — đặt EDGE_IR_TEMPS để hết đoán:\n"
+                "    SELECT DISTINCT temp FROM ir_codes WHERE mode='COOL' ORDER BY temp;",
+                len(observed), ", ".join(f"{t}°C" for t in observed),
+            )
+        return observed
 
     # -- decide ---------------------------------------------------------------
 
@@ -171,15 +242,13 @@ class Controller:
             logger.warning("Bất thường ở %s (%s): %s",
                            self._store.label(int(a.device_uuid)), a.kind, a.detail)
 
-        forecast = None
-        if trends:
-            avg_slope = sum(t.slope_per_min for t in trends.values()) / len(trends)
-            forecast = snapshot.t_in + avg_slope * _FORECAST_MIN
+        # Chấm dự báo đã tới hạn TRƯỚC khi đặt dự báo mới, để không tự chấm chính
+        # mình bằng con số vừa sinh ra trong cùng một nhịp.
+        self._score.settle(time.time(), snapshot.t_in)
+        self._refresh_weather_if_due()
+        forecast = self._forecast(snapshot, tout, trends)
 
-        available = sorted(self._seen_temps)
-        if not available:
-            logger.info("Chưa thấy máy chủ ra lệnh COOL lần nào — chưa biết hộ này "
-                        "đã học những nhiệt độ nào, chỉ đề xuất")
+        available = self._available_temps()
 
         result = None
         if available and not snapshot.override_active:
@@ -210,7 +279,86 @@ class Controller:
         if result is not None and snapshot.outdoor_online and snapshot.t_out is not None:
             self._tout_ema = result.new_ema
 
+        self._log_model()
+        if self._dash.enabled:
+            self._dash.publish(build_state(
+                snapshot=snapshot, store=self._store, model=self._model,
+                score=self._score, weather=self._weather, cloud=self._cloud,
+                settings=self._s, result=result, forecast=forecast,
+                anomalies=anomalies,
+            ))
         await self._act(snapshot, result, forecast, len(anomalies))
+
+    # -- dự báo ---------------------------------------------------------------
+
+    def _forecast(self, snapshot: Snapshot, tout: float, trends) -> float | None:
+        """Nhiệt độ trong nhà sau 15 phút.
+
+        HAI NGUỒN, ưu tiên mô hình nhiệt và rơi về ngoại suy độ dốc khi mô hình
+        chưa chín. Không trộn hai con số: trung bình của một ước lượng tốt và một
+        ước lượng thô cho ra thứ không giải thích được, và khi nó sai thì không
+        biết phải sửa bên nào.
+
+        MỌI DỰ BÁO ĐỀU ĐƯỢC GHI LẠI ĐỂ CHẤM, kể cả loại thô — nhờ vậy câu "mô
+        hình có hơn cách cũ không" trở thành một con số chứ không phải một ý kiến.
+        """
+        model_value = self._model.predict(
+            minutes=_FORECAST_MIN,
+            t_in=snapshot.t_in,
+            t_out_now=tout,
+            setpoint=snapshot.ac_setpoint,
+            cooling=snapshot.ac_mode is Mode.COOL,
+            t_out_at=self._weather.temp_at if self._weather is not None else None,
+            now_ts=time.time(),
+        )
+        if model_value is None and trends:
+            avg_slope = sum(t.slope_per_min for t in trends.values()) / len(trends)
+            model_value = snapshot.t_in + avg_slope * _FORECAST_MIN
+
+        if model_value is not None:
+            self._score.record(time.time(), model_value, snapshot.t_in)
+        return model_value
+
+    def _refresh_weather_if_due(self) -> None:
+        """Gọi lại dự báo nếu tới hạn. KHÔNG chờ kết quả.
+
+        Việc lấy dự báo là thứ chỉ-tốt-nếu-có, mà một lần gọi mạng có thể treo
+        tới 15 giây. Chờ nó trong vòng điều khiển nghĩa là mất mạng sẽ làm nhịp
+        điều khiển giãn ra gấp đôi — đúng lúc node này đáng lẽ phải làm việc
+        chăm chỉ nhất.
+        """
+        if self._weather is None or self._weather_busy or not self._weather.due():
+            return
+        self._weather_busy = True
+
+        async def run() -> None:
+            try:
+                await asyncio.get_running_loop().run_in_executor(None, self._weather.refresh)
+            finally:
+                self._weather_busy = False
+
+        asyncio.create_task(run())
+
+    def _log_model(self) -> None:
+        """Báo cáo mô hình mỗi 10 nhịp (~5 phút).
+
+        Thưa hơn dòng điều khiển có chủ đích: τ và sai số dự báo đổi theo giờ,
+        không theo phút, và in mỗi nhịp sẽ đẩy dòng thật sự cần đọc trôi đi.
+        """
+        self._log_countdown -= 1
+        if self._log_countdown > 0:
+            return
+        self._log_countdown = 10
+
+        parts = [f"mô hình: {self._model.describe()}", f"dự báo: {self._score.describe()}"]
+        if self._weather is not None:
+            peak = self._weather.peak_within(12.0)
+            parts.append(
+                "thời tiết: chưa có" if peak is None
+                else f"thời tiết: đỉnh 12h tới {peak[0]:.1f}°C"
+            )
+        parts.append(f"lịch sử: {self._history.count()} mẫu / {self._history.span_hours():.0f}h")
+        logger.info(" · ".join(parts))
 
     # -- act ------------------------------------------------------------------
 

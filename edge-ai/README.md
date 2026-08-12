@@ -63,10 +63,16 @@ toàn bộ ORM — quá nặng cho một thiết bị ngoài hiện trường. C
 thuật toán trên web thì phải dán cấu hình thật vào `EDGE_COMFORT_CONFIG`** —
 không thì edge tính lệch với cloud mà không bên nào báo lỗi.
 
-## Vì sao chỉ có một phụ thuộc
+## Vì sao chỉ có hai phụ thuộc
 
-`bleak`, hết. Đây là phần mềm chạy trên thiết bị ở nhà khách: mỗi gói thêm vào là một
-thứ nữa có thể vỡ lúc nâng cấp và một thứ nữa phải vá khi có CVE.
+`bleak` và `pydantic`. Đây là phần mềm chạy trên thiết bị ở nhà khách: mỗi gói thêm
+vào là một thứ nữa có thể vỡ lúc nâng cấp và một thứ nữa phải vá khi có CVE.
+
+`pydantic` không phải lựa chọn mà là hệ quả: `comfort_engine.compute()` trả về
+`app.schemas.comfort.ComfortResult`, và lớp đó là một pydantic model. Nó nằm ở phía
+backend nên rất dễ bị bỏ sót khi đếm phụ thuộc của thư mục này — bản đầu chỉ khai
+`bleak`, và trên máy dev thì không lộ ra vì backend đã cài pydantic sẵn. Trên một
+UNO Q sạch thì dịch vụ chết ngay ở lần import đầu tiên.
 
 Bố cục gói BLE đọc bằng `struct` của thư viện chuẩn. Dự báo dùng hồi quy tuyến tính
 bình phương tối thiểu viết tay — nhiệt độ phòng trong 15-30 phút gần như tuyến tính, và
@@ -76,27 +82,62 @@ không ai bảo trì, và khó giải thích hơn hẳn khi khách hỏi "sao n�
 `predictor.py` cố ý để giao diện hẹp để sau này thay ruột bằng mô hình nặng hơn
 mà không phải đụng vào `controller.py`.
 
-## Cài đặt
+## Vì sao KHÔNG chạy được trong Arduino App Lab
 
-Cần một adapter Bluetooth đang chạy (UNO Q có sẵn) và BlueZ.
+Đã thử và không được — ghi lại để người sau khỏi mất thời gian thử lại.
+
+App Lab đóng phần Python vào **container** (log khởi động: `Container
+breezelink-edge-ai-main-1 Started`). Đo từ bên trong container đó:
+
+```
+/.dockerenv                  True
+/run/dbus/system_bus_socket  khong co
+bluetoothctl                 khong co
+/sys/class/bluetooth         hci0        <- adapter CÓ thật
+```
+
+`bleak` nói chuyện với BlueZ **qua D-Bus**, mà socket D-Bus của hệ thống không
+được gắn vào container. Nên nó chết ngay lúc khởi tạo với một lỗi không hề nhắc
+tới Bluetooth: `[Errno 2] No such file or directory` — thứ không tìm thấy là một
+socket, không phải thiết bị. Danh sách Brick của App Lab cũng không có Bluetooth,
+nên không có cách nào xin quyền đó từ bên trong.
+
+Kết luận: muốn giữ BLE thì phải chạy thẳng trên hệ điều hành của bo — xem dưới.
+
+## Cài đặt — systemd trên bo
+
+Cần một adapter Bluetooth đang chạy (UNO Q có sẵn) và BlueZ. Đây là cách duy nhất
+chạy được BLE, vì lý do ở mục ngay trên.
+
+Cài SSH key một lần rồi chạy một lệnh từ máy dev:
 
 ```bash
-# trên UNO Q (Debian)
-sudo useradd -r -s /usr/sbin/nologin breezelink
-sudo mkdir -p /opt/breezelink && sudo chown -R breezelink /opt/breezelink
-
-# cần CẢ src/ của backend (edge import app/comfort từ đó)
-sudo rsync -a --exclude '.pio' /duong/dan/repo/src /duong/dan/repo/edge-ai /opt/breezelink/
-
-cd /opt/breezelink/edge-ai
-python3 -m venv .venv && .venv/bin/pip install -e .
-cp .env.example .env && sudo -e .env          # chỉ cần EDGE_ORG_ID
-
-sudo cp deploy/breezelink-edge-ai.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now breezelink-edge-ai
-journalctl -u breezelink-edge-ai -f
+AC_ORG_ID=<org-id> bash edge-ai/deploy/deploy-to-unoq.sh
 ```
+
+Script tự dò máy đích có `hci0` không (để không cài nhầm sang máy khác trong nhà),
+gói **lát cắt** backend, cài venv, kiểm import, rồi in ra bước cần `sudo` để dán vào
+terminal của bo. Mặc định `AC_UNOQ_HOST=192.168.1.7`, `AC_UNOQ_USER=arduino`.
+
+**Không chép nguyên `src/` lên bo** — bản trước làm thế và nó hỏng:
+
+```
+File ".../src/app/models/__init__.py", line 7
+  from app.models.app_release import AppRelease
+ModuleNotFoundError: No module named 'sqlalchemy'
+```
+
+`comfort_bridge` chỉ cần `app.models.enums.AcMode`, nhưng Python chạy `__init__.py`
+của gói trước khi nạp module con, mà bản thật import cả 12 model ORM. Cài SQLAlchemy
+lên bo để lấy đúng một enum là sai hướng — nên script mang theo lát cắt và thay
+`__init__.py` bằng bản rỗng. Lát cắt định nghĩa ở `_BACKEND_FILES` trong
+`deploy/build-edge-payload.py` — sửa backend mà quên sửa chỗ đó thì build vẫn chạy,
+chỉ tới lúc import trên bo mới nổ, nên script tự dừng nếu thiếu file.
+
+Dịch vụ chạy bằng user `arduino` chứ không tạo user riêng: chính sách D-Bus của BlueZ
+cấp quyền **theo user**, và `arduino` đã nằm trong nhóm `bluetooth`. Một user mới toanh
+sẽ bị `org.bluez` từ chối, và triệu chứng là quét BLE rỗng mãi mãi chứ không phải một
+lỗi quyền rõ ràng.
 
 ## Chạy thử trên máy dev
 

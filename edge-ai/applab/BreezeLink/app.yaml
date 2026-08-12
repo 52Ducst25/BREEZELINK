@@ -1,0 +1,16 @@
+name: BreezeLink
+icon: ❄️
+
+# App Lab chi nhan EMOJI cho `icon:`, khong nhan duong dan anh — da kiem: ca bon
+# app mau trong /var/lib/arduino-app-cli/examples deu dung emoji, va CLI khai
+# `--icon string` khong co gi noi toi file. Bong tuyet nay khop voi bong tuyet
+# tren chinh anh icon cua du an.
+#
+# KHONG CO `description:` — dong mo ta cu hien duoi ten app trong danh sach Apps
+# va bi cat giua chung, doc ra mot cau khong tron nghia.
+
+bricks:
+  - arduino:web_ui
+
+ports:
+  - 7000

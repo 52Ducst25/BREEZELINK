@@ -1,0 +1,18 @@
+# San pham cua build-applab-app.py — dung cho vao git.
+#
+# Cung ly do voi deploy/payload/: chung duoc SINH RA tu edge_ai/, src/app/ va
+# FirmWare/shared/, nen commit vao la co hai ban cua cung mot ma nguon va ban
+# sinh ra chac chan se cu hon. Chay lai script mat mot giay.
+#
+# Nhung gi CON LAI trong BreezeLink/ (app.yaml, sketch.ino, python/main.py,
+# requirements.txt) la ma nguon that va van vao git.
+BreezeLink/python/edge_ai/
+BreezeLink/python/app/
+BreezeLink/sketch/unoq-link-protocol.h
+
+# Chua ORG_ID cua ho. Khong bao gio vao git.
+BreezeLink/python/.env
+
+# Du lieu chay: lich su SQLite (.db + .db-wal + .db-shm) va dem du bao thoi tiet.
+# Sinh ra tren bo, khong phai ma nguon.
+BreezeLink/python/data/

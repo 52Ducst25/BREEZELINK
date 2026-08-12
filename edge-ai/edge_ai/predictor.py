@@ -10,7 +10,7 @@ deliberately narrow so a heavier model can replace the internals later without
 touching the controller.
 
 Everything is plain Python (no numpy): the UNO Q's Linux side runs Debian on a
-quad-core A53, but keeping the dependency list to bleak alone is what makes this
+quad-core A53, but keeping the dependency list to pyserial + pydantic is what makes this
 installable on a device somebody has to maintain in the field.
 """
 
@@ -42,6 +42,18 @@ class Trend:
 # averages out instead of being read as a trend.
 _MIN_SAMPLES = 6
 
+# Và chúng phải trải ít nhất chừng này giây.
+#
+# ĐẾM SỐ MẪU LÀ CHƯA ĐỦ. Sau khi gateway kết nối lại, cả một loạt khung dồn ứ đổ
+# về gần như cùng lúc, nên ``RoomStore`` có đủ 6 mẫu nhưng chúng trải vài mili-
+# giây. Chia cho một phương sai bé xíu cho ra độ dốc hàng nghìn °C/phút, và
+# ``find_anomalies`` báo cả bốn góc "runaway — nghi lỗi cảm biến".
+#
+# Phép kiểm ``var_x <= 1e-9`` bên dưới không cứu được: nó chỉ bắt trường hợp MỌI
+# mẫu cùng một mốc thời gian, còn "trải 5 mili-giây" thì vượt qua nó dễ dàng.
+# Đã thấy đúng hiện tượng này khi chạy thử Controller (−6759 °C/phút, cả 4 góc).
+_MIN_SPAN_SEC = 60.0
+
 
 def fit_trend(points: list[tuple[float, float]]) -> Trend | None:
     """Least-squares slope of ``(timestamp_sec, value)`` pairs.
@@ -52,6 +64,8 @@ def fit_trend(points: list[tuple[float, float]]) -> Trend | None:
     claim, not an absence of one.
     """
     if len(points) < _MIN_SAMPLES:
+        return None
+    if points[-1][0] - points[0][0] < _MIN_SPAN_SEC:
         return None
 
     t0 = points[0][0]

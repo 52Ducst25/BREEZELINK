@@ -1,6 +1,6 @@
 [Unit]
 Description=BreezeLink Edge AI (comfort tại chỗ + dự phòng khi mất cloud)
-Documentation=file:///opt/breezelink/edge-ai/README.md
+Documentation=file:///home/arduino/breezelink/edge-ai/README.md
 # Chỉ CHỜ mạng, không YÊU CẦU: broker có thể nằm trong LAN và bật sau, còn dịch
 # vụ này tự nối lại theo backoff. Đặt Requires= sẽ biến một broker khởi động
 # chậm thành một dịch vụ không bao giờ chạy.
@@ -9,12 +9,24 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=breezelink
-Group=breezelink
-WorkingDirectory=/opt/breezelink/edge-ai
+# CHẠY BẰNG `arduino`, KHÔNG TẠO USER RIÊNG — và đây là lý do kỹ thuật, không
+# phải lười: dịch vụ nói chuyện với BlueZ qua D-Bus, mà chính sách D-Bus của
+# BlueZ cấp quyền theo user. `arduino` là user sẵn có của bo UNO Q và đã nằm
+# trong nhóm bluetooth. Một user mới toanh sẽ bị org.bluez từ chối, và triệu
+# chứng là quét BLE trả về rỗng mãi mãi chứ không phải một lỗi quyền rõ ràng.
+User=arduino
+Group=arduino
+# NAM TRONG /home/arduino CHU KHONG PHAI /opt — vi sudo tren bo NAY doi mat khau.
+# Dat o /opt thi moi lan cap nhat deu can mot lan sudo de ghi, tuc khong the trien
+# khai tu xa duoc nua. Trong home thi user `arduino` tu ghi duoc, va sudo chi con
+# can DUNG MOT LAN de dat unit nay vao /etc/systemd/system.
+WorkingDirectory=/home/arduino/breezelink
 Environment=PYTHONUNBUFFERED=1
-EnvironmentFile=/opt/breezelink/edge-ai/.env
-ExecStart=/opt/breezelink/edge-ai/.venv/bin/python -m edge_ai.main
+# payload/ chua CA `edge_ai/` lan lat cat `app/` cua backend — mot muc PYTHONPATH
+# duy nhat lam ca hai import duoc, nen khong can EDGE_BACKEND_SRC.
+Environment=PYTHONPATH=/home/arduino/breezelink/payload
+EnvironmentFile=/home/arduino/breezelink/.env
+ExecStart=/home/arduino/breezelink/.venv/bin/python -m edge_ai.main
 
 # Restart=always chứ không on-failure: dịch vụ thoát 0 khi nhận SIGTERM, và một
 # lần dừng ngoài ý muốn vẫn phải quay lại. Ngoại lệ là lỗi cấu hình — nó thoát 1
@@ -27,8 +39,11 @@ RestartSec=10
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ProtectHome=true
-ReadOnlyPaths=/opt/breezelink
+# ProtectHome=false BAT BUOC vi ma nguon nam trong /home/arduino/breezelink —
+# bat len la systemd che khuat /home va dich vu khong tim thay chinh no.
+# Bu lai bang ReadOnlyPaths ngay duoi: doc duoc, khong ghi duoc.
+ProtectHome=false
+ReadOnlyPaths=/home/arduino/breezelink
 
 [Install]
 WantedBy=multi-user.target

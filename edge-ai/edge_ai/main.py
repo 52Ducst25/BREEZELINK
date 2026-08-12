@@ -1,6 +1,6 @@
 """Entry point: `python -m edge_ai.main`.
 
-Two coroutines side by side: the BLE link (reconnects forever, feeds snapshots
+Two coroutines side by side: the UART link (reconnects forever, feeds snapshots
 into the controller) and the control loop (fixed cadence, decides and acts).
 
 They are SEPARATE ON PURPOSE. Deciding inside the notify callback would tie the
@@ -15,8 +15,21 @@ import signal
 import sys
 
 from edge_ai import config
-from edge_ai.ble_client import GatewayLink
 from edge_ai.controller import Controller
+
+
+def _make_link(settings):
+    """Dựng đường tới gateway theo cấu hình.
+
+    Import MUỘN, không import cả hai ở đầu file: bản `serial` cần pyserial, bản
+    `bridge` cần gói `arduino` của App Lab, và không môi trường nào có đủ cả hai.
+    Import ở đầu file thì bên nào chạy cũng chết vì thiếu thư viện của bên kia.
+    """
+    if settings.link == "bridge":
+        from edge_ai.bridge_client import GatewayLink
+    else:
+        from edge_ai.uart_client import GatewayLink
+    return GatewayLink(settings)
 
 
 def _load_dotenv() -> None:
@@ -45,7 +58,7 @@ async def _control_loop(controller: Controller, tick_sec: float, stop: asyncio.E
         try:
             # Chờ CÓ THỂ NGẮT thay vì sleep thẳng: SIGTERM được đáp ứng ngay
             # thay vì phải chờ hết nhịp 30s, và systemd sẽ giết cứng nếu chờ lâu
-            # — giết cứng giữa lúc đang ghi một lệnh BLE là một lệnh gửi dở.
+            # — giết cứng giữa lúc đang ghi một lệnh UART là một lệnh gửi dở.
             await asyncio.wait_for(stop.wait(), timeout=tick_sec)
         except asyncio.TimeoutError:
             pass
@@ -53,7 +66,7 @@ async def _control_loop(controller: Controller, tick_sec: float, stop: asyncio.E
 
 async def _run(settings) -> int:
     log = logging.getLogger("edge")
-    link = GatewayLink(settings)
+    link = _make_link(settings)
     controller = Controller(settings, link)
 
     stop = asyncio.Event()
@@ -67,19 +80,21 @@ async def _run(settings) -> int:
             pass
 
     log.info(
-        "Edge AI chạy · org=%s · gateway=%s · nhịp %.0fs · giành lái sau %.0fs%s",
-        settings.org_id, settings.gateway_address or "(tự quét)",
+        "Edge AI chạy · org=%s · đường=%s · nhịp %.0fs · giành lái sau %.0fs%s",
+        settings.org_id,
+        "bridge (qua sketch STM32)" if settings.link == "bridge"
+        else f"serial {settings.uart_port or '(tự dò)'}",
         settings.tick_sec, settings.takeover_after_sec,
         " · CHỈ ĐỀ XUẤT" if settings.advisory_only else "",
     )
 
-    ble_task = asyncio.create_task(link.run(controller.on_snapshot))
+    link_task = asyncio.create_task(link.run(controller.on_snapshot))
     ctl_task = asyncio.create_task(_control_loop(controller, settings.tick_sec, stop))
 
     await stop.wait()
-    ble_task.cancel()
+    link_task.cancel()
     ctl_task.cancel()
-    await asyncio.gather(ble_task, ctl_task, return_exceptions=True)
+    await asyncio.gather(link_task, ctl_task, return_exceptions=True)
     log.info("Đã dừng")
     return 0
 

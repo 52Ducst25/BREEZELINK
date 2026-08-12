@@ -25,6 +25,7 @@ There is no echo to confuse now, because the gateway counts only SERVER commands
 """
 
 import logging
+import time
 
 logger = logging.getLogger("edge.cloud")
 
@@ -34,6 +35,9 @@ class CloudWatch:
         self._takeover_after = takeover_after_sec
         self._driving = False
         self._silence: float | None = 0.0
+        # Mốc thời gian dịch vụ này bắt đầu quan sát. Xem nhánh "chưa từng ra
+        # lệnh" trong update() cho lý do phải có nó.
+        self._watching_since = time.monotonic()
 
     def update(self, silence_sec: int | None) -> None:
         """Nạp `cloud_silence_sec` từ ảnh chụp mới nhất.
@@ -52,11 +56,34 @@ class CloudWatch:
                 logger.info("NHẢ LÁI — máy chủ đã lên tiếng trở lại (%.0fs trước)", self._silence)
             return
 
+        # "CHƯA TỪNG RA LỆNH" KHÔNG ĐƯỢC GIÀNH LÁI NGAY LÚC VỪA BẬT.
+        #
+        # Bản trước coi None là im lặng vô hạn và giành lái tức khắc — đo trên bo
+        # thật thì nó giành sau ĐÚNG 4 GIÂY kể từ lúc dịch vụ khởi động, trong khi
+        # phiên MQTT của gateway đang khoẻ mạnh. Đó chính là ca "hai bên cùng cầm
+        # lái" mà cả file này viết ra để tránh.
+        #
+        # Lý do bản trước sai: None là câu "máy chủ chưa ra lệnh lần nào KỂ TỪ KHI
+        # GATEWAY KHỞI ĐỘNG" — nó không phân biệt được "cloud chết" với "cloud
+        # chưa có việc gì để ra lệnh". Vừa cắm điện cả nhà thì hai thứ đó trông y
+        # hệt nhau, và chỉ có thời gian mới tách được chúng.
+        #
+        # Nên: phải TỰ QUAN SÁT đủ lâu bằng đúng ngưỡng đó rồi mới được kết luận.
+        # Đúng theo nguyên tắc bất đối xứng ở đầu file — giành lái chậm thì mất vài
+        # phút không thích ứng, giành nhầm thì hai bên tranh máy nén.
+        if self._silence is None:
+            watched = time.monotonic() - self._watching_since
+            if watched < self._takeover_after:
+                self._driving = False
+                return
+
         self._driving = True
         if not previously:
             logger.warning(
                 "GIÀNH LÁI — máy chủ im lặng %s (ngưỡng %.0fs)",
-                "chưa từng ra lệnh" if self._silence is None else f"{self._silence:.0f}s",
+                "chưa từng ra lệnh, và đã tự theo dõi đủ ngưỡng"
+                if self._silence is None
+                else f"{self._silence:.0f}s",
                 self._takeover_after,
             )
 

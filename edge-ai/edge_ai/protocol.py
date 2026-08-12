@@ -1,4 +1,4 @@
-"""Bố cục gói trên đường Bluetooth tới gateway.
+"""Bố cục gói trên đường UART tới gateway.
 
 BẢN SONG SINH CỦA ``FirmWare/shared/unoq-link-protocol.h``. Chuỗi ``struct``
 dưới đây phải khớp từng byte với struct C bên đó; đổi một bên mà quên bên kia
@@ -15,12 +15,18 @@ from dataclasses import dataclass
 from enum import IntEnum
 
 MAGIC = 0xAC
-VERSION = 1
-MAX_ROOMS = 4
+# 2 = ban UART. Ban 1 la BLE va KHONG tuong thich: goi lenh v1 dai 12 byte,
+# v2 dai 13 (them crc8). Gateway kiem truong nay nen hai ben lech phien ban se bi
+# tu choi thang thay vi doc lech truong roi ra lenh sai.
+VERSION = 2
 
-SERVICE_UUID = "4f1c9a00-1c3e-4d5a-9b21-7e6d0a3f8c10"
-SNAPSHOT_UUID = "4f1c9a01-1c3e-4d5a-9b21-7e6d0a3f8c10"
-COMMAND_UUID = "4f1c9a02-1c3e-4d5a-9b21-7e6d0a3f8c10"
+# Toc do UART. PHAI KHOP UNOQ_BAUD trong FirmWare/esp32-*/platformio.ini.
+# 115200 la du: anh chup 39 byte moi 5 giay = 62 byte/giay. Khong nang cao hon —
+# day di giua hai bo khong boc giap, toc do cao doi lay ti le loi bit chu khong
+# doi lay gi ca o luu luong nay. Hai ben lech baud thi byte ra rac, va trieu
+# chung giong het thieu day GND.
+BAUD = 115200
+MAX_ROOMS = 4
 
 T_INVALID = -0x8000
 H_INVALID = 0xFFFF
@@ -66,7 +72,14 @@ _SNAPSHOT_FMT = (
 )
 SNAPSHOT_SIZE = struct.calcsize(_SNAPSHOT_FMT)
 
-_COMMAND_FMT = "<BBBBbBHI"  # magic, version, kind, mode, setpoint, reserved, seq, link_key
+# magic, version, kind, mode, setpoint, reserved, seq, link_key, crc8
+#
+# CRC LA MOI O BAN UART. Ban BLE khong co vi tang lien ket cua Bluetooth da tu
+# kiem CRC24 va loai goi hong truoc khi len tang ung dung. UART khong co gi nhu
+# vay: day nhieu, cam rut giua chung, hai dau lech baud — tat ca deu day byte rac
+# len thang. Voi anh chup thi mot bit lat lam sai mot so do trong mot nhip; voi
+# LENH thi no doi setpoint roi di thang ra may lanh.
+_COMMAND_FMT = "<BBBBbBHIB"
 COMMAND_SIZE = struct.calcsize(_COMMAND_FMT)
 
 # Chốt kích thước, khớp static_assert trong unoq-link-protocol.h. Thêm một trường
@@ -75,7 +88,7 @@ COMMAND_SIZE = struct.calcsize(_COMMAND_FMT)
 # được: nó tính trên đúng số byte mà bên gửi nghĩ là đúng. Hai dòng này nổ ngay
 # lúc import, tức là lúc dịch vụ khởi động, chứ không phải lúc đang lái máy lạnh.
 assert SNAPSHOT_SIZE == 39, f"Snapshot {SNAPSHOT_SIZE} byte, firmware chốt 39"
-assert COMMAND_SIZE == 12, f"Command {COMMAND_SIZE} byte, firmware chốt 12"
+assert COMMAND_SIZE == 13, f"Command {COMMAND_SIZE} byte, firmware chốt 13"
 
 
 class ProtocolError(ValueError):
@@ -157,10 +170,9 @@ class Snapshot:
 def parse_snapshot(data: bytes) -> Snapshot:
     """Giải mã một ảnh chụp. Ném ProtocolError nếu có bất cứ gì không khớp.
 
-    Kiểm ĐỘ DÀI TRƯỚC TIÊN, và đó không phải là thủ tục: MTU mặc định của BLE là
-    23 byte, nên nếu hai bên không thương lượng lên được thì notify bị CẮT CỤT
-    trong im lặng — không lỗi ở đâu cả, chỉ là mấy góc cuối biến mất. Dòng kiểm
-    này là thứ duy nhất biến ca đó thành một thông báo đọc được.
+    Kiểm ĐỘ DÀI TRƯỚC TIÊN: trên UART, một khung có thể tới làm nhiều mảnh (đệm
+    driver cắt bất kỳ đâu). Bên gọi phải gom đủ byte rồi mới đưa vào đây; dòng
+    kiểm này biến "gọi sớm" thành một thông báo đọc được thay vì một IndexError.
     """
     if len(data) < SNAPSHOT_SIZE:
         raise ProtocolError(
@@ -224,7 +236,11 @@ def build_command(*, kind: int, mode: Mode, setpoint: int | None, seq: int, link
     ``kind`` là ranh giới quan trọng nhất của cả giao thức: gateway CHỈ bắn hồng
     ngoại khi nhận COMMAND. Mặc định ở mọi lối gọi phải là ADVICE.
     """
-    return struct.pack(
+    # Đóng gói với crc8 = 0 rồi tính CRC trên 12 byte đầu và ghi đè byte cuối.
+    # Cùng cách firmware làm (acUnoQSealCommand) — và phải cùng cách, vì CRC tính
+    # trên một chuỗi byte khác đi một byte là mọi lệnh bị gateway từ chối, mà
+    # triệu chứng chỉ là "máy lạnh không nhúc nhích".
+    body = struct.pack(
         _COMMAND_FMT,
         MAGIC,
         VERSION,
@@ -234,4 +250,6 @@ def build_command(*, kind: int, mode: Mode, setpoint: int | None, seq: int, link
         0,                    # reserved
         seq & 0xFFFF,
         link_key & 0xFFFFFFFF,
+        0,                    # crc8, điền ngay dưới
     )
+    return body[:-1] + bytes([crc8(body[:-1])])
