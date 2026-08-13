@@ -60,6 +60,11 @@ repomix-output.xml
 .serena/cache
 plans/**/*
 !plans/templates/*
+# Ke hoach da node theo phong: dua len git de thuc thi sau, co the tu may khac.
+# Can CA HAI dong — mo lai thu muc truoc roi moi mo noi dung. Chi co dong thu hai
+# thi git khong di vao thu muc da bi loai o tren va ngoai le khong bao gio chay.
+!plans/260730-1836-da-node-theo-phong/
+!plans/260730-1836-da-node-theo-phong/**
 screenshots/*
 docs/screenshots/*
 docs/research/*

@@ -1,0 +1,6 @@
+# San pham cua build-edge-payload.py — dung cho vao git.
+#
+# No duoc SINH RA tu edge_ai/ va src/app/, nen commit vao la co hai ban cua cung
+# mot ma nguon, va ban sinh ra chac chan se cu hon. Ai can thi chay lai script;
+# no chay trong mot giay.
+payload/

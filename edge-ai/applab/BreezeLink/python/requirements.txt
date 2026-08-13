@@ -1,0 +1,8 @@
+# pydantic KHONG phai lua chon ma la he qua: comfort_engine.compute() tra ve
+# app.schemas.comfort.ComfortResult, va lop do la mot pydantic BaseModel.
+#
+# KHONG co pyserial o day, khac voi pyproject.toml cua edge-ai: trong App Lab thi
+# duong toi gateway di qua sketch tren STM32 (edge_ai/bridge_client.py), khong
+# qua mot cong /dev/tty* nao ca. Cai them pyserial vao container chi de no nam do
+# la them mot thu co the vo luc nang cap.
+pydantic>=2

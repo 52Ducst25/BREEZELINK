@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User, UserRole
 from app.services import user_service
-from app.web.dependencies import get_db, require_sysadmin
+from app.web.dependencies import get_db, require_sysadmin, require_web_user
 from app.web.templating import render
 
 router = APIRouter(prefix="/web", tags=["ssr-admin"])
@@ -223,6 +223,23 @@ async def account_page(request: Request, user: User = Depends(require_sysadmin))
         "err": request.query_params.get("err"),
         "ok": request.query_params.get("ok"),
     })
+
+
+@router.get("/settings")
+async def settings_page(request: Request, user: User = Depends(require_web_user)):
+    """Tuỳ chọn hiển thị. KHÔNG phải trang quản trị.
+
+    ``require_web_user`` chứ không phải ``require_sysadmin`` như phần còn lại của
+    file này: chọn giao diện sáng hay tối là sở thích cá nhân, không phải quyền.
+    Khoá nó sau quyền quản trị nghĩa là một nhân viên không phải sysadmin sẽ bị
+    ép dùng giao diện sáng mãi mãi mà không có cách nào đổi.
+
+    Trang này KHÔNG ghi gì xuống máy chủ. Lựa chọn nằm trong localStorage của
+    trình duyệt, cùng chỗ với trạng thái gập/mở thanh bên — cùng lý do: nó phải
+    có hiệu lực TRƯỚC lần vẽ đầu tiên, mà chờ máy chủ trả lời thì đã muộn và
+    người dùng sẽ thấy giao diện sáng loé lên rồi mới chuyển tối.
+    """
+    return render(request, "settings.html", {"user": user, "nav": "settings"})
 
 
 @router.post("/account/avatar")

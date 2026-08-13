@@ -1,0 +1,13 @@
+# Git tren may nay dat core.autocrlf=true, nen moi lan checkout git doi LF -> CRLF
+# cho tat ca file van ban. Voi shell script thi do la loi: bash doc dau \r nhu mot
+# phan cua lenh va bao nhung thu vo nghia kieu `$'\r': command not found`, hoac
+# `/usr/bin/env: 'bash\r': No such file or directory` — deu tro sai huong hoan toan,
+# vi file van ton tai va noi dung van dung.
+#
+# Dong duoi ep *.sh luon la LF trong thu muc lam viec, bat ke autocrlf.
+*.sh text eol=lf
+
+# Ly do tuong tu: cac file nay chay tren Linux (VPS) hoac duoc doc boi cong cu
+# khong chap nhan CRLF.
+Dockerfile text eol=lf
+*.service text eol=lf

@@ -75,9 +75,10 @@ flutter_launcher_icons:
   ios: false
   image_path: "assets/icon/app_icon.png"
   # Behind the transparent-free foreground; only shows at a mask's extreme
-  # edge. Very dark purple to match the artwork's corners, not a stark white
-  # that would ring the icon.
-  adaptive_icon_background: "#0A0410"
+  # edge. Lấy từ CHÍNH góc ảnh nguồn (đo bằng Pillow), không chọn tay: nền này
+  # chỉ ló ra ở rìa cực đại của mặt nạ, nên lệch màu một chút là thành một viền
+  # mảnh khác màu chạy quanh icon.
+  adaptive_icon_background: "#000507"
   adaptive_icon_foreground: "assets/icon/app_icon.png"
   min_sdk_android: 21
 

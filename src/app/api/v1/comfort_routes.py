@@ -76,9 +76,9 @@ async def set_override(
             status_code=422,
         )
 
-    device = await telemetry_service.get_device_by_org_and_node(session, org_id, "indoor")
+    device = await telemetry_service.get_gateway_device(session, org_id)
     if device is None:
-        raise NotFoundError("Indoor device not registered for this organization")
+        raise NotFoundError("Gateway (indoor) device not registered for this organization")
 
     await redis_override_service.set_override(
         org_id,
@@ -141,9 +141,9 @@ async def _send_ir_action(
             available=False,
             detail="Chưa học nút này. Vào tab Học lệnh để học từ điều khiển thật.",
         )
-    device = await telemetry_service.get_device_by_org_and_node(session, org_id, "indoor")
+    device = await telemetry_service.get_gateway_device(session, org_id)
     if device is None:
-        raise NotFoundError("Indoor device not registered for this organization")
+        raise NotFoundError("Gateway (indoor) device not registered for this organization")
 
     mode, setpoint = _current_indoor(await redis_state_service.get_indoor_state(org_id))
     await command_publisher.publish_ir_action(

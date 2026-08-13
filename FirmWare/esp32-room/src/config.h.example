@@ -1,0 +1,52 @@
+#pragma once
+// ============================================================================
+//  BreezeLink — ESP32-C3-DevKitM-1 · node CẢM BIẾN GÓC PHÒNG
+//  BẢN MẪU — copy thành `config.h` rồi điền. (config.h bị gitignore.)
+// ============================================================================
+//  Node này KHÔNG nối WiFi và KHÔNG nối MQTT — nó chỉ bắn ESP-NOW về gateway,
+//  gateway đứng tên publish hộ. Nên ở đây KHÔNG có MQTT_PASSWORD, và WIFI_SSID
+//  dưới đây KHÔNG kèm mật khẩu: node chỉ *quét* tên mạng để biết router đang ở
+//  kênh nào, không hề đăng nhập.
+//
+//  Lấy DEVICE_UUID ở đâu?
+//    Web admin -> Khách hàng -> mở node (Cảm biến phòng) -> mục "Nạp firmware".
+//    Mỗi góc là MỘT hàng device riêng trên web, nên MỖI BO MỘT UUID KHÁC NHAU.
+// ============================================================================
+
+// -------- 1) Tên mạng WiFi của nhà (CHỈ để dò kênh) --------
+//  PHẢI GIỐNG HỆT chuỗi trong config.h của gateway, và phải là băng 2.4 GHz.
+//
+//  Đây là chỗ hỏng câm số một của ESP-NOW: hai bên bắt buộc cùng kênh, mà node
+//  này suy ra kênh bằng cách quét đúng chuỗi tên này. Gõ lệch một ký tự (hoặc
+//  điền tên băng 5 GHz) thì node bám kênh 1 mặc định, gói bay vào khoảng không,
+//  và vì broadcast KHÔNG CÓ ACK nên không một dòng log nào ở bất kỳ đâu báo lỗi.
+#define WIFI_SSID   "TEN_WIFI_2G"
+
+#define FW_VERSION  "room-1.0"
+
+// -------- 2) DEVICE_UUID và ROOM_CORNER KHÔNG CÒN Ở ĐÂY --------
+//  Chúng nằm trong `nodes.ini` (cùng thư mục với platformio.ini), mỗi node một
+//  env riêng, và tới đây qua build_flags.
+//
+//  VÌ SAO CHUYỂN: file này CHỈ CÓ MỘT, mà bốn bo thì khác nhau đúng hai dòng đó.
+//  Nạp bo thứ ba nghĩa là sửa file rồi nạp, sửa lại rồi nạp bo thứ tư — và không
+//  cách nào nhìn vào thư mục mà biết nó đang giữ danh tính của bo nào. Đã có lần
+//  nạp nhầm uuid của SS2 lên bo SS4 vì đúng chuyện đó.
+//
+//  Nay mỗi bo một lệnh, không sửa file nào:
+//      pio run -e ss1 -t upload --upload-port COM30
+//
+//  Những gì còn ở đây là thứ CẢ BỐN BO DÙNG CHUNG (tên WiFi, phiên bản firmware)
+//  — đó cũng là ranh giới để quyết định thứ mới thuộc về file nào.
+
+// ============================================================================
+//  Phần cứng
+// ----------------------------------------------------------------------------
+//  DHT_PIN khai trong platformio.ini (mặc định GPIO4), cùng chỗ với các cờ build
+//  khác. Lý do chọn chân + những chân phải tránh trên C3: xem khối chú thích đầu
+//  platformio.ini.
+//
+//  Cấp nguồn: bản này chạy nguồn USB 5V và KHÔNG đo pin. Muốn chạy pin thì phải
+//  thêm deep-sleep — ESP-NOW rất hợp với việc đó (không có bắt tay WiFi/DHCP/TCP
+//  nào phải làm lại sau mỗi lần thức), nhưng chưa làm.
+// ============================================================================

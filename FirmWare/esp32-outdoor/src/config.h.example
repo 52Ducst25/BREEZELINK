@@ -44,4 +44,16 @@
 #define DHT_TYPE       DHT22
 
 //  Chu kỳ gửi số liệu (ms). 15s cho dễ theo dõi khi test; 30000 khi chạy thật.
-#define TELEMETRY_MS   15000UL
+//  5 GIAY khi chay ESP-NOW, KHONG PHAI 15. Day la NHIP TIM, khong phai nhip ghi
+//  du lieu: gateway da tu chan viec day len cloud o 15s (SlaveWatch::
+//  RELAY_INTERVAL_MS), nen phat day hon KHONG sinh them hang telemetry nao.
+//
+//  Vi sao phai day: broadcast ESP-NOW khong co ACK nen goi roi la mat han. Do
+//  tren bo that: node phat o giay 8/23/38/53, gateway chi nhan duoc goi giay 23.
+//  Voi nhip 15s va nguong mat ket noi 20s cua SlaveWatch thi chi can ROI MOT GOI
+//  la node bi bao OFFLINE — log gateway nhap nhay ONLINE/OFFLINE lien tuc trong
+//  khi node van phat deu. 5s cho phep roi ba nhip lien tiep ma van duoc coi la
+//  con song.
+//
+//  Ban chay WiFi truc tiep thi 15s van dung: TCP co xac nhan, khong roi am tham.
+#define TELEMETRY_MS   5000UL

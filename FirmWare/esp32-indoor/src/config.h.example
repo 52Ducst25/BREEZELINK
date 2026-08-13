@@ -8,11 +8,11 @@
 //    Web admin -> Khách hàng -> mở node (Trong nhà) -> mục "Nạp firmware".
 //    MQTT_USERNAME luôn = DEVICE_UUID.
 //
-//  QUAN TRỌNG — DÙNG LẠI ĐÚNG DEVICE_UUID CỦA NODE "TRONG NHÀ" ĐANG CÓ:
-//    backend chỉ chấp nhận DUY NHẤT 1 node node_type=indoor cho mỗi org
-//    (telemetry_service.get_device_by_org_and_node dùng scalar_one_or_none).
-//    Tạo thêm một hàng device "indoor" thứ hai sẽ làm worker ném
-//    MultipleResultsFound và toàn bộ luồng điều khiển tự động đứng.
+//  QUAN TRỌNG — ĐẶT VAI TRÒ MẠNG CỦA NODE NÀY LÀ **MASTER** TRÊN WEB:
+//    backend chọn "node nào nhận lệnh điều khiển" bằng role=master trước, rồi
+//    mới rơi về node_type=indoor cũ nhất (telemetry_service.get_gateway_device).
+//    Không đặt master thì hộ nào có hai hàng indoor sẽ bị lái nhầm node, và
+//    triệu chứng là lệnh publish thành công mà máy lạnh không nhúc nhích.
 // ============================================================================
 
 // -------- 1) WiFi --------
@@ -31,7 +31,22 @@
 // -------- 3) Định danh node (khớp hàng devices trên web) --------
 #define ORG_ID         "DAN_ORG_ID"
 #define DEVICE_UUID    "DAN_DEVICE_UUID"
-#define FW_VERSION     "indoor-1.0"
+#define FW_VERSION     "gateway-2.0"
+
+// -------- 4) Node cảm biến góc phòng: KHÔNG PHẢI KHAI GÌ Ở ĐÂY --------
+//  Trước đây chỗ này có một mảng ROOM_NODE_UUIDS, và thêm/bớt một góc là phải
+//  nạp lại gateway. Nó đã bỏ khi các node góc chuyển sang ESP-NOW: gói ESP-NOW
+//  chở được 250 byte nên mỗi node mang thẳng device_uuid 32 ký tự của chính nó
+//  (../../shared/espnow-message.h). Gateway cứ thế publish hộ vào topic của node
+//  đó — nó không cần biết trước có bao nhiêu góc, cũng không cần biết góc nào là
+//  góc nào.
+//
+//  Kèm theo đó là mất hẳn một lớp lỗi: mảng cũ lệch một ô thì số đo của góc A
+//  được nộp lên cloud dưới tên góc B, biểu đồ vẫn có số, không lỗi ở đâu cả, và
+//  hai góc bị hoán tên vĩnh viễn.
+//
+//  Node góc phòng cấu hình ở ../../esp32-room/src/config.h — mỗi bo một
+//  DEVICE_UUID riêng, lấy trên web ở mục "Nạp firmware" của chính node đó.
 
 // ============================================================================
 //  Phần cứng — bo QR Box Advance Touch Screen
@@ -39,14 +54,15 @@
 //  Cách đọc ngược sơ đồ chân từ schematic + thiết kế giao diện:
 //  ../../Interface/README.md
 //
-//  CHÂN IR VÀ DHT KHÔNG KHAI Ở ĐÂY. `IR_TX_PIN` (5), `IR_RX_PIN` (17) và
-//  `DHT_PIN` (2) nằm trong build_flags của platformio.ini, cùng chỗ với các cờ
-//  TFT_* — vì cả hai nhóm đều phải có mặt lúc biên dịch THƯ VIỆN, không chỉ lúc
-//  biên dịch src/. Lý do chọn từng chân + các bẫy phần cứng: đọc khối chú thích
-//  đầu platformio.ini, và Interface/README.md §3.
+//  CHÂN IR KHÔNG KHAI Ở ĐÂY. `IR_TX_PIN` (5) và `IR_RX_PIN` (17) nằm trong
+//  build_flags của platformio.ini, cùng chỗ với các cờ TFT_* — vì cả hai nhóm
+//  đều phải có mặt lúc biên dịch THƯ VIỆN, không chỉ lúc biên dịch src/. Lý do
+//  chọn từng chân + các bẫy phần cứng: đọc khối chú thích đầu platformio.ini,
+//  và Interface/README.md §3.
 //
-//  Nhiệt/ẩm: DHT22 trên GPIO17. SHT3x (I2C 0x44) vẫn được dò và ĐƯỢC ƯU TIÊN nếu
-//  có mặt — nó có CRC nên đáng tin hơn. Không đấu thì tự rơi về DHT22.
+//  BO NÀY KHÔNG CÒN CẢM BIẾN NHIỆT/ẨM. Cả DHT22 lẫn SHT3x đã bỏ khỏi firmware:
+//  số "trong nhà" nay là trung vị của các node góc phòng (ROOM_NODE_UUIDS ở
+//  trên). Một cảm biến treo trên tường chỉ nói được nhiệt độ của cái tường đó.
 // ============================================================================
 
 //  Thời gian chờ người dùng bấm remote khi vào chế độ HỌC (ms).

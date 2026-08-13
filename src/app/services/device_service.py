@@ -91,7 +91,18 @@ async def set_role(session: AsyncSession, device: Device, role: NodeRole | None)
     At most ONE master per household: promoting a node to master demotes any
     OTHER current master in the same org to slave in the same flush, so the
     "which node bridges to the cloud" answer is always unambiguous.
+
+    A room sensor can never be master. It reaches the gateway over BLE and never
+    opens an MQTT session, so making it master would point every outgoing
+    command at a node that is not subscribed — the commands would be published
+    successfully, never executed, and never nacked. Refusing here is the only
+    place that catches a mis-click on the admin form.
     """
+    if role == NodeRole.master and device.node_type == NodeType.room:
+        raise ValueError(
+            "Node cảm biến phòng (room) không thể làm master — nó không nối MQTT. "
+            "Chọn node trong nhà (gateway) làm master."
+        )
     if role == NodeRole.master:
         await session.execute(
             update(Device)

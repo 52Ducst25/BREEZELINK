@@ -1,0 +1,61 @@
+; Danh tính của từng bo cảm biến góc phòng — MỘT ENV MỖI BO.
+;
+; BẢN MẪU: chép thành `nodes.ini` rồi điền. (nodes.ini bị gitignore vì nó chứa
+; DEVICE_UUID của một khách hàng thật.)
+;
+; Nạp:
+;     pio run -e ss1 -t upload --upload-port COM30
+;     pio run -e ss4 -t upload --upload-port COM33
+;
+; Xem log đúng bo đó:
+        & "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" device monitor -e ss1 --port COM30
+        & "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" device monitor -e ss2 --port COM31
+        & "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" device monitor -e ss3 --port COM32
+        & "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" device monitor -e ss4 --port COM33
+
+;     pio device monitor -e ss1 --port COM30
+;     pio device monitor -e ss2 --port COM31
+      pio device monitor -e ss3 --port COM32
+      pio device monitor -e ss4 --port COM33
+; ---------------------------------------------------------------------------
+;  VÌ SAO LÀ 4 ENV CHỨ KHÔNG PHẢI 4 THƯ MỤC
+;
+;  Bốn bo chạy CÙNG MỘT firmware, khác nhau đúng hai giá trị. Tách thành bốn thư
+;  mục là bốn bản sao của main.cpp + room-sensor.cpp: sửa một lỗi phải sửa bốn
+;  lần, và lần thứ tư sẽ có người quên — rồi một góc phòng chạy bản cũ mà không
+;  ai nhận ra, vì nó vẫn gửi số đo bình thường.
+;
+;  Env cho đúng thứ cần: mỗi bo một lệnh nạp, mỗi bo một thư mục build riêng
+;  (.pio/build/ss1…), mà vẫn một bản mã nguồn.
+; ---------------------------------------------------------------------------
+;  LẤY DEVICE_UUID Ở ĐÂU: web admin -> Khách hàng -> mở node (Cảm biến phòng)
+;  -> mục "Nạp firmware". MỖI BO MỘT UUID KHÁC NHAU — trùng uuid là hai bo cùng
+;  ghi đè số đo của nhau lên một hàng device, và biểu đồ nhảy loạn không lý do.
+;
+;  ROOM_CORNER 0..3 CHỈ LÀ NHÃN hiển thị. Trùng nhau thì vô hại (định danh thật
+;  là uuid), chỉ là màn gateway ghi "góc 1" hai lần.
+; ---------------------------------------------------------------------------
+
+[env:ss1]
+extends = room_base
+build_flags = ${room_base.build_flags}
+    -D DEVICE_UUID='"DEVICE_UUID_GOC_1"'
+    -D ROOM_CORNER=0
+
+[env:ss2]
+extends = room_base
+build_flags = ${room_base.build_flags}
+    -D DEVICE_UUID='"DEVICE_UUID_GOC_2"'
+    -D ROOM_CORNER=1
+
+[env:ss3]
+extends = room_base
+build_flags = ${room_base.build_flags}
+    -D DEVICE_UUID='"DEVICE_UUID_GOC_3"'
+    -D ROOM_CORNER=2
+
+[env:ss4]
+extends = room_base
+build_flags = ${room_base.build_flags}
+    -D DEVICE_UUID='"DAN_UUIDDEVICE_UUID_GOC_4_GOC_3"'
+    -D ROOM_CORNER=3

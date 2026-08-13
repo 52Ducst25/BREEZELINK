@@ -42,6 +42,11 @@ namespace Ui {
 /// Mọi số đo dùng NAN cho "không có", KHÔNG dùng 0. App tiền nhiệm từng mặc
 /// định thiếu số về 0.0 rồi hiện setpoint bịa — ở đây chặn bằng cùng một luật.
 struct Model {
+  /// Số ô cảm biến góc phòng mà giao diện dựng sẵn. 8 = AC_BLE_MAX_NODES của
+  /// khuôn gói BLE, để không node hợp lệ nào lọt ra ngoài màn. Lắp thật hiện là
+  /// 4; các ô thừa đơn giản là không được vẽ (xem `roomSlots`).
+  static const uint8_t MAX_ROOMS = 8;
+
   // --- kết nối ---
   bool     wifiUp   = false;
   int      rssi     = 0;
@@ -51,8 +56,31 @@ struct Model {
   char     mac[18]  = "";
   uint8_t  channel  = 0;
 
-  // --- số đo trong nhà ---
+  // --- số đo trong nhà: TRUNG VỊ của các node góc phòng ---
+  //
+  // KHÔNG PHẢI SỐ CỦA BO NÀY NỮA. Bo gateway không còn cảm biến; hai số dưới đây
+  // do RoomRegistry::median() dựng ở lõi 1 rồi chép sang. NAN = chưa góc nào có
+  // số đo, và màn phải hiện skeleton chứ không hiện 0.
   float    tIn = NAN, hIn = NAN;
+
+  // --- từng góc phòng (BLE mesh) ---
+  //
+  // Có mặt ở đây, chứ không chỉ mỗi số trung vị, VÌ ĐÓ LÀ LÝ DO CÓ BỐN CẢM BIẾN:
+  // trung vị che đi đúng cái thông tin đáng giá nhất — góc nào đang lệch. Người
+  // đứng trước panel cần thấy "góc cửa sổ 29°, ba góc kia 25°" để biết nên kéo
+  // rèm, chứ không phải một con 25.5° không giải thích được.
+  uint8_t  roomSlots       = 0;      ///< số góc ĐÃ NGHE THẤY — chỉ vẽ ngần này
+  uint8_t  roomOnlineCount = 0;      ///< số góc còn nghe thấy (kể cả cảm biến hỏng)
+  uint8_t  roomVoting      = 0;      ///< số góc thật sự tham gia trung vị
+  float    roomT[MAX_ROOMS]  = {NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN};
+  float    roomH[MAX_ROOMS]  = {NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN};
+  bool     roomOnline[MAX_ROOMS] = {false};
+  uint8_t  roomCorner[MAX_ROOMS] = {0};   ///< nhãn góc node tự khai; 0xFF = không khai
+  uint32_t roomAgeSec[MAX_ROOMS] = {0};
+
+  // --- Arduino UNO Q (edge AI, qua Bluetooth) ---
+  bool     unoqUp = false;   ///< có đang kết nối GATT không
+  uint32_t unoqRx = 0;       ///< số đề xuất/lệnh đã nhận từ nó
 
   // --- số đo ngoài trời (qua ESP-NOW) ---
   float    tOut = NAN, hOut = NAN;
@@ -146,23 +174,10 @@ bool pollCommand(Command &out);
 /// nullptr = thành công, dùng lời mặc định.
 void reply(const char *msg);
 
-/// Số đo trong nhà mới nhất. HAI nguồn có thể ghi vào đây, tuỳ bo lắp con nào:
-///
-///   SHT3x (I2C 0x44) — tác vụ UI tự đọc mỗi 2s. Bus I2C có ba con (cảm ứng,
-///     DS1307, SHT3x) và thuộc quyền sở hữu của tác vụ UI: hai lõi cùng nói
-///     chuyện trên một bus I2C thì hỏng gói, mà triệu chứng là số đo sai lác đác
-///     — loại lỗi tốn cả tuần để tìm.
-///   DHT22 (GPIO17) — loop() đọc rồi gọi setIndoor(). Ngược hướng vì lý do đối
-///     xứng: thư viện DHT tắt ngắt suốt ~5ms để bắt nhịp bit, mà lõi 0 là chỗ
-///     ngăn xếp WiFi chạy. Đọc ở lõi 1 vừa an toàn cho WiFi vừa ít bị ngắt xen
-///     vào giữa nên tỉ lệ đọc hỏng thấp hơn hẳn.
-///
-/// Trả false khi chưa có số đo hợp lệ nào (chưa cắm cảm biến, hoặc CRC sai).
-/// KHÔNG bao giờ trả 0.0 thay cho "không đo được".
-bool readIndoor(float &tempC, float &humidity);
-
-/// Đặt số đo trong nhà từ bên ngoài tác vụ UI (dùng cho DHT22 đọc ở loop()).
-/// An toàn đa lõi. Người gọi phải tự loại NaN — hàm này không đoán hộ.
-void setIndoor(float tempC, float humidity);
+// KHÔNG CÒN readIndoor()/setIndoor(). Bo này từng mang cảm biến của riêng nó
+// (DHT22 ở lõi 1, hoặc SHT3x do tác vụ UI đọc trên bus I2C), nên cần một kho
+// chung có khoá để hai lõi trao số cho nhau. Nay nguồn duy nhất là các node góc
+// phòng, và lõi 1 đã tính sẵn trung vị trước khi gọi publish() — số đi cùng
+// Model như mọi trường khác, không cần đường riêng nữa.
 
 } // namespace Ui

@@ -1,24 +1,38 @@
 // ============================================================================
-//  BreezeLink — QR Box Advance Touch · node TRONG NHÀ (indoor) + MASTER + IR blaster
+//  BreezeLink — QR Box Advance Touch · GATEWAY TRONG NHÀ + IR blaster
 // ----------------------------------------------------------------------------
-//  Node này gộp cả 4 vai trò của một hộ vào một bo:
-//    1. Đo nhiệt/ẩm -> đẩy t_in/h_in lên cloud (đầu vào của thuật toán comfort).
-//       DHT22 trên GPIO17 đọc ngay tại loop() này; nếu bo có thêm SHT3x trên I2C
-//       thì tác vụ UI lấy hộ (bus I2C thuộc về nó) và số của SHT3x được ưu tiên.
+//  Bo này KHÔNG CÒN ĐO NHIỆT ĐỘ. Bốn node ESP32-C3 đặt ở bốn góc phòng làm việc
+//  đó (FirmWare/esp32-room/), còn bo này làm năm việc của một cầu nối:
+//    1. Nhận ESP-NOW từ 4 node góc phòng + node ngoài trời -> trung chuyển lên
+//       MQTT hộ TỪNG node (mỗi node một topic riêng, theo uuid nó tự khai)
 //    2. Nhận lệnh từ cloud -> phát hồng ngoại điều khiển máy lạnh + học remote
-//    3. Nhận ESP-NOW từ node outdoor -> chuyển tiếp lên MQTT hộ nó
-//    4. Hiển thị + cho điều khiển tại chỗ trên màn cảm ứng 2.8" (tác vụ lõi 0)
+//    3. Hiển thị + cho điều khiển tại chỗ trên màn cảm ứng 2.8" (tác vụ lõi 0)
+//    4. Đẩy ảnh chụp sang Arduino UNO Q qua Bluetooth (GATT, vai peripheral)
+//    5. Nhận đề xuất/lệnh ngược từ UNO Q — và chỉ thi hành khi đó là LỆNH
 //
-//  Vì sao gộp: backend chỉ chấp nhận DUY NHẤT một node node_type=indoor cho mỗi
-//  org (telemetry_service.get_device_by_org_and_node dùng scalar_one_or_none),
-//  nên "node indoor" và "node indoor-master" không thể là hai hàng devices khác
-//  nhau. Node này mang chính DEVICE_UUID của node ESP32-S3 cũ và thay thế nó.
+//  VÌ SAO BỎ DHT22 KHỎI BO NÀY: một cảm biến treo trên tường không nói được
+//  nhiệt độ của phòng, nó nói nhiệt độ của CÁI TƯỜNG ĐÓ. Bốn góc chênh nhau
+//  3-4°C là chuyện thường (nắng cửa sổ, miệng gió, sau tủ). Nay số "trong nhà"
+//  là TRUNG VỊ của các góc còn tươi — xem room-registry.h cho lý do chọn trung
+//  vị thay vì trung bình cộng.
+//
+//  HỆ QUẢ QUAN TRỌNG: bo này không publish `telemetry` nữa. Nó không có số đo
+//  nào của riêng mình, và gửi số mượn của node khác dưới tên mình là bịa. MAC
+//  của nó đi kèm gói `state` (state_handler.py đọc) để trang nạp firmware vẫn
+//  hiện được.
+//
+//  BA RADIO TRÊN MỘT ĂNG-TEN: WiFi/MQTT + ESP-NOW + BLE cùng dùng một khối
+//  2.4GHz. Bộ đồng tồn tại của IDF chia thời gian giúp. BLE ở đây NHẸ hơn hẳn
+//  phương án từng cân nhắc (quét advert của 4 node phòng): gateway chỉ quảng bá
+//  và giữ MỘT kết nối GATT với UNO Q, không quét gì cả — mà quét mới là thứ ăn
+//  sóng liên tục. Số đo phòng đi ESP-NOW, vốn đã chia sẻ radio WiFi sẵn có.
 //
 //  6 topic đang dùng, khớp CHÍNH XÁC backend (src/app/utils/mqtt_naming.py):
 //    telemetry  node -> cloud   {ts,t,h,rssi,mac,fw}      (telemetry_handler.py)
+//                               bo này CHỈ gửi hộ node khác, không gửi của mình
 //    status     node -> cloud   "online"/"offline" retain (status_handler.py)
 //    cmd        cloud -> node   lệnh IR HOẶC lệnh học     (command_publisher.py)
-//    state      node -> cloud   {ack,mode,setpoint} retain (state_handler.py)
+//    state      node -> cloud   {ack,mode,setpoint,mac} retain (state_handler.py)
 //    learn      node -> cloud   {raw_timing,mode/action,temp} (learn_handler.py)
 //    override   node -> cloud   {mode,setpoint} | {clear}  (override_handler.py)
 //                               KHÔNG retain — xem buildTopics()
@@ -27,47 +41,33 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
-#include <DHTesp.h>
 #include "config.h"
+#include "espnow-message.h"
 #include "espnow-relay.h"
+#include "room-registry.h"
 #include "slave-watch.h"
+#include "unoq-link.h"
 #include "ir-io.h"
 #include "ir-store.h"
+// Nhật ký từng gói vào/ra. TẮT trừ khi biên dịch với -D GATEWAY_TRACE=1, và khi
+// tắt thì mọi lời gọi dưới đây bị trình biên dịch xoá sạch (thân hàm rỗng).
+#include "serial-trace.h"
 // Bo QR Box Advance Touch Screen: màn 2.8" chạy trên TÁC VỤ RIÊNG Ở LÕI 0.
 // Thiết kế giao diện + lý do phải tách lõi: ../../Interface/README.md và ui.h.
 // loop() dưới đây không vẽ một pixel nào — nó chỉ đổ số liệu sang và rút lệnh về.
 #include "ui/ui.h"
-#include "ui/board-io.h"   // chỉ để hỏi sht3xPresent() — xem readDht() bên dưới
 
-// --- Cảm biến nhiệt/ẩm trong nhà --------------------------------------------
-// DHT22 trên GPIO17 (pad chân TX của module A7680C không hàn).
+// KHÔNG CÓ BẢNG TRA NODE GÓC PHÒNG Ở ĐÂY, và đó là lý do chọn ESP-NOW.
 //
-// ĐỌC Ở LÕI 1 (trong loop()), không ở tác vụ giao diện: giải mã DHT22 phải tắt
-// ngắt ~5ms để tự bắt nhịp bit, mà tác vụ giao diện nằm ở lõi 0 — đúng lõi ngăn
-// xếp WiFi chạy. loop() ở lõi 1 chỉ có nó và IR nên vừa an toàn cho WiFi vừa ít
-// bị xen vào giữa, tỉ lệ đọc hỏng thấp hơn.
+// Gói ESP-NOW chở được 250 byte nên mỗi node góc phòng mang thẳng device_uuid 32
+// ký tự của chính nó (shared/espnow-message.h). Gateway cứ thế publish vào topic
+// của node đó — thêm/bớt một góc thì chỉ nạp firmware cho góc mới, gateway không
+// phải sửa và không phải nạp lại.
 //
-// DÙNG DHTesp CHỨ KHÔNG PHẢI thư viện DHT của Adafruit — lý do dài, xem lib_deps
-// trong platformio.ini. Tóm tắt: bản Adafruit tắt ngắt hơn 1 giây khi chưa cắm
-// cảm biến và làm panic lõi 1.
-static DHTesp dht;
-static unsigned long lastDht = 0;
-
-/// GPIO34..39 là chân CHỈ VÀO: không có mạch lái ngõ ra, không có trở kéo trong
-/// chip. DHT22 là giao thức một dây HAI CHIỀU — MCU phải tự kéo dây xuống thấp
-/// ~1ms mở đầu mỗi lượt đọc rồi mới nhả ra nghe — nên đặt DHT_PIN vào dải này
-/// thì cảm biến không bao giờ trả lời.
-///
-/// Phải kiểm ở đây vì trình biên dịch KHÔNG bắt được: pinMode(36, OUTPUT) là mã
-/// hợp lệ và trên ESP32 nó lặng lẽ không làm gì. Không có dòng cảnh báo này thì
-/// triệu chứng duy nhất là NaN vĩnh viễn — nhìn y hệt đứt dây hoặc chết cảm
-/// biến, và người ta sẽ đi thay cảm biến trước khi nghĩ tới sơ đồ chân.
-static const bool DHT_PIN_OK = !(DHT_PIN >= 34 && DHT_PIN <= 39);
-
-/// Nhịp đọc DHT22 (ms). Datasheet ghi TỐI THIỂU 2s giữa hai lần đọc — dưới mức
-/// đó chip trả lại số của lần trước chứ không đo mới. 2.5s cho dư biên.
-static const unsigned long DHT_PERIOD_MS = 2500;
-static void readDht();
+// Phương án BLE từng cân nhắc thì ngược lại: advertising cổ điển chỉ có 31 byte,
+// chở không nổi uuid, nên sẽ buộc file này giữ một mảng ROOM_NODE_UUIDS mà lệch
+// một ô là số đo của góc A nộp lên cloud dưới tên góc B — biểu đồ vẫn có số,
+// không lỗi ở đâu cả, hai góc bị hoán tên vĩnh viễn.
 
 // Broker EMQX tự host trên VPS chạy plaintext 1883 (MQTT_TLS=false trong
 // docker-compose), nên dùng WiFiClient thường — KHÔNG phải WiFiClientSecure.
@@ -183,6 +183,22 @@ static void copyStr(char *dst, size_t dstSize, const char *src) {
 // ---------------------------------------------------------------------------
 //  ESP-NOW: chuyển tiếp số đo của node outdoor
 // ---------------------------------------------------------------------------
+/// Master ĐỨNG TÊN slave báo trạng thái: slave không có kết nối MQTT nên broker
+/// không thể sinh Last Will cho nó. Retained để web/app mở lên là thấy ngay.
+static void publishSlaveStatus(const char *uuid, bool online) {
+  String topic = String("bl/") + ORG_ID + "/" + uuid + "/status";
+  mqtt.publish(topic.c_str(), online ? "online" : "offline", true);
+  Serial.printf("[slave] %s -> %s\n", uuid, online ? "ONLINE" : "OFFLINE (mat nhip tim)");
+}
+
+// ---------------------------------------------------------------------------
+//  ESP-NOW: chuyển tiếp số đo của node góc phòng + node ngoài trời
+// ---------------------------------------------------------------------------
+/// Đẩy số đo của MỘT node slave lên topic của chính nó.
+///
+/// Dùng chung cho cả node góc phòng lẫn node ngoài trời: gói ESP-NOW tự mang
+/// uuid nên gateway không cần biết đó là loại node nào để trung chuyển. Loại
+/// node chỉ quyết định gateway XẾP số đó vào đâu để hiển thị (xem onSlavePacket).
 static void publishSlaveTelemetry(const char *uuid, const uint8_t mac[6],
                                   float t, float h) {
   JsonDocument doc;
@@ -194,33 +210,53 @@ static void publishSlaveTelemetry(const char *uuid, const uint8_t mac[6],
   doc["mac"]  = macToText(mac);
   doc["via"]  = "espnow";
   char buf[224];
-  size_t n = serializeJson(doc, buf);
-  String topic = String("bl/") + ORG_ID + "/" + uuid + "/telemetry";
-  bool ok = mqtt.publish(topic.c_str(), (const uint8_t *)buf, n, false);
+  const size_t n = serializeJson(doc, buf);
+  const String topic = String("bl/") + ORG_ID + "/" + uuid + "/telemetry";
+  const bool ok = mqtt.publish(topic.c_str(), (const uint8_t *)buf, n, false);
   Serial.printf("[relay] %s t=%.1f h=%.0f -> %s\n", uuid, t, h, ok ? "da chuyen" : "LOI");
+  SerialTrace::mqttOut(topic.c_str(), (const uint8_t *)buf, n, ok);
 }
 
-/// Master ĐỨNG TÊN slave báo trạng thái: slave không có kết nối MQTT nên broker
-/// không thể sinh Last Will cho nó. Retained để web/app mở lên là thấy ngay.
-static void publishSlaveStatus(const char *uuid, bool online) {
-  String topic = String("bl/") + ORG_ID + "/" + uuid + "/status";
-  mqtt.publish(topic.c_str(), online ? "online" : "offline", true);
-  Serial.printf("[slave] %s -> %s\n", uuid, online ? "ONLINE" : "OFFLINE (mat nhip tim)");
-}
+/// Một gói vừa tới từ bất kỳ node slave nào — góc phòng hoặc ngoài trời.
+static void onSlavePacket(const AcEspNowPacket &pkt, const uint8_t mac[6]) {
+  const char *uuid = pkt.device_uuid;
+  const bool isRoom = (pkt.node_kind == AC_NODE_ROOM);
 
-static void onSlavePacket(const char *uuid, const uint8_t mac[6], float t, float h) {
+  // TRƯỚC MỌI THỨ KHÁC: ghi lại gói đúng như nó tới. Các nhánh dưới đây lọc NaN,
+  // chặn theo nhịp, bỏ qua bảng đầy — nên đặt trace sau chúng là mất đúng những
+  // gói cần nhìn nhất khi đi tìm mất sóng.
+  SerialTrace::packetIn(pkt, mac);
+
   // MỌI gói đều tính là nhịp tim -> phát hiện mất kết nối nhanh. Kể cả gói
   // KHÔNG có số đo (NaN, do cảm biến slave lỗi): node vẫn sống, chỉ cảm biến
   // hỏng — hai chuyện khác nhau, không được gộp thành "mất kết nối".
   SlaveWatch::heard(uuid, publishSlaveStatus);
+  if (SlaveWatch::dueForStatusRefresh(uuid)) publishSlaveStatus(uuid, true);
 
-  if (isnan(t) || isnan(h)) {
-    Serial.printf("[slave] %s con song nhung cam bien loi (NaN)\n", uuid);
+  // Ghi vào bảng hiển thị TRƯỚC khi lọc NaN: bảng cần biết góc này còn sống, và
+  // NaN trong đó là câu trả lời đúng cho "sống nhưng cảm biến hỏng".
+  if (isRoom) {
+    if (!RoomRegistry::update(pkt)) {
+      static bool warned = false;
+      if (!warned) {
+        warned = true;
+        Serial.printf("[room] bang day (%u o) — goc thu %u tro di khong hien tren man, "
+                      "nhung VAN duoc chuyen tiep len cloud\n",
+                      RoomRegistry::MAX_ROOMS, RoomRegistry::MAX_ROOMS + 1);
+      }
+    }
+  } else {
+    lastSlaveT = pkt.temp;
+    lastSlaveH = pkt.humidity;
+    lastSlaveMs = millis();
+  }
+
+  if (isnan(pkt.temp) || isnan(pkt.humidity)) {
+    Serial.printf("[%s] %s con song nhung cam bien loi (NaN)\n",
+                  isRoom ? "room" : "slave", uuid);
     return;
   }
-  lastSlaveT = t; lastSlaveH = h; lastSlaveMs = millis();
-  if (SlaveWatch::dueForRelay(uuid)) publishSlaveTelemetry(uuid, mac, t, h);
-  if (SlaveWatch::dueForStatusRefresh(uuid)) publishSlaveStatus(uuid, true);
+  if (SlaveWatch::dueForRelay(uuid)) publishSlaveTelemetry(uuid, mac, pkt.temp, pkt.humidity);
 }
 
 // ---------------------------------------------------------------------------
@@ -457,6 +493,10 @@ static void takeCommand(JsonDocument &doc) {
 }
 
 static void onMessage(char *topic, byte *payload, unsigned int len) {
+  // Ghi TRƯỚC khi bóc JSON: gói hỏng khuôn cũng là gói đã tới, mà nhánh lỗi bên
+  // dưới chỉ in tên lỗi chứ không in nội dung — đúng lúc cần nhìn nội dung nhất.
+  SerialTrace::mqttIn(topic, payload, len);
+
   JsonDocument doc;
   DeserializationError err = deserializeJson(doc, payload, len);
   if (err) {
@@ -483,9 +523,15 @@ static void publishState() {
   if (pending.reqId[0]) doc["ack"] = pending.reqId;
   if (pending.mode[0])  doc["mode"] = pending.mode;
   if (pending.setpoint >= 0) doc["setpoint"] = pending.setpoint;
-  char buf[128];
+  // MAC ĐI KÈM Ở ĐÂY VÌ KHÔNG CÒN CHỖ NÀO KHÁC. Mọi node khác khai MAC trong gói
+  // telemetry, nhưng gateway không còn cảm biến nên không publish telemetry nữa.
+  // Thiếu dòng này thì trang "Nạp firmware" hiện "—" ở đúng cái node mà người đi
+  // lắp đang đứng trước mặt. state_handler.py đọc trường này.
+  doc["mac"] = WiFi.macAddress();
+  char buf[160];
   size_t n = serializeJson(doc, buf);
   bool ok = mqtt.publish(tState.c_str(), (const uint8_t *)buf, n, true);
+  SerialTrace::mqttOut(tState.c_str(), (const uint8_t *)buf, n, ok);
   Serial.printf("[state] ack=%s mode=%s setpoint=%d -> %s\n",
                 pending.reqId, pending.mode, pending.setpoint, ok ? "da gui" : "GUI LOI");
 }
@@ -563,14 +609,22 @@ static void wifiDiagnose() {
   WiFi.scanDelete();
 }
 
+/// Số lần thử WiFi lúc KHỞI ĐỘNG trước khi chạy tiếp mà không có mạng.
+///
+/// CÓ GIỚI HẠN, KHÔNG CHỜ MÃI. Bản trước chờ vô hạn ở đây với lý do "không có
+/// mạng thì node chẳng làm được gì" — lý do đó SAI, và nó là lỗi nghiêm trọng
+/// nhất từng có trong file này (xem serviceNetwork bên dưới). Không có mạng thì
+/// node vẫn thu được ESP-NOW, vẫn nói chuyện được với UNO Q qua UART, và vẫn bắn
+/// được hồng ngoại — tức là vẫn điều khiển được máy lạnh. Đó chính xác là thứ
+/// lớp edge sinh ra để làm.
+static const uint8_t WIFI_BOOT_ATTEMPTS = 3;
+
 static void connectWifi() {
   if (WiFi.status() == WL_CONNECTED) return;
   WiFi.mode(WIFI_STA);
 
-  // Vẫn chặn tới khi vào được mạng — không có mạng thì node chẳng làm được gì —
-  // nhưng cứ 20 giây lại nói ra MỘT LÝ DO thay vì rải dấu chấm im lặng.
-  for (uint8_t attempt = 1;; attempt++) {
-    Serial.printf("WiFi -> \"%s\" (lan %u) ", WIFI_SSID, attempt);
+  for (uint8_t attempt = 1; attempt <= WIFI_BOOT_ATTEMPTS; attempt++) {
+    Serial.printf("WiFi -> \"%s\" (lan %u/%u) ", WIFI_SSID, attempt, WIFI_BOOT_ATTEMPTS);
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     const uint32_t deadline = millis() + WIFI_ATTEMPT_MS;
     while (WiFi.status() != WL_CONNECTED && (int32_t)(millis() - deadline) < 0) {
@@ -578,53 +632,118 @@ static void connectWifi() {
       Serial.print(".");
     }
     if (WiFi.status() == WL_CONNECTED) break;
-    wifiDiagnose();
+    // Quét CHỈ ĐƯỢC PHÉP Ở ĐÂY, lúc ESP-NOW chưa dựng. scanNetworks() nhảy khắp
+    // các kênh và bỏ radio lại ở kênh cuối — gọi nó sau khi ESP-NOW đã chạy là
+    // kéo gateway ra khỏi kênh của các node, và không một dòng log nào báo.
+    if (attempt < WIFI_BOOT_ATTEMPTS) wifiDiagnose();
   }
 
-  // BẮT BUỘC cho node master: tắt tiết kiệm điện WiFi.
-  // ESP32 mặc định bật modem sleep khi đã vào mạng — radio ngủ giữa các beacon.
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.printf("\nKHONG VAO DUOC WiFi sau %u lan — CHAY TIEP KHONG CO MANG.\n"
+                  "  ESP-NOW, UART toi UNO Q va hong ngoai van hoat dong; chi mat\n"
+                  "  duong len cloud. serviceNetwork() se thu lai nen trong loop().\n",
+                  WIFI_BOOT_ATTEMPTS);
+    return;
+  }
+
+  // TẮT tiết kiệm điện WiFi. BẮT BUỘC cho node master, và giờ làm được vì đường
+  // tới UNO Q đã chuyển sang UART — không còn Bluetooth để ràng buộc.
+  //
+  // ESP32 mặc định bật modem sleep khi đã vào mạng: radio ngủ giữa các beacon.
   // Lưu lượng WiFi thường không sao vì router ĐỆM HỘ trong lúc ngủ, nhưng gói
-  // ESP-NOW từ slave thì KHÔNG ai đệm: đến đúng lúc radio ngủ là mất luôn, mà
-  // broadcast lại không có ACK nên slave vẫn tưởng gửi thành công. Triệu chứng:
-  // chạy tốt vài phút rồi master "điếc" hẳn dù MQTT vẫn bình thường.
+  // ESP-NOW từ slave thì KHÔNG ai đệm — đến đúng lúc radio ngủ là mất luôn, mà
+  // broadcast không có ACK nên slave vẫn tưởng gửi thành công.
+  //
+  // ĐÃ ĐO CÁI GIÁ ĐÓ, đừng bật lại vì bất kỳ lý do gì:
+  //     modem sleep BẬT (thời BLE):  0,31 gói/giây
+  //     modem sleep TẮT:             0,80 gói/giây  ← đúng 4 node × 5 giây
+  // Node ngoài trời khi đó rơi ~50% và nhấp nháy ONLINE/OFFLINE liên tục.
+  //
+  // Hệ quả: KHÔNG bao giờ bật lại Bluetooth trên bo này. Chip từ chối chạy WiFi +
+  // BT với modem sleep tắt — nó abort() chứ không chạy kém đi
+  // (`Should enable WiFi modem sleep when both WiFi and Bluetooth are enabled`),
+  // và bo sẽ lặp khởi động lại vô hạn mỗi ~6 giây.
   WiFi.setSleep(false);
 
   Serial.printf(" OK  IP=%s  RSSI=%d dBm\n", WiFi.localIP().toString().c_str(), (int)WiFi.RSSI());
 }
 
-static void connectMqtt() {
+/// MỘT lần thử nối MQTT. Trả true nếu vào được.
+static bool mqttTryConnect() {
   String cid = String("breezelink_") + DEVICE_UUID;  // = mqtt_naming.client_id()
-  while (!mqtt.connected()) {
-    Serial.print("MQTT ... ");
-    // LWT (will): topic=status, qos=1, retain=true, payload="offline".
-    if (mqtt.connect(cid.c_str(), MQTT_USERNAME, MQTT_PASSWORD,
-                     tStatus.c_str(), 1, true, "offline")) {
-      Serial.println("connected");
-      mqtt.publish(tStatus.c_str(), "online", true);  // retained -> web thấy "Trực tuyến"
-      // QoS1: lệnh điều khiển máy lạnh không được phép rơi âm thầm.
-      mqtt.subscribe(tCmd.c_str(), 1);
-    } else {
-      // rc=-2 mạng lỗi; rc=4 sai user/pass; rc=5 chưa được cấp quyền trên broker.
-      Serial.printf("that bai rc=%d (thu lai sau 2s)\n", mqtt.state());
-      delay(2000);
-    }
+  // LWT (will): topic=status, qos=1, retain=true, payload="offline".
+  if (mqtt.connect(cid.c_str(), MQTT_USERNAME, MQTT_PASSWORD,
+                   tStatus.c_str(), 1, true, "offline")) {
+    Serial.println("MQTT ... connected");
+    mqtt.publish(tStatus.c_str(), "online", true);  // retained -> web thấy "Trực tuyến"
+    // QoS1: lệnh điều khiển máy lạnh không được phép rơi âm thầm.
+    mqtt.subscribe(tCmd.c_str(), 1);
+    return true;
   }
+  // rc=-2 mạng lỗi; rc=4 sai user/pass; rc=5 chưa được cấp quyền trên broker.
+  Serial.printf("MQTT ... that bai rc=%d\n", mqtt.state());
+  return false;
+}
+
+/// Bao lâu thử nối lại một lần khi đang mất mạng (ms).
+static const uint32_t NET_RETRY_MS = 15000UL;
+
+/// Giữ WiFi/MQTT sống mà KHÔNG CHẶN loop(). Gọi mỗi vòng.
+///
+/// ĐÂY LÀ CHỖ SỬA LỖI NGHIÊM TRỌNG NHẤT CỦA FILE NÀY.
+///
+/// Bản trước gọi thẳng connectWifi() + connectMqtt() trong loop(), mà cả hai đều
+/// là vòng lặp CHỜ VÔ HẠN. Hệ quả: mất WiFi là loop() không bao giờ quay lại —
+///
+///   ESP-NOW ngừng thu   -> 4 góc phòng và node ngoài trời biến mất
+///   UART ngừng đẩy      -> UNO Q không còn ảnh chụp nào để tính
+///   lệnh UNO Q không ai đọc -> edge không lái được máy lạnh
+///   IR ngừng thi hành   -> kể cả lệnh đã nằm trong hàng đợi
+///
+/// Tức là mất mạng làm CHẾT luôn lớp dự phòng sinh ra để chịu đựng đúng sự cố
+/// đó. Cả kiến trúc edge-ai dựa trên giả định "gateway vẫn chạy khi mất cloud",
+/// và giả định đó sai ngay trong vòng lặp chính.
+///
+/// Nay: thử lại theo nhịp, không chờ, và TUYỆT ĐỐI KHÔNG QUÉT. scanNetworks()
+/// nhảy khắp các kênh và bỏ radio lại ở kênh cuối — gọi nó khi ESP-NOW đang chạy
+/// là tự cắt đứt đường thu của chính mình, âm thầm.
+static void serviceNetwork() {
+  static uint32_t lastTry = 0;
+  const uint32_t now = millis();
+
+  if (WiFi.status() != WL_CONNECTED) {
+    if (now - lastTry >= NET_RETRY_MS) {
+      lastTry = now;
+      Serial.println("[net] mat WiFi — thu noi lai (khong chan vong lap)");
+      WiFi.begin(WIFI_SSID, WIFI_PASSWORD);   // đặt lệnh rồi đi tiếp, không chờ
+    }
+    return;   // chưa có WiFi thì cũng chưa thể có MQTT
+  }
+
+  if (!mqtt.connected()) {
+    if (now - lastTry >= NET_RETRY_MS) {
+      lastTry = now;
+      mqttTryConnect();   // MỘT lần; hỏng thì vòng sau thử tiếp
+    }
+    return;
+  }
+
+  mqtt.loop();
 }
 
 void setup() {
   Serial.begin(115200);
   delay(300);
-  Serial.println("\n== BreezeLink · QR Box Advance Touch · TRONG NHA (indoor + master + IR) ==");
+  Serial.println("\n== BreezeLink · QR Box Advance Touch · GATEWAY TRONG NHA (BLE + ESP-NOW + IR) ==");
 
   // Dựng màn TRƯỚC WiFi, có chủ đích: tác vụ giao diện chạy ở lõi 0 nên nó vẫn
   // vẽ bình thường suốt lúc connectWifi()/connectMqtt() đang chặn lõi 1 hàng
   // chục giây. Người đi lắp nhìn thấy "MAT KET NOI" nhấp nháy — tức là node
   // sống và đang dò mạng — thay vì một màn đen không nói gì.
   //
-  // Ui::begin() cũng là nơi dò SHT3x trên I2C và kéo EN_LEVEL_SHIFT lên HIGH —
-  // mà IR phát nay đi qua bộ dịch mức đó, nên nó phải chạy TRƯỚC IrIo::begin().
+  // Ui::begin() cũng là nơi kéo EN_LEVEL_SHIFT lên HIGH, nên nó phải chạy TRƯỚC
+  // IrIo::begin() nếu chân IR đi qua bộ dịch mức.
   Ui::begin();
-  dht.setup(DHT_PIN, DHTesp::DHT22);
   IrIo::begin(IR_TX_PIN, IR_RX_PIN);
   if (!IrStore::begin()) {
     // Không chặn khởi động: node vẫn chạy được, chỉ là mọi lệnh phải kèm ir_raw.
@@ -642,7 +761,9 @@ void setup() {
   // sau ~22s. Ưu tiên ỔN ĐỊNH: hạ xuống 3-5s thì chỉ cần mạng chớp một nhịp là
   // broker cắt phiên rồi client nối lại, trạng thái lật online/offline liên tục.
   mqtt.setKeepAlive(15);
-  connectMqtt();
+  // MỘT lần lúc khởi động. Hỏng thì KHÔNG chặn — serviceNetwork() trong loop()
+  // sẽ thử lại nền, và mọi thứ không cần mạng (ESP-NOW, UART, IR) chạy ngay.
+  if (WiFi.status() == WL_CONNECTED) mqttTryConnect();
 
   // ESP-NOW khởi tạo SAU khi WiFi đã kết nối: nó dùng đúng kênh WiFi đang bám,
   // nên phải để WiFi chốt kênh trước thì slave (đang dò kênh router) mới gặp.
@@ -652,6 +773,14 @@ void setup() {
   } else {
     Serial.println("ESP-NOW KHOI TAO LOI — se khong nhan duoc so lieu tu node ngoai troi");
   }
+
+  // UART tới UNO Q. Thứ tự không còn quan trọng như thời BLE (nó không đụng
+  // radio), nhưng giữ ở đây để log khởi động đọc theo đúng chiều dữ liệu chảy.
+  //
+  // ĐƯỜNG NÀY CHỈ ĐỂ NÓI CHUYỆN VỚI ARDUINO UNO Q, không liên quan gì tới cảm
+  // biến — số đo phòng đi ESP-NOW. Nên hỏng nó thì mất lớp edge AI, KHÔNG mất
+  // nhiệt độ trong nhà; đó là lý do dòng dưới không chặn khởi động.
+  UnoQLink::begin(ORG_ID);
   // Tự suy ra đường đi thay vì ghi cứng: cặp UART_1 (GPIO2/15) ra P3 qua TXS0104
   // nên phụ thuộc EN_LEVEL_SHIFT, còn lại nối 3.3V thẳng. Bản trước ghi cứng
   // "qua TXS0104" từ hồi IR phát còn ở GPIO15, và dòng log đó tiếp tục khẳng
@@ -662,18 +791,8 @@ void setup() {
   };
   Serial.printf("IR: phat GPIO%d (%s) · thu GPIO%d (%s)\n",
                 IR_TX_PIN, irPath(IR_TX_PIN), IR_RX_PIN, irPath(IR_RX_PIN));
-  if (BoardIo::sht3xPresent()) {
-    Serial.println("Cam bien nhiet/am: SHT3x @0x44 (I2C) — DHT22 bi bo qua");
-  } else if (!DHT_PIN_OK) {
-    Serial.printf(
-        "\n!!! SAI SO DO CHAN: DHT22 dang dat o GPIO%d, ma GPIO34..39 la chan CHI VAO.\n"
-        "    DHT22 can MCU keo day xuong thap ~1ms de mo dau moi luot doc, chan chi vao\n"
-        "    khong lam duoc -> se KHONG BAO GIO co so do (chi ra NaN, khong bao loi).\n"
-        "    Sua: doi DHT_PIN trong platformio.ini sang mot chan lai duoc ngo ra.\n"
-        "    Da TAT han viec doc DHT de khoi ton thoi gian.\n\n", DHT_PIN);
-  } else {
-    Serial.printf("Cam bien nhiet/am: DHT22 @GPIO%d (khong thay SHT3x @0x44)\n", DHT_PIN);
-  }
+  Serial.println("Bo nay KHONG co cam bien nhiet/am — so \"trong nha\" la trung vi "
+                 "cua cac node goc phong (xem room-registry.h)");
 }
 
 static unsigned long lastPub = 0;
@@ -807,8 +926,156 @@ static void runPanelCommand(const Ui::Command &c) {
   // Nói đúng chuyện vừa xảy ra, hai câu khác nhau cho hai kết cục khác nhau.
   // Câu cũ ("máy chủ sẽ giành lại quyền") giờ SAI khi gửi được — cổng ghi đè đã
   // đặt xong thì máy chủ không giành lại nữa cho tới khi hết hạn hoặc bấm TỰ ĐỘNG.
-  Ui::reply(ovOk ? "ĐÃ GỬI — bạn đang giữ quyền"
-                 : "ĐÃ PHÁT — nhưng máy chủ sẽ giành lại quyền");
+  Ui::reply(ovOk ? "ĐÃ GỬI"
+                 : "ĐÃ PHÁT");  
+}
+
+// ---------------------------------------------------------------------------
+//  Arduino UNO Q (edge AI)
+// ---------------------------------------------------------------------------
+/// Đổi chuỗi chế độ của dự án ("COOL"...) sang mã 1 byte trên dây, và ngược lại.
+/// Hai hàm nhỏ này là RANH GIỚI DUY NHẤT giữa hai cách biểu diễn — để rải
+/// strcmp("COOL") khắp nơi là kiểu chỗ mà một lỗi gõ trở thành một chế độ sai.
+static uint8_t modeToWire(const char *mode) {
+  if (mode == nullptr || mode[0] == '\0') return AC_UNOQ_MODE_UNKNOWN;
+  if (strcmp(mode, "OFF")  == 0) return AC_UNOQ_MODE_OFF;
+  if (strcmp(mode, "COOL") == 0) return AC_UNOQ_MODE_COOL;
+  if (strcmp(mode, "DRY")  == 0) return AC_UNOQ_MODE_DRY;
+  if (strcmp(mode, "FAN")  == 0) return AC_UNOQ_MODE_FAN;
+  return AC_UNOQ_MODE_UNKNOWN;
+}
+
+static const char *modeFromWire(uint8_t wire) {
+  switch (wire) {
+    case AC_UNOQ_MODE_OFF:  return "OFF";
+    case AC_UNOQ_MODE_COOL: return "COOL";
+    case AC_UNOQ_MODE_DRY:  return "DRY";
+    case AC_UNOQ_MODE_FAN:  return "FAN";
+    default:                return nullptr;   // nullptr = KHÔNG thi hành
+  }
+}
+
+/// Nhịp đẩy ảnh chụp sang UNO Q (ms). Thưa hơn nhịp vẽ màn (200ms) rất nhiều:
+/// UNO Q tính lại mỗi 30 giây, đẩy dày hơn chỉ tốn sóng BLE đang chia với WiFi.
+static const uint32_t UNOQ_PUSH_MS = 5000;
+
+/// Đóng gói mọi thứ UNO Q cần để tự quyết định, rồi notify.
+///
+/// `cloud_silence_sec` là trường quan trọng nhất: nó là thứ DUY NHẤT cho UNO Q
+/// biết máy chủ còn sống hay không, và gateway biết chắc chắn hơn UNO Q vì chính
+/// nó giữ phiên MQTT. Không có nó thì lớp dự phòng phải tự đoán, và đoán sai
+/// theo chiều nào cũng tệ: giành lái sớm là hai bên tranh máy nén, giành muộn là
+/// nhà nóng suốt thời gian mất mạng.
+static void pushUnoQSnapshot() {
+  static uint32_t lastPush = 0;
+  if (millis() - lastPush < UNOQ_PUSH_MS) return;
+  lastPush = millis();
+
+  AcUnoQSnapshot snap{};
+  snap.magic   = AC_UNOQ_MAGIC;
+  snap.version = AC_UNOQ_VERSION;
+
+  float tin = NAN, hin = NAN;
+  uint8_t voting = 0;
+  RoomRegistry::median(tin, hin, &voting);   // thất bại -> giữ NaN, mã hoá thành INVALID
+  snap.room_count = voting;
+  snap.t_in_c100  = acUnoQEncodeTemp(tin);
+  snap.h_in_x100  = acUnoQEncodeRh(hin);
+  snap.t_out_c100 = acUnoQEncodeTemp(lastSlaveT);
+  snap.h_out_x100 = acUnoQEncodeRh(lastSlaveH);
+
+  for (uint8_t i = 0; i < AC_UNOQ_MAX_ROOMS; i++) {
+    const RoomRegistry::Room *r = RoomRegistry::at(i);
+    const bool live = r != nullptr && RoomRegistry::online(i);
+    snap.room_t_c100[i]  = live ? acUnoQEncodeTemp(r->t) : AC_UNOQ_T_INVALID;
+    snap.room_h_x100[i]  = live ? acUnoQEncodeRh(r->h)   : AC_UNOQ_H_INVALID;
+    snap.room_corner[i]  = r ? r->corner : AC_CORNER_NONE;
+  }
+
+  const bool outOnline =
+      lastSlaveMs && (millis() - lastSlaveMs < SlaveWatch::SLAVE_TIMEOUT_MS);
+  snap.flags = (uint8_t)((WiFi.status() == WL_CONNECTED ? AC_UNOQ_FLAG_WIFI_UP : 0) |
+                         (mqtt.connected() ? AC_UNOQ_FLAG_MQTT_UP : 0) |
+                         (overrideLocal ? AC_UNOQ_FLAG_OVERRIDE : 0) |
+                         (outOnline ? AC_UNOQ_FLAG_OUT_ONLINE : 0));
+
+  // lastCmdMs = 0 nghĩa là CHƯA TỪNG nghe máy chủ ra lệnh — khác hẳn "vừa nghe
+  // xong". Gửi 0 cho cả hai ca sẽ khiến UNO Q tưởng cloud vừa nói và không bao
+  // giờ giành lái ở một hộ mà cloud chưa từng hoạt động.
+  const uint32_t silence = lastCmdMs ? (millis() - lastCmdMs) / 1000UL : 0xFFFFFFFFUL;
+  snap.cloud_silence_sec =
+      silence >= AC_UNOQ_SILENCE_NEVER ? AC_UNOQ_SILENCE_NEVER : (uint16_t)silence;
+
+  snap.ac_mode     = modeToWire(actMode);
+  snap.ac_setpoint = (int8_t)(actSetpoint >= 0 ? actSetpoint : -1);
+  snap.uptime_min  = (uint16_t)(millis() / 60000UL);
+  acUnoQSealSnapshot(&snap);
+
+  UnoQLink::publish(snap);
+  SerialTrace::snapshotOut(snap, UnoQLink::connected());
+}
+
+/// Thi hành (hoặc chỉ ghi nhận) thứ UNO Q vừa gửi sang.
+static void runUnoQIncoming() {
+  UnoQLink::Incoming in;
+  if (!UnoQLink::poll(in)) return;
+
+  const char *mode = modeFromWire(in.mode);
+  if (mode == nullptr) {
+    Serial.printf("[unoq] che do la (%u) — bo qua\n", in.mode);
+    return;
+  }
+
+  if (!in.isCommand) {
+    // ĐỀ XUẤT: ghi lại, KHÔNG bắn IR. Đây là ranh giới giữ cho mọi phép thử trên
+    // UNO Q khỏi chạy thẳng vào máy nén — xem unoq-link.h §2.
+    Serial.printf("[unoq] de xuat %s %d (chi ghi nhan, khong phat)\n", mode, in.setpoint);
+    Ui::CmdLog entry{};
+    copyStr(entry.mode,   sizeof(entry.mode),   mode);
+    copyStr(entry.reason, sizeof(entry.reason), "edge advice");
+    entry.setpoint = in.setpoint;
+    entry.result   = Ui::CmdLog::NO_CODE;   // "không phát" — đúng chuyện đã xảy ra
+    Ui::logCommand(entry);
+    return;
+  }
+
+  // LỆNH THẬT — UNO Q đang cầm lái vì máy chủ im lặng.
+  //
+  // CỐ Ý KHÔNG ĐI QUA runPanelCommand(), dù đường đó đã sẵn và làm gần đúng
+  // việc cần: nó đặt `overrideLocal` và xin máy chủ mở cổng GHI ĐÈ. Ghi đè là
+  // để người dùng giành quyền KHỎI máy chủ; còn UNO Q thì đang ĐỨNG THAY máy
+  // chủ. Đi nhầm đường đó thì lúc mạng về, máy chủ bị khoá ngoài suốt
+  // `override_hours` (mặc định 2 giờ) bởi chính lớp dự phòng vừa cứu nó — và
+  // trên màn hiện "GHI ĐÈ" trong khi không một ai bấm gì.
+  Serial.printf("[unoq] LENH %s %d (edge dang cam lai)\n", mode, in.setpoint);
+
+  const uint16_t n = IrStore::loadAlias(mode, aliasTemp(mode, in.setpoint),
+                                        irBuf, IrIo::RAW_MAX);
+  Ui::CmdLog entry{};
+  copyStr(entry.mode,   sizeof(entry.mode),   mode);
+  copyStr(entry.reason, sizeof(entry.reason), "edge takeover");
+  entry.setpoint = in.setpoint;
+
+  if (n == 0) {
+    Serial.printf("[unoq] %s %d: chua hoc ma nay — khong phat\n", mode, in.setpoint);
+    entry.result = Ui::CmdLog::NO_CODE;
+    Ui::logCommand(entry);
+    return;
+  }
+
+  IrIo::blast(irBuf, n);
+  copyStr(actMode, sizeof(actMode), mode);   // trạng thái THẬT đã bắn ra máy lạnh
+  actSetpoint = in.setpoint;
+  entry.result = Ui::CmdLog::SENT;
+  Ui::logCommand(entry);
+
+  // Báo trạng thái mới lên cloud nếu còn đường — mất mạng thì thôi, chính vì
+  // mất mạng nên UNO Q mới đang cầm lái. Không kèm `ack`: không có req_id nào
+  // của máy chủ để khớp.
+  pending.reqId[0] = '\0';
+  copyStr(pending.mode, sizeof(pending.mode), mode);
+  pending.setpoint = in.setpoint;
+  if (mqtt.connected()) publishState();
 }
 
 /// Dựng ảnh chụp cho màn. Bitmask mã IR tính ở đây vì NVS thuộc quyền lõi 1.
@@ -822,7 +1089,28 @@ static void pushUiModel() {
   strncpy(m.ssid, WIFI_SSID, sizeof(m.ssid) - 1);
   strncpy(m.mac,  WiFi.macAddress().c_str(), sizeof(m.mac) - 1);
 
-  Ui::readIndoor(m.tIn, m.hIn);     // để nguyên NAN nếu chưa có số đo hợp lệ
+  // Từng góc phòng, để màn nói được góc nào đang lệch — chứ không chỉ một con số
+  // trung vị đã che mất chuyện đó. Đây chính là thứ biện minh cho bốn cảm biến.
+  //
+  // Số ô lấy từ SỐ GÓC ĐÃ NGHE THẤY, không từ một hằng số khai trước: gateway
+  // không giữ danh sách node phòng nào cả (gói ESP-NOW tự mang uuid), nên lắp
+  // thêm một góc là nó tự hiện lên màn mà không phải nạp lại firmware.
+  m.roomSlots = RoomRegistry::knownCount() < Ui::Model::MAX_ROOMS
+                    ? RoomRegistry::knownCount() : Ui::Model::MAX_ROOMS;
+  for (uint8_t i = 0; i < m.roomSlots; i++) {
+    const RoomRegistry::Room *r = RoomRegistry::at(i);
+    m.roomOnline[i] = RoomRegistry::online(i);
+    m.roomT[i] = (r && m.roomOnline[i]) ? r->t : NAN;
+    m.roomH[i] = (r && m.roomOnline[i]) ? r->h : NAN;
+    m.roomCorner[i] = r ? r->corner : AC_CORNER_NONE;
+    m.roomAgeSec[i] = RoomRegistry::ageSec(i);
+  }
+  m.roomOnlineCount = RoomRegistry::onlineCount();
+  // Không góc nào có số -> median() để nguyên m.tIn/m.hIn ở NAN mặc định của
+  // Model, và màn hiện skeleton. KHÔNG được thay bằng 0.0 hay số cũ (ui.h §Model).
+  RoomRegistry::median(m.tIn, m.hIn, &m.roomVoting);   // roomVoting = số góc CÓ SỐ ĐO
+  m.unoqUp  = UnoQLink::connected();
+  m.unoqRx  = UnoQLink::rxCount();
 
   m.tOut = lastSlaveT; m.hOut = lastSlaveH;
   // Cùng ngưỡng với SlaveWatch để màn hình và topic status không bao giờ nói
@@ -865,35 +1153,11 @@ static void pushUiModel() {
   Ui::publish(m);
 }
 
-/// Đọc DHT22 theo nhịp rồi đặt số vào kho chung của giao diện.
-///
-/// NHƯỜNG SHT3x KHI CÓ MẶT: nếu cả hai cùng lắp mà cả hai cùng ghi, số trên màn
-/// nhảy qua nhảy lại giữa hai con lệch nhau vài phần mười độ — nhìn như cảm biến
-/// hỏng. SHT3x được ưu tiên vì mỗi lần đọc có CRC kiểm chứng.
-static void readDht() {
-  if (!DHT_PIN_OK) return;          // đã cảnh báo ở setup(), đừng phí công đọc
-  if (millis() - lastDht < DHT_PERIOD_MS) return;
-  lastDht = millis();
-  if (BoardIo::sht3xPresent()) return;
-
-  // Một lượt đọc lấy cả hai số — KHÔNG gọi getTemperature() rồi getHumidity()
-  // như hai lệnh riêng: mỗi lệnh là một lần bắt tay 5ms với cảm biến, mà nhịp
-  // tối thiểu của DHT22 là 2s nên lệnh thứ hai chỉ trả lại số cũ.
-  const TempAndHumidity th = dht.getTempAndHumidity();
-
-  // Sai checksum hoặc hết giờ chờ là chuyện thường với DHT22 (vài phần trăm số
-  // lần đọc). Bỏ lượt này, 2.5s nữa đọc lại — ghi NaN vào kho chung sẽ làm màn
-  // chớp "—" rồi lại hiện số, trông như cảm biến sắp hỏng.
-  if (dht.getStatus() != DHTesp::ERROR_NONE) return;
-  if (isnan(th.temperature) || isnan(th.humidity)) return;
-  Ui::setIndoor(th.temperature, th.humidity);
-}
-
 void loop() {
-  connectWifi();
-  if (!mqtt.connected()) connectMqtt();
-  mqtt.loop();
-  readDht();
+  // KHÔNG BAO GIỜ gọi connectWifi()/mqttTryConnect() thẳng ở đây — cả hai đều
+  // chờ. serviceNetwork() thử lại theo nhịp rồi trả về ngay, để phần dưới luôn
+  // chạy được kể cả khi mất mạng hoàn toàn. Xem chú thích của nó cho lý do.
+  serviceNetwork();
 
   // Rút lệnh người dùng bấm MỖI VÒNG (nút phải phản hồi ngay), nhưng ảnh chụp
   // trạng thái chỉ đẩy sang giao diện theo nhịp 200ms — đúng nhịp vẽ lại của màn
@@ -940,51 +1204,57 @@ void loop() {
                   "Kiem tra: remote co pin? co huong dung mat thu? cach < 1m?\n", learnLabel);
   }
 
-  // Rút hàng đợi ESP-NOW: chuyển tiếp số đo + cập nhật nhịp tim của node outdoor.
+  // Rút hàng đợi ESP-NOW: cả 4 góc phòng lẫn node ngoài trời đi chung đường này.
+  // Callback chỉ chép gói, việc publish nằm ở đây — xem espnow-relay.h.
   EspNowRelay::poll(onSlavePacket);
+  // Một hàm dọn hạn cho CẢ node ngoài trời lẫn các góc phòng: SlaveWatch khoá
+  // theo device_uuid nên nó không cần biết node nào là loại gì.
   SlaveWatch::checkTimeouts(publishSlaveStatus);
 
-  unsigned long now = millis();
-  if (lastPub != 0 && now - lastPub < TELEMETRY_MS) return;  // chưa tới nhịp
+  // Đề xuất/lệnh từ Arduino UNO Q. Rút ở đây chứ không thi hành trong callback
+  // BLE — cùng luật đã áp cho callback MQTT và ESP-NOW (xem unoq-link.h §1).
+  runUnoQIncoming();
+  pushUnoQSnapshot();
 
-  // Đóng dấu nhịp NGAY, TRƯỚC khi biết có số đo hay không — chứ không chỉ khi
-  // gửi thành công. Đặt sau lần đọc hỏng thì `lastPub` đứng yên ở 0, điều kiện
-  // trên không bao giờ chặn, và cả khối này chạy MỖI VÒNG loop(): chưa cắm cảm
-  // biến là log phun ra vài nghìn dòng mỗi phút (đo được 304 KB trong 40 s),
-  // đủ để chôn mọi dòng log khác và ăn hẳn một phần lõi 1.
+  // KHÔNG CÒN KHỐI PUBLISH TELEMETRY CỦA CHÍNH BO NÀY.
+  //
+  // Bo không có cảm biến nữa, và gửi số mượn của node góc phòng dưới tên gateway
+  // là bịa ra một phép đo chưa từng xảy ra — đúng thứ luật "NAN chứ không 0" của
+  // ui.h ngăn cấm, chỉ ở tầng khác. Trạng thái sống/chết của gateway đã có topic
+  // `status` (retained + Last Will) lo, còn MAC đi kèm gói `state`.
+  //
+  // Số đo trong nhà lên cloud qua topic CỦA TỪNG GÓC, do publishRoomTelemetry()
+  // gửi hộ; backend tự lấy trung vị (services/redis_room_state_service.py).
+
+  unsigned long now = millis();
+  if (lastPub != 0 && now - lastPub < TELEMETRY_MS) return;  // chưa tới nhịp tổng kết
   lastPub = now;
 
-  // Lấy số ĐÃ ĐO SẴN — không đọc cảm biến tại đây. readDht() ở đầu loop() lo
-  // nhịp 2.5s của DHT22, còn SHT3x thì tác vụ UI đo. Chờ một lượt đo ở đây sẽ
-  // chặn cả mqtt.loop() lẫn việc rút hàng đợi ESP-NOW.
-  float t, h;
-  if (!Ui::readIndoor(t, h)) {
-    // Hai nguyên nhân khác hẳn nhau -> hai lời nhắc khác hẳn nhau. Nhắc "kiểm
-    // tra trở kéo" khi thật ra chân không lái được ngõ ra là đẩy người đọc log
-    // đi sai hướng — đúng cái mà dòng cảnh báo ở setup() sinh ra để chặn.
-    if (!DHT_PIN_OK)
-      Serial.printf("Chua co so do nhiet/am — DHT22 dang o GPIO%d (chan CHI VAO), "
-                    "xem canh bao luc khoi dong\n", DHT_PIN);
-    else
-      Serial.printf("Chua co so do nhiet/am — kiem tra DHT22 tren GPIO%d "
-                    "(co tro keo 4.7k len 3.3V chua?) hoac day I2C cua SHT3x tren J1\n",
-                    DHT_PIN);
-    return;
+  float tin = NAN, hin = NAN;
+  uint8_t voting = 0;
+  const bool haveIndoor = RoomRegistry::median(tin, hin, &voting);
+  if (haveIndoor) {
+    Serial.printf("[trong nha] trung vi %.1f°C %.0f%% tu %u/%u goc · espnow nhan=%lu bo=%lu"
+                  " · unoq=%s\n",
+                  tin, hin, voting, RoomRegistry::knownCount(),
+                  (unsigned long)EspNowRelay::receivedCount(),
+                  (unsigned long)EspNowRelay::droppedCount(),
+                  UnoQLink::connected() ? "da noi" : "chua noi");
+  } else {
+    // Ba ca hỏng khác hẳn nhau, và hai bộ đếm là thứ phân biệt được chúng:
+    //   nhan=0            -> không nghe thấy ESP-NOW nào: sai WIFI_SSID ở node
+    //                        phòng (nó bám nhầm kênh), hoặc node chưa bật
+    //   nhan>0, 0 goc     -> nghe thấy nhưng toàn gói của node ngoài trời
+    //   co goc, voting=0  -> các góc còn sống nhưng cảm biến đều hỏng (NaN)
+    Serial.printf("[trong nha] CHUA CO SO DO — espnow nhan=%lu bo=%lu · "
+                  "%u goc da biet, %u con song. Xem 3 ca trong main.cpp.\n",
+                  (unsigned long)EspNowRelay::receivedCount(),
+                  (unsigned long)EspNowRelay::droppedCount(),
+                  RoomRegistry::knownCount(), RoomRegistry::onlineCount());
   }
 
-  JsonDocument doc;
-  doc["ts"]   = (uint32_t)(millis() / 1000);  // không RTC -> backend tự đóng dấu giờ nhận
-  doc["t"]    = t;
-  doc["h"]    = h;
-  doc["rssi"] = (int)WiFi.RSSI();
-  doc["mac"]  = WiFi.macAddress();
-  doc["fw"]   = FW_VERSION;
-  char buf[192];
-  size_t n = serializeJson(doc, buf);
-  bool ok = mqtt.publish(tTelemetry.c_str(), (const uint8_t *)buf, n, false);
-  Serial.printf("[telemetry] t=%.1f°C h=%.0f%% -> %s · espnow nhan=%lu bo=%lu · kenh=%d\n",
-                t, h, ok ? "da gui" : "GUI LOI",
-                (unsigned long)EspNowRelay::receivedCount(),
-                (unsigned long)EspNowRelay::droppedCount(),
-                WiFi.channel());
+  // Bảng Δ trung bình theo từng node. Bộ đếm tổng ở trên nói "có mất gói không";
+  // bảng này nói "node NÀO đang mất" — hai câu hỏi khác nhau, và câu thứ hai mới
+  // dẫn tới chỗ cần sửa.
+  SerialTrace::summary();
 }

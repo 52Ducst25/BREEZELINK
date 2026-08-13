@@ -23,6 +23,7 @@ from app.services import (
     redis_state_service,
     telemetry_service,
 )
+from app.utils.mac_address import parse_mac
 from app.utils.mqtt_naming import ParsedTopic
 
 logger = logging.getLogger("breezelink.worker.state")
@@ -36,10 +37,24 @@ async def handle_state(client, topic: ParsedTopic, payload: dict) -> None:
         # This mirrors mode/setpoint into the org's live state, which the comfort
         # loop then treats as ground truth — so verify the publishing node really
         # belongs to the org in the topic before trusting a word of it.
-        if await telemetry_service.get_device_for_topic(session, topic.org_id, topic.device_uuid) is None:
+        device = await telemetry_service.get_device_for_topic(
+            session, topic.org_id, topic.device_uuid
+        )
+        if device is None:
             logger.warning("Ignoring state from unknown/mismatched uuid=%s org=%s",
                            topic.device_uuid, topic.org_id)
             return
+
+        # The gateway's ONLY chance to report its MAC. It lost its DHT22 when the
+        # room sensors took over, so it publishes no telemetry at all — and
+        # telemetry was where every other node's MAC came from. Without this the
+        # provisioning page shows "—" for the one node an installer is most
+        # likely to be standing in front of.
+        mac = parse_mac(payload.get("mac"))
+        if mac is not None and device.mac != mac:
+            device.mac = mac
+            await session.commit()
+            logger.info("Device %s reported MAC %012X via state", topic.device_uuid, mac)
 
         # The node could not resolve an ir_code_id we believed it had cached.
         # Drop the cache entry so the NEXT command for that code carries the raw

@@ -55,7 +55,7 @@
     <div>
       <h1 class="ac-detail-title">{{ device.name }}</h1>
       <div class="ac-device__meta">
-        {{ 'Nút ngoài trời' if device.node_type.value == 'outdoor' else 'Nút trong nhà' }}
+        {{ device.node_type | node_type }}
         {% if device.location %} · {{ device.location }}{% endif %}
       </div>
     </div>
@@ -72,16 +72,25 @@
   <h2 class="ac-section-title">Nạp firmware</h2>
 </div>
 <div class="card ac-provision">
+  {# Ba loại node cần ba khối cấu hình khác hẳn nhau, và nhầm là hỏng câm: node
+     phòng không đăng nhập WiFi và không nối MQTT, nên dán MQTT_PASSWORD vào nó
+     vừa vô nghĩa vừa rò một bí mật ra chỗ không cần. #}
   <p class="ac-form-note" style="margin-top:0;">
-    Loại node cố định (ngoài trời / trong nhà). <b>Vai trò mạng</b> do bạn đặt:
-    <b>Master</b> nối gateway (WiFi + MQTT lên cloud); <b>Slave</b> nối về master qua ESP-NOW.
-    Mỗi nhà chỉ 1 master — đặt node này thành master sẽ tự hạ các master khác xuống slave.
+    {% if device.node_type.value == 'room' %}
+      Cảm biến phòng <b>không đăng nhập WiFi và không nối MQTT</b> — nó bắn ESP-NOW về
+      gateway, và gateway đứng tên đẩy số đo lên cloud hộ nó. <b>WIFI_SSID</b> ở đây chỉ
+      để <i>dò xem router đang ở kênh nào</i> (ESP-NOW bắt buộc mọi bên cùng kênh), nên
+      nó phải giống hệt gateway và phải là băng 2.4&nbsp;GHz — gõ lệch là node câm hoàn
+      toàn mà không báo lỗi ở đâu cả.
+    {% else %}
+      <b>Vai trò mạng</b> do bạn đặt: <b>Master</b> nối gateway (WiFi + MQTT lên cloud);
+      <b>Slave</b> nối về master qua ESP-NOW. Mỗi nhà chỉ 1 master — đặt node này thành
+      master sẽ tự hạ các master khác xuống slave.
+    {% endif %}
   </p>
 
   <div class="ac-row-actions" style="margin-bottom: var(--space-4);">
-    <span class="status-pill status-pill-idle">
-      {{ 'Ngoài trời (outdoor)' if device.node_type.value == 'outdoor' else 'Trong nhà (indoor)' }}
-    </span>
+    <span class="status-pill status-pill-idle">{{ device.node_type | node_type }}</span>
     {% if device.role %}
       <span class="status-pill status-pill-active">{{ 'MASTER' if device.role.value == 'master' else 'SLAVE' }}</span>
     {% else %}
@@ -90,7 +99,10 @@
   </div>
 
   {# Set master/slave. Refreshes the page over AJAX (same green-tick save as
-     everywhere else) — the config snippet below updates in place. #}
+     everywhere else) — the config snippet below updates in place.
+     Ẩn hẳn với node phòng: nó không có phiên MQTT nào để làm master, và
+     device_service.set_role sẽ từ chối — thà đừng bày ra cái nút chỉ để báo lỗi. #}
+  {% if device.node_type.value != 'room' %}
   <form class="ac-sell-form__row" method="post"
         action="/web/customers/{{ device.org_id }}/devices/{{ device.id }}/role"
         data-ajax="refresh" data-ajax-msg="Đã đổi vai trò node" style="margin-bottom: var(--space-5);">
@@ -104,6 +116,7 @@
     </label>
     <button class="btn btn-primary" type="submit">Lưu vai trò</button>
   </form>
+  {% endif %}
 
   {# The values to paste into this node's config.h. user-select:all so a tap
      selects the whole token. This page is sysadmin-only, so showing the MQTT
@@ -113,9 +126,18 @@
       <tbody>
         <tr><td>ORG_ID</td><td class="text-mono" style="user-select:all;">{{ device.org_id }}</td></tr>
         <tr><td>DEVICE_UUID</td><td class="text-mono" style="user-select:all;">{{ device.device_uuid }}</td></tr>
+        {% if device.node_type.value == 'room' %}
+        <tr>
+          <td>ROOM_CORNER <span class="ac-muted">(chỉ là nhãn hiển thị)</span></td>
+          <td class="text-mono" style="user-select:all;">
+            {% if room_index is not none %}{{ room_index }}{% else %}<span class="ac-muted">—</span>{% endif %}
+          </td>
+        </tr>
+        {% else %}
         <tr><td>MQTT_USERNAME</td><td class="text-mono" style="user-select:all;">{{ device.device_uuid }}</td></tr>
         <tr><td>MQTT_PASSWORD</td><td class="text-mono" style="user-select:all;">{{ device.mqtt_token }}</td></tr>
         <tr><td>MQTT_HOST : PORT</td><td class="text-mono" style="user-select:all;">{{ mqtt_host }} : {{ mqtt_port }}</td></tr>
+        {% endif %}
         <tr><td>MAC node này</td><td class="text-mono">{{ device.mac|mac }}</td></tr>
         {% if device.role and device.role.value == 'slave' %}
         <tr>
@@ -129,7 +151,22 @@
     </table>
   </div>
 
-  {% if device.role and device.role.value == 'master' or not device.role %}
+  {% if device.node_type.value == 'room' %}
+  <div class="ac-section-head" style="margin-top: var(--space-5);">
+    <h2 class="ac-section-title">Khối config.h (cảm biến phòng — dán vào firmware)</h2>
+  </div>
+  {# Không có MQTT ở đây, có chủ đích: node phòng chỉ bắn ESP-NOW. In thêm
+     MQTT_PASSWORD vào một bo không nối mạng chỉ tổ rò bí mật ra một chỗ vô ích. #}
+  <pre class="ac-code chamfer-sm" style="user-select:all; overflow-x:auto; padding: var(--space-4); background: var(--bg-subtle); font: var(--tech-code);">#define WIFI_SSID   "&lt;tên WiFi 2.4GHz của nhà, giống hệt gateway&gt;"
+#define DEVICE_UUID "{{ device.device_uuid }}"
+#define ROOM_CORNER {% if room_index is not none %}{{ room_index }}{% else %}0{% endif %}
+#define FW_VERSION  "room-1.0"</pre>
+  <p class="ac-form-note">
+    <b>Gateway không cần khai gì về node này.</b> Gói ESP-NOW mang sẵn
+    <code>DEVICE_UUID</code> ở trên, nên gateway trung chuyển được ngay — lắp thêm một góc
+    thì chỉ nạp bo mới, không phải nạp lại gateway.
+  </p>
+    {% elif device.role and device.role.value == 'master' or not device.role %}
   <div class="ac-section-head" style="margin-top: var(--space-5);">
     <h2 class="ac-section-title">Khối config.h (master — dán vào firmware)</h2>
   </div>

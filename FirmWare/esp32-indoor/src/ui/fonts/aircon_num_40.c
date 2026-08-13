@@ -1,7 +1,7 @@
 /*******************************************************************************
  * Size: 40 px
  * Bpp: 4
- * Opts: --font C:\WINDOWS\Fonts\arialbd.ttf --size 40 --bpp 4 --format lvgl --no-compress -r 0x20 -r 0x25 -r 0x2B -r 0x2D-0x2E -r 0x30-0x39 -r 0x43 -r 0xB0 --force-fast-kern-format -o C:\VHITEK\AirConditioner\FirmWare\esp32-indoor\src\ui\fonts\aircon_num_40.c
+ * Opts: --font C:/WINDOWS/Fonts/arialbd.ttf --size 40 --bpp 4 --format lvgl --no-compress -r 0x20 -r 0x25 -r 0x2B -r 0x2D-0x2E -r 0x30-0x3A -r 0x43 -r 0xB0 --force-fast-kern-format -o e:/Project/Personal/AirConditioner/FirmWare/esp32-indoor/src/ui/fonts/aircon_num_40.c
  ******************************************************************************/
 
 #ifdef LV_LVGL_H_INCLUDE_SIMPLE
@@ -493,6 +493,18 @@ static LV_ATTRIBUTE_LARGE_CONST const uint8_t glyph_bitmap[] = {
     0xff, 0xff, 0xfe, 0x50, 0x0, 0x0, 0x0, 0x0,
     0x6, 0xbe, 0xff, 0xda, 0x50, 0x0, 0x0, 0x0,
 
+    /* U+003A ":" */
+    0x1f, 0xff, 0xff, 0x61, 0xff, 0xff, 0xf6, 0x1f,
+    0xff, 0xff, 0x61, 0xff, 0xff, 0xf6, 0x1f, 0xff,
+    0xff, 0x60, 0x77, 0x77, 0x72, 0x0, 0x0, 0x0,
+    0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
+    0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
+    0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
+    0x0, 0x0, 0x0, 0x0, 0x0, 0x77, 0x77, 0x72,
+    0x1f, 0xff, 0xff, 0x61, 0xff, 0xff, 0xf6, 0x1f,
+    0xff, 0xff, 0x61, 0xff, 0xff, 0xf6, 0x1f, 0xff,
+    0xff, 0x60,
+
     /* U+0043 "C" */
     0x0, 0x0, 0x0, 0x0, 0x3, 0x8c, 0xde, 0xfe,
     0xda, 0x61, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
@@ -578,8 +590,9 @@ static const lv_font_fmt_txt_glyph_dsc_t glyph_dsc[] = {
     {.bitmap_index = 2666, .adv_w = 356, .box_w = 20, .box_h = 28, .ofs_x = 1, .ofs_y = 0},
     {.bitmap_index = 2946, .adv_w = 356, .box_w = 20, .box_h = 28, .ofs_x = 1, .ofs_y = 0},
     {.bitmap_index = 3226, .adv_w = 356, .box_w = 20, .box_h = 28, .ofs_x = 1, .ofs_y = 0},
-    {.bitmap_index = 3506, .adv_w = 462, .box_w = 26, .box_h = 28, .ofs_x = 1, .ofs_y = 0},
-    {.bitmap_index = 3870, .adv_w = 256, .box_w = 14, .box_h = 13, .ofs_x = 1, .ofs_y = 16}
+    {.bitmap_index = 3506, .adv_w = 213, .box_w = 7, .box_h = 21, .ofs_x = 3, .ofs_y = 0},
+    {.bitmap_index = 3580, .adv_w = 462, .box_w = 26, .box_h = 28, .ofs_x = 1, .ofs_y = 0},
+    {.bitmap_index = 3944, .adv_w = 256, .box_w = 14, .box_h = 13, .ofs_x = 1, .ofs_y = 16}
 };
 
 /*---------------------
@@ -588,8 +601,8 @@ static const lv_font_fmt_txt_glyph_dsc_t glyph_dsc[] = {
 
 static const uint16_t unicode_list_0[] = {
     0x0, 0x5, 0xb, 0xd, 0xe, 0x10, 0x11, 0x12,
-    0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x23,
-    0x90
+    0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a,
+    0x23, 0x90
 };
 
 /*Collect the unicode lists and glyph_id offsets*/
@@ -597,7 +610,7 @@ static const lv_font_fmt_txt_cmap_t cmaps[] =
 {
     {
         .range_start = 32, .range_length = 145, .glyph_id_start = 1,
-        .unicode_list = unicode_list_0, .glyph_id_ofs_list = NULL, .list_length = 17, .type = LV_FONT_FMT_TXT_CMAP_SPARSE_TINY
+        .unicode_list = unicode_list_0, .glyph_id_ofs_list = NULL, .list_length = 18, .type = LV_FONT_FMT_TXT_CMAP_SPARSE_TINY
     }
 };
 

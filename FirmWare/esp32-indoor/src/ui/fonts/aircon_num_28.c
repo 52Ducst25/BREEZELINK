@@ -1,7 +1,7 @@
 /*******************************************************************************
  * Size: 28 px
  * Bpp: 4
- * Opts: --font C:\WINDOWS\Fonts\arialbd.ttf --size 28 --bpp 4 --format lvgl --no-compress -r 0x20 -r 0x25 -r 0x2B -r 0x2D-0x2E -r 0x30-0x39 -r 0x43 -r 0xB0 --force-fast-kern-format -o C:\VHITEK\AirConditioner\FirmWare\esp32-indoor\src\ui\fonts\aircon_num_28.c
+ * Opts: --font C:/WINDOWS/Fonts/arialbd.ttf --size 28 --bpp 4 --format lvgl --no-compress -r 0x20 -r 0x25 -r 0x2B -r 0x2D-0x2E -r 0x30-0x3A -r 0x43 -r 0xB0 --force-fast-kern-format -o e:/Project/Personal/AirConditioner/FirmWare/esp32-indoor/src/ui/fonts/aircon_num_28.c
  ******************************************************************************/
 
 #ifdef LV_LVGL_H_INCLUDE_SIMPLE
@@ -278,6 +278,13 @@ static LV_ATTRIBUTE_LARGE_CONST const uint8_t glyph_bitmap[] = {
     0x2e, 0xff, 0xff, 0xff, 0xf5, 0x0, 0x0, 0x0,
     0x18, 0xdf, 0xfd, 0x81, 0x0, 0x0,
 
+    /* U+003A ":" */
+    0x4f, 0xff, 0x94, 0xff, 0xf9, 0x4f, 0xff, 0x93,
+    0xee, 0xe8, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
+    0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
+    0x0, 0x0, 0x0, 0x3, 0xee, 0xe8, 0x4f, 0xff,
+    0x94, 0xff, 0xf9, 0x4f, 0xff, 0x90,
+
     /* U+0043 "C" */
     0x0, 0x0, 0x2, 0x7c, 0xef, 0xfd, 0x94, 0x0,
     0x0, 0x0, 0x0, 0x9f, 0xff, 0xff, 0xff, 0xff,
@@ -334,8 +341,9 @@ static const lv_font_fmt_txt_glyph_dsc_t glyph_dsc[] = {
     {.bitmap_index = 1329, .adv_w = 249, .box_w = 14, .box_h = 20, .ofs_x = 1, .ofs_y = 0},
     {.bitmap_index = 1469, .adv_w = 249, .box_w = 14, .box_h = 20, .ofs_x = 1, .ofs_y = 0},
     {.bitmap_index = 1609, .adv_w = 249, .box_w = 15, .box_h = 20, .ofs_x = 0, .ofs_y = 0},
-    {.bitmap_index = 1759, .adv_w = 324, .box_w = 18, .box_h = 20, .ofs_x = 1, .ofs_y = 0},
-    {.bitmap_index = 1939, .adv_w = 179, .box_w = 9, .box_h = 9, .ofs_x = 1, .ofs_y = 12}
+    {.bitmap_index = 1759, .adv_w = 149, .box_w = 5, .box_h = 15, .ofs_x = 2, .ofs_y = 0},
+    {.bitmap_index = 1797, .adv_w = 324, .box_w = 18, .box_h = 20, .ofs_x = 1, .ofs_y = 0},
+    {.bitmap_index = 1977, .adv_w = 179, .box_w = 9, .box_h = 9, .ofs_x = 1, .ofs_y = 12}
 };
 
 /*---------------------
@@ -344,8 +352,8 @@ static const lv_font_fmt_txt_glyph_dsc_t glyph_dsc[] = {
 
 static const uint16_t unicode_list_0[] = {
     0x0, 0x5, 0xb, 0xd, 0xe, 0x10, 0x11, 0x12,
-    0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x23,
-    0x90
+    0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a,
+    0x23, 0x90
 };
 
 /*Collect the unicode lists and glyph_id offsets*/
@@ -353,7 +361,7 @@ static const lv_font_fmt_txt_cmap_t cmaps[] =
 {
     {
         .range_start = 32, .range_length = 145, .glyph_id_start = 1,
-        .unicode_list = unicode_list_0, .glyph_id_ofs_list = NULL, .list_length = 17, .type = LV_FONT_FMT_TXT_CMAP_SPARSE_TINY
+        .unicode_list = unicode_list_0, .glyph_id_ofs_list = NULL, .list_length = 18, .type = LV_FONT_FMT_TXT_CMAP_SPARSE_TINY
     }
 };
 

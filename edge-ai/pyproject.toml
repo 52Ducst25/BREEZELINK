@@ -1,0 +1,44 @@
+[project]
+name = "breezelink-edge-ai"
+version = "1.0.0"
+description = "Edge comfort inference + cloud-outage failover, runs on the Linux half of an Arduino UNO Q"
+requires-python = ">=3.11"
+# MỘT phụ thuộc duy nhất, có chủ đích. Đây là phần mềm chạy trên thiết bị ở nhà
+# khách, nơi mỗi gói thêm vào là một thứ nữa có thể vỡ lúc nâng cấp và một thứ
+# nữa phải vá khi có CVE. Thuật toán comfort lấy từ src/ của backend (thuần
+# Python, không phụ thuộc gì); hồi quy tuyến tính không cần numpy; và bố cục gói
+# BLE đọc bằng `struct` của thư viện chuẩn.
+#
+# pyserial THAY CHO bleak: duong toi gateway da chuyen tu Bluetooth sang UART.
+# Ly do day du o FirmWare/shared/unoq-link-protocol.h — tom tat: bat Bluetooth
+# thi ESP32 BAT BUOC bat ngu WiFi, ma ngu WiFi lam gateway roi ~60% goi ESP-NOW.
+# Doi lai, pyserial khong can BlueZ, khong can D-Bus — nho vay dich vu chay duoc
+# CA trong container cua Arduino App Lab, thu ma ban BLE khong lam duoc.
+#
+# pydantic KHÔNG PHẢI lựa chọn, mà là hệ quả: comfort_engine.compute() trả về
+# `app.schemas.comfort.ComfortResult`, và lớp đó là một pydantic BaseModel. Nó
+# nằm ở phía backend nên dễ bị bỏ sót khi đếm phụ thuộc của thư mục này — bản
+# trước chỉ khai bleak, và trên máy dev thì không lộ ra vì backend đã cài
+# pydantic sẵn. Trên UNO Q sạch thì dịch vụ chết ngay ở lần import đầu tiên.
+#
+# numpy CHO MO HINH NHIET (thermal_model.py). Day la phu thuoc thu ba, va no da
+# duoc can nhac ky vi file nay von tu hao chi co mot:
+#   - Anh nen cua App Lab DA CO san numpy 2.5.1, nen o duong trien khai chinh no
+#     khong them gi ca.
+#   - Phan thay the la tu viet nghich dao ma tran 4x4 va binh phuong toi thieu.
+#     Do dung la loai ma "chay duoc" nhung sai am tham o truong hop suy bien, va
+#     cai gia cua mot sai lam nhu vay (may lanh chay theo mot mo hinh hong) cao
+#     hon nhieu so voi cai gia cua mot phu thuoc chuan.
+# SQLite (lich su cuc bo) va urllib (du bao thoi tiet) deu nam trong thu vien
+# chuan — khong them gi cho hai phan do.
+dependencies = ["pyserial>=3.5", "pydantic>=2", "numpy>=1.24"]
+
+[project.scripts]
+breezelink-edge-ai = "edge_ai.main:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["edge_ai*"]

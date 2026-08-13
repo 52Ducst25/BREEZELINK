@@ -131,56 +131,6 @@ void buzzerTick() {
 }
 
 // ---------------------------------------------------------------------------
-//  SHT3x
-// ---------------------------------------------------------------------------
-static const uint8_t SHT3X_ADDR = 0x44;
-static bool sht3xOk = false;
-
-/// CRC8 của Sensirion (đa thức 0x31). Kiểm chứ không bỏ qua: bus này chạy
-/// chung với cảm ứng và DS1307, nhiễu một bit là ra nhiệt độ vô lý mà không có
-/// dấu hiệu nào khác — đúng kiểu sai âm thầm mà cả dự án đang cố tránh.
-static uint8_t crc8(const uint8_t *d, uint8_t n) {
-  uint8_t c = 0xFF;
-  for (uint8_t i = 0; i < n; i++) {
-    c ^= d[i];
-    for (uint8_t b = 0; b < 8; b++) c = (c & 0x80) ? (uint8_t)((c << 1) ^ 0x31) : (uint8_t)(c << 1);
-  }
-  return c;
-}
-
-bool sht3xBegin() {
-  Wire.beginTransmission(SHT3X_ADDR);
-  sht3xOk = (Wire.endTransmission() == 0);
-  return sht3xOk;
-}
-
-bool sht3xPresent() { return sht3xOk; }
-
-bool sht3xRead(float &tempC, float &humidity) {
-  if (!sht3xOk) return false;
-
-  // 0x2400 = đo một lần, độ lặp lại cao, KHÔNG giữ nhịp bus (clock stretching).
-  // Giữ nhịp bus sẽ ghim SCL ~15ms, mà bus này còn có cảm ứng và đồng hồ.
-  Wire.beginTransmission(SHT3X_ADDR);
-  Wire.write(0x24);
-  Wire.write(0x00);
-  if (Wire.endTransmission() != 0) return false;
-
-  delay(20);   // chuyển đổi mất ~15ms ở độ lặp lại cao
-  if (Wire.requestFrom(SHT3X_ADDR, (uint8_t)6) != 6) return false;
-
-  uint8_t b[6];
-  for (uint8_t i = 0; i < 6; i++) b[i] = Wire.read();
-  if (crc8(b, 2) != b[2] || crc8(b + 3, 2) != b[5]) return false;
-
-  const uint16_t rt = (uint16_t)((b[0] << 8) | b[1]);
-  const uint16_t rh = (uint16_t)((b[3] << 8) | b[4]);
-  tempC    = -45.0f + 175.0f * (float)rt / 65535.0f;
-  humidity = 100.0f * (float)rh / 65535.0f;
-  return true;
-}
-
-// ---------------------------------------------------------------------------
 //  DS1307
 // ---------------------------------------------------------------------------
 static const uint8_t DS1307_ADDR = 0x68;

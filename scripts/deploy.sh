@@ -143,7 +143,19 @@ $SSH "docker ps --filter name=${AC_PROJECT} --format '  {{.Names}}: {{.Status}}'
 REV="$($SSH "docker exec ${AC_PROJECT}-postgres-1 psql -U ${AC_PROJECT} -d ${AC_PROJECT} -t -c 'select version_num from alembic_version;' 2>/dev/null | tr -d ' \n' || true")"
 [ -n "$REV" ] && ok "alembic revision: $REV"
 
-CODE="$(curl -s -m 15 -o /dev/null -w '%{http_code}' "${AC_URL}/web/login" || echo 000)"
+# CHO TUNNEL GAN LAI, dung hoi mot lan roi ket luan.
+#
+# Buoc 6 da cho `api` bao healthy roi moi dung lai cloudflared, nhung `healthy`
+# noi ve container api, khong noi ve duong hop le tu Cloudflare vao no. Tunnel
+# can them ~15-30 giay de bat tay lai. Hoi mot lan ngay sau do gan nhu chac chan
+# gap 502, va script bao DEPLOY THAT BAI cho mot lan deploy da thanh cong —
+# nguoi doc se di rollback mot ban hoan toan lanh lan.
+CODE=000
+for i in $(seq 1 12); do
+  CODE="$(curl -s -m 10 -o /dev/null -w '%{http_code}' "${AC_URL}/web/login" || echo 000)"
+  [ "$CODE" = "200" ] && break
+  sleep 5
+done
 if [ "$CODE" = "200" ]; then
   ok "${AC_URL}/web/login -> 200"
 else

@@ -117,17 +117,31 @@ async def create_customer_submit(
     )
     await config_service.create_default_config(session, org.id)
 
-    # First node is the outdoor one: the comfort algorithm needs exactly one
-    # outdoor reading (running-mean of outside temperature) and treats every
-    # other node as an indoor room. The installer renames these on site.
+    # Seed the standard kit in installation order, because the roles are not
+    # interchangeable and getting them wrong is invisible until the household
+    # stops responding:
+    #   node 0  outdoor  — the ONLY source of the running-mean outside temp
+    #   node 1  indoor   — the gateway: WiFi/MQTT, IR blaster, touch panel.
+    #                      Marked master here so the household has an unambiguous
+    #                      command target from the moment it is sold; without it
+    #                      get_gateway_device falls back to "oldest indoor row".
+    #   node 2+ room     — corner sensors, medianed into the indoor reading
+    # The installer renames and re-places these on site.
+    gateway = None
     for i in range(num_nodes):
-        is_outdoor = i == 0
-        await device_service.create_device(
-            session,
-            org_id=org.id,
-            name=f"Node {'ngoài trời' if is_outdoor else f'trong nhà {i}'}",
-            node_type=NodeType.outdoor if is_outdoor else NodeType.indoor,
+        if i == 0:
+            kind, label = NodeType.outdoor, "Node ngoài trời"
+        elif i == 1:
+            kind, label = NodeType.indoor, "Gateway trong nhà"
+        else:
+            kind, label = NodeType.room, f"Cảm biến góc {i - 1}"
+        node = await device_service.create_device(
+            session, org_id=org.id, name=label, node_type=kind
         )
+        if kind == NodeType.indoor:
+            gateway = node
+    if gateway is not None:
+        await device_service.set_role(session, gateway, NodeRole.master)
 
     codes = await invite_service.create_codes(
         session, org_id=org.id, count=1, role=UserRole.owner
@@ -403,7 +417,12 @@ async def set_device_role_submit(
         node_role = NodeRole(role) if role else None
     except (AppException, ValueError):
         return _err("Không tìm thấy node hoặc vai trò không hợp lệ", f"/web/customers/{org_id}")
-    await device_service.set_role(session, device, node_role)
+    try:
+        await device_service.set_role(session, device, node_role)
+    except ValueError as exc:
+        # e.g. promoting a room sensor to master — it has no MQTT session, so
+        # the household would publish commands nobody is listening for.
+        return _err(str(exc), f"/web/customers/{org_id}/devices/{device_id}")
     await session.commit()
     return RedirectResponse(f"/web/customers/{org_id}/devices/{device_id}", status_code=303)
 
