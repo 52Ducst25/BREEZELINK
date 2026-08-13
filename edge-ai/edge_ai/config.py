@@ -100,13 +100,14 @@ def _link() -> str:
 class Settings:
     org_id: str
 
-    # Địa chỉ BLE của gateway. ĐỂ TRỐNG là đúng trong hầu hết trường hợp: dịch vụ
-    # tự quét theo UUID DỊCH VỤ, nên thay bo gateway không phải sửa cấu hình.
-    # Chỉ điền khi trong tầm sóng có hai gateway (lắp thử hai hộ cạnh nhau).
-    # None = tu do (uu tien chip cau CH34x/CP210x/FTDI). Khai tay khi noi thang
-    # chan UART: Linux khong doan duoc /dev/ttyS* nao dang noi vao dau.
+    # Cổng UART tới gateway. None = tự dò (ưu tiên chip cầu CH34x/CP210x/FTDI).
+    # Khai tay khi nối thẳng chân UART: Linux không đoán được /dev/ttyS* nào
+    # đang nối vào đâu.
+    #
+    # (EDGE_SCAN_TIMEOUT_SEC đã bỏ cùng trường `scan_timeout_sec`: đó là thời
+    # gian quét BLE tìm gateway theo UUID dịch vụ. Từ khi chuyển sang UART thì
+    # không còn gì để quét — trường đó chỉ được ĐẶT chứ không nơi nào ĐỌC.)
     uart_port: str | None
-    scan_timeout_sec: float
     reconnect_sec: float
 
     # Đường tới gateway: "bridge" (qua sketch trên STM32) hay "serial" (cổng
@@ -198,7 +199,6 @@ def load() -> Settings:
         history_days=_num("EDGE_HISTORY_DAYS", 30),
         lat=lat,
         lon=lon,
-        scan_timeout_sec=_num("EDGE_SCAN_TIMEOUT_SEC", 20),
         reconnect_sec=_num("EDGE_RECONNECT_SEC", 5),
         history_sec=_num("EDGE_HISTORY_SEC", 1800),
         takeover_after_sec=_num("EDGE_TAKEOVER_AFTER_SEC", 300),
