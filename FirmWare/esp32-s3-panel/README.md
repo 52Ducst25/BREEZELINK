@@ -17,55 +17,23 @@ pio device monitor -p COM5 -b 115200                    # xem log
 
 ---
 
-## 1. Thư mục này giữ mã nguồn thật — và chỉ có một bản
+## 1. Thư mục này không có mã nguồn — và đó là chủ ý
 
-`src/` ở đây là bản **duy nhất** của firmware panel. Hai thư mục kia không có mã riêng,
-chúng trỏ ngược về đây:
+Nó biên dịch thẳng `../esp32-indoor/src/`, tức **đúng** mã mà bo QR Box chạy, kể cả `ui/`.
 
-| Thư mục | Bo | Trỏ về đây bằng |
-|---|---|---|
-| `../esp32-qrbox/` | QR Box Advance (cũ) | `src_dir = ../esp32-s3-panel/src` |
-| `../esp32-s3-gateway/` | DevKitC-1, gỡ lỗi | `build_src_filter` (bỏ `ui/`) |
+Chép mã sang đây cho "gọn" là tạo ra **hai panel**. Logic thi hành lệnh, chống trùng
+`req_id`, xin lại mã IR, ranh giới đề xuất/lệnh của UNO Q — toàn những chỗ tinh vi mà
+mỗi cái đều đã trả giá một lần để viết cho đúng. Hai bản sao lệch nhau ngay lần sửa
+thứ nhất, và triệu chứng là bo này chạy đúng còn bo kia thì không, không có cách nào
+biết bên nào mới là bản thật.
 
-**Đừng bao giờ chép `src/` sang thư mục khác.** Chép là tạo ra hai panel. Logic thi hành
-lệnh, chống trùng `req_id`, xin lại mã IR, ranh giới đề xuất/lệnh của UNO Q — toàn những
-chỗ tinh vi mà mỗi cái đều đã trả giá một lần để viết cho đúng. Hai bản sao lệch nhau
-ngay lần sửa thứ nhất, và triệu chứng là bo này chạy đúng còn bo kia thì không, không có
-cách nào biết bên nào mới là bản thật.
+Chỗ nào thật sự khác nhau giữa hai bo thì nằm ở
+[`../esp32-indoor/src/board-pins.h`](../esp32-indoor/src/board-pins.h), chọn bằng cờ
+`-D BOARD_S3_PANEL`. **Không rải `#ifdef` vào mã.**
 
-⚠️ **Sửa `src/*.cpp` là ảnh hưởng cả ba env.** Chỗ nào thật sự khác nhau giữa các bo thì
-để ở [`src/board-pins.h`](src/board-pins.h), chọn bằng cờ `-D BOARD_*`.
-**Không rải `#ifdef` vào mã.**
-
-### `src/config.h` — một file cho mọi bo panel
-
-WiFi, token MQTT, `DEVICE_UUID`. Các bo panel **thay thế nhau** chứ không chạy cùng lúc,
-nên phải dùng đúng một hàng `devices` trên web. Mỗi bo một bản sao là có hai file cùng
-chứa một mật khẩu MQTT, và chắc chắn sẽ lệch.
-
-File này **bị gitignore** (`FirmWare/.gitignore`, mẫu `*/src/config.h`). Bản được commit
-là `src/config.h.example` — copy nó rồi điền.
-
-### Bố cục `src/`
-
-```
-src/
-├── main.cpp              vòng lặp chính, MQTT, thi hành lệnh
-├── config.h              BÍ MẬT — gitignore
-├── config.h.example      bản mẫu, được commit
-├── board-pins.h          sơ đồ chân THEO BO (chọn bằng -D BOARD_*)
-├── ir-io.*  ir-store.*   phát/học hồng ngoại + kho mã trong NVS
-├── unoq-link.*           khung gói UART sang Arduino UNO Q
-├── espnow-relay.*        thu ESP-NOW, chuyển tiếp lên MQTT hộ từng node
-├── room-registry.*       bảng 4 góc phòng + trung vị
-├── slave-watch.*         theo dõi node mất tín hiệu
-├── serial-trace.*        nhật ký từng gói (bật bằng GATEWAY_TRACE)
-├── lv_conf.h             cấu hình LVGL
-└── ui/                   giao diện LVGL — chạy trên lõi 0
-    ├── ui.cpp  ui-screens.*  theme.*  touch.*  board-io.*
-    ├── fonts/            font VLW tiếng Việt (sinh bằng ../tools/)
-    └── images/
-```
+Cấu hình (WiFi, token MQTT, `DEVICE_UUID`) dùng chung `../esp32-indoor/src/config.h` —
+bo này thay thế node indoor nên phải dùng **đúng** hàng `devices` đó trên web.
+Thư mục này tuyệt đối không được có `config.h` riêng.
 
 ---
 
@@ -208,7 +176,7 @@ nguồn nhìn như màn hình lỗi chứ không phải màn khởi động.
 
 ### Bước 4 — trục cảm ứng
 
-Ba cờ trong [`src/board-pins.h`](src/board-pins.h) đang để y bo cũ, chưa đo.
+Ba cờ trong [`board-pins.h`](../esp32-indoor/src/board-pins.h) đang để y bo cũ, chưa đo.
 Chạm góc **trên-trái** rồi xem con trỏ chạy đâu:
 
 | Triệu chứng | Đổi cờ |
@@ -241,8 +209,7 @@ Hình đúng nhưng **lộn ngược 180°** thì đổi `TFT_ROTATION` từ 1 s
 
 ## 6. Liên quan
 
-- [`src/board-pins.h`](src/board-pins.h) — sơ đồ chân từng bo
-- [`../esp32-qrbox/`](../esp32-qrbox/) — bo QR Box cũ (chỉ còn cấu hình build)
+- [`../esp32-indoor/`](../esp32-indoor/) — **mã nguồn thật**, và bo QR Box cũ
+- [`../esp32-indoor/src/board-pins.h`](../esp32-indoor/src/board-pins.h) — sơ đồ chân hai bo
 - [`../esp32-s3-gateway/`](../esp32-s3-gateway/) — bo gỡ lỗi không màn, in mọi gói ra serial
 - [`../shared/unoq-link-protocol.h`](../shared/unoq-link-protocol.h) — khung gói UART sang UNO Q
-- [`../Interface/README.md`](../Interface/README.md) — thiết kế giao diện, đọc ngược sơ đồ chân QR Box
