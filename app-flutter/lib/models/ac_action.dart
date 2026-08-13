@@ -15,7 +15,17 @@ class AcAction {
 /// remote. Kept in ONE place so the remote tab and the learn tab stay in sync —
 /// add a button here (and to KNOWN_ACTIONS on the server) and both pick it up.
 const kAcActions = <AcAction>[
-  AcAction('FAN_SPEED', 'Tốc độ quạt', Icons.air),
+  // Các mức quạt ĐẶT THẲNG — mỗi mức một mã IR học riêng. Xem FAN_LEVELS trong
+  // services/ir_action_service.py để biết vì sao không tái dùng FAN_SPEED.
+  AcAction('FAN_20', 'Quạt 20%', Icons.air),
+  AcAction('FAN_40', 'Quạt 40%', Icons.air),
+  AcAction('FAN_60', 'Quạt 60%', Icons.air),
+  AcAction('FAN_80', 'Quạt 80%', Icons.air),
+  AcAction('FAN_100', 'Quạt 100%', Icons.air),
+  AcAction('FAN_AUTO', 'Quạt tự động', Icons.auto_mode),
+  // Nút "quạt" kiểu vòng của remote. GIỮ LẠI cho org đã học từ trước — bỏ đi là
+  // mã họ đã học thành mồ côi, bấm vào báo lỗi mà không ai hiểu vì sao.
+  AcAction('FAN_SPEED', 'Quạt (nút vòng)', Icons.loop),
   AcAction('SUPER', 'Siêu tốc', Icons.bolt),
   AcAction('SLEEP', 'Ngủ', Icons.bedtime_outlined),
   AcAction('ECO', 'Tiết kiệm', Icons.eco_outlined),

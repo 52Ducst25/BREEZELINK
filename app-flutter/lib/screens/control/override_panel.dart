@@ -10,6 +10,7 @@ import '../../theme/ac_colors.dart';
 import '../../theme/ac_shapes.dart';
 import '../../theme/ac_text.dart';
 import '../../widgets/icon_badge.dart';
+import 'fan_speed_sheet.dart';
 import 'temp_dial.dart';
 
 /// The AC remote, restyled to the BenKon look: a big circular temperature dial,
@@ -55,9 +56,12 @@ enum _SendState { idle, sending, sent, error }
 
 const _kModes = [AcMode.cool, AcMode.dry, AcMode.fan];
 
-/// Peripheral keys shown in the grid — every [kAcActions] entry EXCEPT
-/// FAN_SPEED, which has its own dedicated "Tốc độ quạt" card above.
-final _kGridActions = kAcActions.where((a) => a.wire != 'FAN_SPEED').toList();
+/// Mọi nút thuộc về thẻ "Tốc độ quạt" — không hiện trong lưới nút phụ.
+const _kFanWires = {'FAN_20', 'FAN_40', 'FAN_60', 'FAN_80', 'FAN_100', 'FAN_AUTO', 'FAN_SPEED'};
+
+/// Peripheral keys shown in the grid — every [kAcActions] entry EXCEPT the fan
+/// ones, which have their own dedicated "Tốc độ quạt" card above.
+final _kGridActions = kAcActions.where((a) => !_kFanWires.contains(a.wire)).toList();
 AcAction _act(String wire) => kAcActions.firstWhere((a) => a.wire == wire);
 
 /// Dial dùng mức này khi máy chủ chưa biết máy lạnh đang ở đâu. Chỉ là chỗ đặt
@@ -183,6 +187,35 @@ class _OverridePanelState extends State<OverridePanel> {
     _showResult(err, okMsg: 'Đã gửi ${_act(wire).label}');
   }
 
+  /// Mức quạt vừa gửi TỪ APP NÀY. null khi phiên này chưa gửi lệnh quạt nào.
+  ///
+  /// KHÔNG PHẢI trạng thái thật của máy, và không được trình bày như vậy. Lệnh
+  /// quạt là một khung hồng ngoại bắn đi một chiều — máy chủ không lưu, `AcState`
+  /// cũng không mang trường nào cho nó. Ai cầm remote thật bấm một cái là con số
+  /// ở đây sai ngay mà app không có cách nào biết. Cùng nguyên tắc đã ghi trong
+  /// models/ac_state.dart: thà nói "chưa rõ" còn hơn khẳng định một mức bịa.
+  String? _fanWire;
+
+  String _fanLabel() {
+    final w = _fanWire;
+    if (w == null) return 'Chọn mức';
+    return kFanChoices.firstWhere((c) => c.$1 == w).$2;
+  }
+
+  Future<void> _pickFan() async {
+    final picked = await showFanSpeedSheet(context, _fanWire);
+    if (picked == null || !mounted) return;
+
+    setState(() => _fanWire = picked);
+    _showSending();
+    final err = await widget.onAction(picked);
+    // Máy chủ báo chưa học mức này -> nhả nhãn về "Chọn mức". Giữ nguyên nhãn
+    // vừa bấm sẽ là nói dối: màn hình khoe 60% trong khi không có mã nào được
+    // phát đi và máy vẫn chạy y như cũ.
+    if (err != null && mounted) setState(() => _fanWire = null);
+    _showResult(err, okMsg: 'Đã đặt quạt ${_fanLabel()}');
+  }
+
   @override
   Widget build(BuildContext context) {
     final steppable = _on && _mode == AcMode.cool;
@@ -213,8 +246,8 @@ class _OverridePanelState extends State<OverridePanel> {
               child: _ControlCard(
                 icon: Icons.air,
                 title: 'Tốc độ quạt',
-                value: 'Nhấn để đổi',
-                onTap: () => _action('FAN_SPEED'),
+                value: _fanLabel(),
+                onTap: _pickFan,
               ),
             ),
           ],

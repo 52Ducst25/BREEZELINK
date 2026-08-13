@@ -146,7 +146,7 @@ Future<void> _downloadAndInstall(BuildContext context, OtaService ota, AppUpdate
 
   try {
     final dir = await getTemporaryDirectory();
-    final path = '${dir.path}/aircon-${info.latestVersionCode}.apk';
+    final path = '${dir.path}/breezelink-${info.latestVersionCode}.apk';
     if (!context.mounted) return;
 
     showDialog<void>(

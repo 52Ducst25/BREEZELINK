@@ -20,8 +20,27 @@ from app.models.ir_action_code import IrActionCode
 # and icon in the Flutter AcAction). FAN_SPEED is first for back-compat with the
 # already-shipped /comfort/fan-speed endpoint (build 6).
 FAN_SPEED = "FAN_SPEED"
+
+#  Các mức quạt ĐẶT THẲNG — mỗi mức là MỘT khung IR học riêng, y hệt cách
+#  COOL 24..28 mỗi nhiệt độ một mã.
+#
+#  VÌ SAO KHÔNG TÁI DÙNG FAN_SPEED: nút đó mô phỏng nút "quạt" trên remote, tức
+#  là NHẢY SANG MỨC KẾ TIẾP theo vòng của chính máy. Một mã duy nhất thì không
+#  có cách nào tới thẳng mức 60% — chỉ bấm nhiều lần rồi đoán, mà đoán sai vì
+#  không ai biết máy đang ở mức nào (xem chú thích "không theo dõi" bên dưới).
+#
+#  Remote điều hoà gửi TRỌN trạng thái trong mỗi khung, không gửi lệnh "tăng
+#  một nấc" — nên chỉnh remote tới đúng mức rồi học, sẽ ra một khung mã hoá
+#  đúng mức đó. Đó là lý do cách này khả thi.
+#
+#  NHÃN PHẦN TRĂM LÀ QUY ƯỚC CỦA MÌNH: remote thật thường chỉ có Low/Med/High
+#  (+Turbo/Auto), hiếm khi đủ 5 nấc. Máy nào ít nấc hơn thì org đó chỉ học được
+#  vài mức, các mức còn lại vẫn hiện nhưng máy chủ trả "chưa học" khi bấm.
+FAN_LEVELS = ("FAN_20", "FAN_40", "FAN_60", "FAN_80", "FAN_100", "FAN_AUTO")
+
 KNOWN_ACTIONS = frozenset({
-    FAN_SPEED,
+    FAN_SPEED,   # nút vòng của remote — GIỮ LẠI cho org đã học từ trước
+    *FAN_LEVELS,
     "SUPER",     # turbo / siêu tốc
     "SLEEP",     # chế độ ngủ
     "ECO",       # tiết kiệm điện
