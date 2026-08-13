@@ -121,7 +121,23 @@
   <button class="header-burger" id="acBurger" type="button" aria-label="Mở menu" aria-controls="acRail">
     <svg viewBox="0 0 24 24" width="22" height="22" class="ac-rail__ico" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
   </button>
-  <div class="header-brand">BREEZE<span class="header-brand-accent">LINK</span></div>
+  {# ĐỒNG HỒ THAY CHO CHỮ "BREEZELINK".
+     Tên thương hiệu đã có ở đầu thanh bên trái (.ac-rail__brand); in lại lần
+     thứ hai cách đó 200px chỉ chiếm một ô đắt giá mà không nói thêm gì.
+
+     GIỜ CỦA MÁY ĐANG XEM, KHÔNG PHẢI GIỜ MÁY CHỦ. Máy chủ chạy UTC, mà người
+     đọc đối chiếu con số này với đồng hồ trên tường của họ — nên nó do
+     JavaScript điền (app.js), server không tham gia.
+
+     Giá trị giữ chỗ "--:--:--" là cố ý: nó chiếm đúng bề rộng của giờ thật nên
+     lúc app.js chạy xong không có cú nhảy bố cục nào.
+
+     KHÔNG đặt aria-live: một vùng tự đọc mỗi giây sẽ nói đè lên mọi thứ khác
+     trong trình đọc màn hình. #}
+  <div class="ac-clock" id="acClock">
+    <span class="ac-clock__time" id="acClockTime">--:--:--</span>
+    <span class="ac-clock__date" id="acClockDate">--/--/----</span>
+  </div>
   <div class="header-actions">
     {# Just the picture — no gear, no bell. Clicking it opens /web/account,
        which is the only place the avatar can be changed. #}

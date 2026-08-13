@@ -25,15 +25,22 @@ VÌ SAO KHÔNG VÁ Ở FIRMWARE
 MQTT chỉ cho **một Will Message cho mỗi kết nối**. Gateway không thể đăng ký 5 di
 chúc hộ 5 slave — giới hạn giao thức, không phải thiếu sót của ai.
 
-NGƯỠNG 150 GIÂY LẤY TỪ ĐÂU
----------------------------
-``last_seen_at`` chỉ được ghi bởi ``status_handler`` — telemetry KHÔNG đụng vào.
-Với một slave còn sống, mốc đó được làm mới mỗi ``STATUS_REFRESH_MS = 60s``
-(FirmWare/esp32-indoor/src/slave-watch.h). Nên ngưỡng phải lớn hơn 60 giây, nếu
-không mọi node sẽ nhấp nháy offline giữa hai lượt làm mới.
+HAI ĐƯỜNG LÀM TƯƠI ``last_seen_at``
+------------------------------------
+1. ``status_handler``  — nhịp ``STATUS_REFRESH_MS = 60s`` ở firmware
+   (FirmWare/esp32-s3-panel/src/slave-watch.h). Áp cho MỌI node.
+2. ``telemetry_handler`` — mỗi số đo, tức 15s/node
+   (``SlaveWatch::RELAY_INTERVAL_MS``). Chỉ áp cho node CÓ số đo.
 
-150 giây = 2,5 lần nhịp đó. Đủ biên để không báo nhầm, mà vẫn phát hiện gateway
-chết trong vòng 1–2,5 phút.
+Đường 2 thêm vào sau, vì đường 1 một mình là quá mỏng: PubSubClient chỉ publish
+được QoS 0 và firmware bỏ qua giá trị trả về, nên trong cửa sổ 210 giây nhịp 60s
+chỉ cho BA cơ hội — trượt ba lần là node bị báo ngoại tuyến trong khi telemetry
+vẫn đang rơi vào Postgres đều đặn. Với đường 2 thì slave có mười bốn cơ hội.
+
+GATEWAY VẪN CHỈ CÓ ĐƯỜNG 1. Firmware sau khi tách không publish t/h của chính
+nó nữa (gửi số mượn của node góc dưới tên gateway là bịa ra một phép đo chưa
+từng xảy ra), nên nó không có telemetry để mà làm tươi. Đó là lý do ngưỡng dưới
+đây vẫn phải tính theo nhịp 60 giây, không được siết theo nhịp 15 giây.
 
 ĐỔI ``STATUS_REFRESH_MS`` Ở FIRMWARE THÌ PHẢI ĐỔI CẢ SỐ NÀY.
 """

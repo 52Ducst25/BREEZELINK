@@ -213,6 +213,58 @@ var acMorph = (function () {
 })();
 
 (function () {
+  // Đồng hồ trên thanh đầu trang (thay chỗ chữ "BREEZELINK" cũ).
+  //
+  // GIỜ CỦA MÁY ĐANG XEM. Máy chủ chạy UTC; render giờ máy chủ ra đây thì người
+  // ở Việt Nam đọc thấy lệch 7 tiếng so với đồng hồ trên tường của họ — mà đồng
+  // hồ thì chỉ có một công dụng là đối chiếu với đồng hồ khác.
+  var elTime = document.getElementById("acClockTime");
+  var elDate = document.getElementById("acClockDate");
+  if (!elTime || !elDate) return;
+
+  function p2(n) { return n < 10 ? "0" + n : "" + n; }
+
+  function paint() {
+    var d = new Date();
+    var t = p2(d.getHours()) + ":" + p2(d.getMinutes()) + ":" + p2(d.getSeconds());
+    var s = p2(d.getDate()) + "/" + p2(d.getMonth() + 1) + "/" + d.getFullYear();
+    // Chỉ ghi khi khác. Ngày chỉ đổi mỗi 24 giờ, nên gán lại mỗi giây là bắt
+    // trình duyệt tính lại bố cục 86.400 lần/ngày cho một chuỗi không đổi.
+    if (elTime.textContent !== t) elTime.textContent = t;
+    if (elDate.textContent !== s) elDate.textContent = s;
+    return d;
+  }
+
+  // KHÔNG DÙNG setInterval(1000). Hai lý do, cả hai đều nhìn thấy được:
+  //
+  //   1. TRÔI. setInterval không bù phần thời gian đã tiêu cho chính hàm gọi,
+  //      nên nhịp thực luôn hơn 1000ms một chút. Sau vài phút, thời điểm vẽ
+  //      trượt dần khỏi mốc giây thật và đồng hồ sẽ có lúc nhảy hai giây một
+  //      lần rồi lại đứng yên hai nhịp — trông như treo.
+  //   2. TAB CHẠY NỀN. Trình duyệt hãm hẹn giờ ở tab ẩn xuống còn ~1 lần/phút.
+  //
+  // Cách làm: sau mỗi lần vẽ, hẹn đúng phần còn lại tới mốc giây kế tiếp. Sai
+  // số không tích luỹ vì mỗi lần hẹn đều tính lại từ đồng hồ thật.
+  var timer = 0;
+  function tick() {
+    var d = paint();
+    // +40ms để chắc chắn đã QUA mốc giây; hẹn đúng ranh giới thì độ phân giải
+    // của hẹn giờ có thể làm ta dậy sớm 1ms và vẽ lại y hệt giây cũ.
+    timer = setTimeout(tick, 1000 - d.getMilliseconds() + 40);
+  }
+  tick();
+
+  // Quay lại tab: vẽ ngay rồi bắt nhịp lại. Không có đoạn này thì đồng hồ hiện
+  // giờ của lúc tab bị ẩn cho tới nhịp hẹn kế tiếp — sai vài chục giây, và sai
+  // một cách rất tự tin.
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden) return;
+    clearTimeout(timer);
+    tick();
+  });
+})();
+
+(function () {
   var main = document.getElementById("main");
   // LOGGED-IN SHELL ONLY (guarded by #acRail, which base.html renders only when
   // there's a user). The live feed's auto-refetch does fetch(location.href) and

@@ -213,6 +213,47 @@ html.rail-collapsed .ac-rail__top,
 html.rail-collapsed .ac-live { justify-content: center; }
 
 /* ============================================================
+   ĐỒNG HỒ TRÊN THANH ĐẦU TRANG -- thay chỗ chữ "BREEZELINK" cũ
+   (base.html). Giờ do app.js điền mỗi giây; ở đây chỉ lo hình thức.
+
+   LÀ CLASS MỚI CHỨ KHÔNG SỬA .header-brand: .header-brand là component
+   của DS, và luật ở đầu file này là không khai lại thứ DS đã ship. Đổi
+   nó ở đây sẽ đổi luôn mọi chỗ khác dùng cùng class.
+
+   `tabular-nums` LÀ BẮT BUỘC, không phải trang trí: phông tỉ lệ cho số
+   "1" hẹp hơn "8", nên một đồng hồ chạy từng giây sẽ co giãn bề rộng
+   liên tục và kéo theo cả thanh đầu trang nhấp nháy. --font-mono đã
+   đều bề rộng, cờ này là chốt chặn cho lúc phông đó chưa tải xong và
+   trình duyệt đang dùng phông thay thế.
+   ============================================================ */
+.ac-clock {
+  display: flex; flex-direction: column; gap: 2px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  /* Không cho co lại: thanh đầu trang là flex, và khi email người dùng
+     dài thì đồng hồ sẽ bị bóp méo thay vì đẩy phần kia xuống. */
+  flex: 0 0 auto;
+}
+.ac-clock__time {
+  font: var(--tech-price);
+  color: var(--text-primary);
+  letter-spacing: var(--tracking-tight);
+}
+.ac-clock__date {
+  font: var(--tech-code);
+  color: var(--text-muted);
+  letter-spacing: var(--tracking-wide);
+}
+
+/* Màn hẹp: thanh đầu trang còn phải chứa nút menu, ảnh đại diện, email và
+   nút đăng xuất. Bỏ phần ngày (thông tin ít khẩn hơn giờ) và thu nhỏ giờ,
+   thay vì để cả cụm xuống dòng. */
+@media (max-width: 640px) {
+  .ac-clock__date { display: none; }
+  .ac-clock__time { font: var(--tech-label-lg); }
+}
+
+/* ============================================================
    AVATAR -- the DS ships .header-user-avatar (a chamfered accent tile
    holding initials); .ac-avatar extends that idea so the same element can
    hold a real uploaded picture instead, at two sizes. Used by the small

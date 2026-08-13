@@ -17,6 +17,7 @@ from app.comfort.comfort_engine import ComfortInputs, compute
 from app.comfort.ir_snap import NoIrCodesError
 from app.core.database import AsyncSessionLocal
 from app.core.tenant import set_current_org
+from app.models.base import utcnow
 from app.models.enums import AcMode, NodeType
 from app.services import (
     ir_code_service,
@@ -127,6 +128,33 @@ async def handle_telemetry(client, topic: ParsedTopic, payload: dict) -> None:
         if mac is not None and device.mac != mac:
             device.mac = mac
             logger.info("Device %s reported MAC %012X", topic.device_uuid, mac)
+
+        # SỐ ĐO CŨNG LÀ BẰNG CHỨNG "VỪA NGHE THẤY" — và là bằng chứng mạnh hơn
+        # nhịp tim `status`: một hàng telemetry chứng minh gateway đã nghe được
+        # node qua ESP-NOW **và** đẩy được lên broker.
+        #
+        # TRƯỚC ĐÂY CHỈ `status_handler` GHI CỘT NÀY, và đó là chỗ hở: PubSubClient
+        # chỉ publish được QoS 0 (bắn rồi quên, broker không ACK) và firmware bỏ
+        # qua giá trị trả về của mqtt.publish(). Trong cửa sổ PRESENCE_TTL=210s,
+        # nhịp `status` 60s cho đúng BA cơ hội — trượt ba lần là web báo ngoại
+        # tuyến trong khi telemetry vẫn đang rơi vào Postgres đều đặn. Đúng
+        # triệu chứng "node vẫn gửi mà web báo offline".
+        #
+        # Telemetry 15s cho MƯỜI BỐN cơ hội trong cùng cửa sổ đó.
+        #
+        # VÌ SAO KHÔNG LÀM NODE CHẾT TRÔNG NHƯ SỐNG — hai câu hỏi đã kiểm:
+        #   - Gói retained? Không. Cái bẫy buộc status_handler phải có cờ
+        #     `retained` là broker dội lại bản "online" cuối của node đã rút điện
+        #     từ hôm trước; topic telemetry không retained nên không có chuyện đó.
+        #   - Gateway publish hộ slave, vậy slave chết có bị làm tươi nhầm? Không:
+        #     gateway chỉ chuyển tiếp khi THẬT SỰ nghe được gói ESP-NOW
+        #     (onSlavePacket -> dueForRelay trong esp32-s3-panel/src/main.cpp).
+        #
+        # CHỈ ĐỘNG `last_seen_at`, KHÔNG ĐỘNG CỜ `status`. Bật cờ ở đây sẽ đua với
+        # Last Will đến muộn (broker chờ hết keepalive ~22s mới bắn), tức là đổi
+        # một lỗi biết rõ lấy một lỗi phụ thuộc thứ tự. Gateway — node duy nhất
+        # không publish telemetry — vẫn dựa vào nhịp `status` 60s như cũ.
+        device.last_seen_at = utcnow()
 
         await telemetry_service.persist_telemetry(
             session,
