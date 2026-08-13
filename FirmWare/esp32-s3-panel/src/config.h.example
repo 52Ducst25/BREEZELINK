@@ -74,39 +74,15 @@
 #define TELEMETRY_MS   15000UL
 
 // ----------------------------------------------------------------------------
-//  Bus I2C dùng chung: cảm ứng màn (0x38/0x5D/0x15) + DS1307 (0x68) + SHT3x (0x44).
-//  ĐỪNG nâng lên 400kHz — DS1307 chỉ chịu 100kHz, xem Interface/README.md §2.1.
+//  SƠ ĐỒ CHÂN KHÔNG NẰM Ở ĐÂY NỮA — xem board-pins.h
 // ----------------------------------------------------------------------------
-#define I2C_SCL_PIN        4
-#define I2C_SDA_PIN        16
-#define TOUCH_RST_PIN      25
-#define TOUCH_INT_PIN      33
-
-//  Đèn nền qua Q5 (BSS138 hạ áp phía mát): mức CAO = sáng, PWM được.
-#define LCD_BACKLIGHT_PIN  27
-#define BUZZER_PIN         13
-
-//  OE của TXS0104 (bộ dịch mức cho UART_1 ra cổng P3).
+//  Chân (I2C, cảm ứng, đèn nền, còi, xoay màn) đã chuyển sang board-pins.h vì
+//  chúng thuộc về BO, còn file này thuộc về HỘ. Firmware panel nay chạy trên hai
+//  bo khác nhau (QR Box Advance và bo 2.8" ESP32-S3) dùng CHUNG một hàng
+//  `devices` trên web — tức chung file này, nhưng chân thì khác hoàn toàn.
 //
-//  DHT22 (GPIO2 = UART_1_RX) ĐI QUA IC NÀY — nên chân này là điều kiện sống còn
-//  của phép đo nhiệt/ẩm. OE thấp thì ngõ ra treo lơ lửng và cảm biến ra NaN mãi.
-//  (IR thì không: cả phát GPIO5 lẫn thu GPIO17 đều nối 3.3V thẳng.)
-//
-//  PHẢI đặt trong setup() chứ không kéo bằng trở ngoài: GPIO12 = MTDI, HIGH
-//  lúc reset thì ROM chọn mức flash 1.8V và bo không boot. Trên bo này R7 10k
-//  kéo GPIO12 XUỐNG GND — đúng chuẩn (đã đối chiếu schematic).
-#define EN_LEVEL_SHIFT_PIN 12
+//  Đổi bo: khai cờ -D BOARD_* trong platformio.ini, KHÔNG sửa file này.
+#include "board-pins.h"
 
-//  1 hoặc 3 = nằm ngang 320x240 (panel gốc là 240x320 dọc, xoay bằng phần mềm).
-//  Bo này dùng 1 — đã đo trên bo thật: 3 cho ra hình ĐÚNG NHƯNG LỘN NGƯỢC 180 độ.
-#define TFT_ROTATION       1
-
-//  Xoay/lật toạ độ cảm ứng về hệ của TFT. Mỗi lô module dán tấm cảm ứng lệch
-//  trục khác nhau và schematic không nói gì — chạm thử rồi chỉnh ba cờ này.
-#define TOUCH_SWAP_XY      1
-#define TOUCH_INVERT_X     0
-#define TOUCH_INVERT_Y     1
-
-//  KHÔNG CÒN TZ_INFO: nút "ĐỒNG BỘ GIỜ" và cả đường NTP đã bỏ. Node chỉ ĐỌC
-//  DS1307 để hiện giờ trên thanh trạng thái, không đặt giờ nữa — đặt bằng công
-//  cụ khác, chip có pin nuôi riêng nên một lần là giữ.
+//  KHÔNG CÒN TZ_INFO ở đây: múi giờ là hằng số trong ui/board-io.cpp (sản phẩm
+//  bán trong nước, thêm một ô cho người lắp điền là thêm một chỗ điền sai).

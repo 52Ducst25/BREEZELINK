@@ -26,7 +26,7 @@ node ngoài trời, đường lên cloud, và đường sang UNO Q cùng lúc.
 
 Thư mục này chỉ có **hai file**: `platformio.ini` và `src/ui-headless.cpp`.
 
-Nó biên dịch thẳng `../esp32-indoor/src/`, bỏ đúng thư mục `ui/`, và thay bằng
+Nó biên dịch thẳng `../esp32-s3-panel/src/`, bỏ đúng thư mục `ui/`, và thay bằng
 5 hàm in ra serial. Bề mặt giao diện vừa đủ nhỏ để làm được việc đó — `ui.h` chỉ
 khai `begin` · `publish` · `pollCommand` · `reply` · `logCommand`, và không file
 nào ngoài `ui/` chạm tới LVGL hay TFT_eSPI.
@@ -40,13 +40,13 @@ nào biết bản nào mới là bản thật.
 Nhờ vậy bo S3 là **người đóng thế thật**: nó chạy chính xác đường mã mà QR Box
 sẽ chạy. Sửa xong mạch nạp thì nạp lại bo kia, không phải chuyển đổi gì.
 
-**Đổi lại:** sửa `../esp32-indoor/src/*.cpp` là ảnh hưởng cả hai env. Thêm một
+**Đổi lại:** sửa `../esp32-s3-panel/src/*.cpp` là ảnh hưởng cả hai env. Thêm một
 hàm `Ui::` mới thì build ở đây đứt lúc link (`undefined reference to Ui::...`) —
 cách sửa là thêm bản rỗng vào `src/ui-headless.cpp`.
 
 ## Cấu hình
 
-**Không có `config.h` riêng.** Dùng chung `../esp32-indoor/src/config.h`.
+**Không có `config.h` riêng.** Dùng chung `../esp32-s3-panel/src/config.h`.
 
 Cố ý: bo này đóng thế node indoor nên phải dùng **đúng `DEVICE_UUID` và đúng
 token MQTT** của hàng devices đó trên web. Hai bo không bao giờ chạy cùng lúc.
@@ -118,13 +118,13 @@ dây hoặc thiếu trở kéo. Khác hẳn node mất điện, và cách xử l
 - **Không thấy log nào** → cắm nhầm cổng UART (xem mục Nạp).
 - **Lặp `rst:0x3` vô hạn, không in nổi dòng nào** → sai bảng phân vùng hoặc sai
   `board_upload.offset_address`. Cả hai khoá phải đi cùng nhau; lý do đầy đủ
-  trong `../esp32-indoor/platformio.ini`.
+  trong `../esp32-qrbox/platformio.ini`.
 - **`CHUA CO SO DO TRONG NHA` mãi** → không góc nào gửi được. Kiểm `WIFI_SSID`
   của node góc phòng có **giống hệt** của gateway không: ESP-NOW bắt buộc cùng
   kênh, mà node góc suy ra kênh bằng cách quét đúng chuỗi tên đó. Lệch một ký tự
   là gói bay vào khoảng không và **không một dòng log nào ở đâu báo lỗi** —
   broadcast không có ACK.
-- **`undefined reference to Ui::...`** → `../esp32-indoor/src/ui/ui.h` vừa có hàm
+- **`undefined reference to Ui::...`** → `../esp32-s3-panel/src/ui/ui.h` vừa có hàm
   mới. Thêm bản rỗng vào `src/ui-headless.cpp`.
 
 ## Giới hạn đã biết

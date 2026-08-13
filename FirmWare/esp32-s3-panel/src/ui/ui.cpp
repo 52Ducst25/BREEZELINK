@@ -47,9 +47,18 @@ TFT_eSPI tft;
 //  người dùng phải nhìn 3 giây màn kiểm tra kỹ thuật trước khi thấy giao diện —
 //  trên một bảng điều khiển treo tường đó là màn hình lỗi, không phải màn khởi
 //  động. Bật lại (1) nếu đổi lô màn hoặc nghi ngờ màu.
+//
+//  CẢ HAI ĐỀU ĐÈ ĐƯỢC TỪ build_flags (-D DISPLAY_SELFTEST=1). Hai bo panel dùng
+//  chung file này nhưng KHÁC CHIP MÀN — QR Box là ST7789 (TFT_eSPI gửi INVON vô
+//  điều kiện), bo S3 là ILI9341 (không gửi). Nên trị số chốt được cho bo này
+//  chưa chắc đúng cho bo kia, và sửa thẳng vào đây là sửa cho cả hai.
 // ============================================================================
+#ifndef DISPLAY_INVERT
 #define DISPLAY_INVERT   0
+#endif
+#ifndef DISPLAY_SELFTEST
 #define DISPLAY_SELFTEST 0
+#endif
 
 /// Hiện 3 ô màu có ghi tên. Vẽ THẲNG bằng TFT_eSPI, không qua LVGL — nên nó
 /// kiểm tra được cả đường dẫn phần cứng lẫn chiều đảo màu, độc lập với mọi thứ
@@ -397,10 +406,15 @@ void uiTaskFn(void *) {
 bool begin() {
   // OE của TXS0104 (bộ dịch mức ra cổng P3). PHẢI đặt Ở ĐÂY, trong setup(), chứ
   // KHÔNG kéo bằng trở ngoài: GPIO12 = MTDI, nếu nó HIGH lúc reset thì ROM chọn
-  // mức flash 1.8V và bo không boot. Trên bo này R7 10k kéo GPIO12 xuống GND —
+  // mức flash 1.8V và bo không boot. Trên bo QR Box R7 10k kéo GPIO12 xuống GND —
   // đúng chuẩn, nên chỉ cần kéo lên sau khi đã boot xong.
-  pinMode(EN_LEVEL_SHIFT_PIN, OUTPUT);
-  digitalWrite(EN_LEVEL_SHIFT_PIN, HIGH);
+  //
+  // Bo panel S3 không có IC dịch mức nào (EN_LEVEL_SHIFT_PIN = PIN_NONE): header
+  // ra thẳng 3.3V. Bỏ qua chứ không đặt bừa — 255 không phải chân hợp lệ.
+  if (EN_LEVEL_SHIFT_PIN != PIN_NONE) {
+    pinMode(EN_LEVEL_SHIFT_PIN, OUTPUT);
+    digitalWrite(EN_LEVEL_SHIFT_PIN, HIGH);
+  }
 
   modelMx = xSemaphoreCreateMutex();
   cmdQ    = xQueueCreate(4, sizeof(Command));

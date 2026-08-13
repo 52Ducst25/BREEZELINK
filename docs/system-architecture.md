@@ -41,7 +41,7 @@ Quy tắc này tồn tại ở **ba nơi** và cả ba **phải cho cùng một 
 | Nơi | File |
 |---|---|
 | Backend (nguồn chân lý) | `src/app/comfort/room_aggregate.py` |
-| Gateway (màn tại chỗ + gói gửi UNO Q) | `FirmWare/esp32-indoor/src/room-registry.cpp` |
+| Gateway (màn tại chỗ + gói gửi UNO Q) | `FirmWare/esp32-s3-panel/src/room-registry.cpp` |
 | Edge AI | import lại chính file backend, qua `edge-ai/edge_ai/comfort_bridge.py` |
 
 Bản C++ là bản sao **bắt buộc phải có** (firmware không import được Python) — đổi luật ở

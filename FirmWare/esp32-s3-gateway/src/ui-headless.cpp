@@ -1,7 +1,7 @@
 // ============================================================================
 //  BreezeLink — bản cài đặt KHÔNG MÀN HÌNH của giao diện gateway.
 // ----------------------------------------------------------------------------
-//  Bo ESP32-S3 không có màn cảm ứng của QR Box, nhưng ../esp32-indoor/src/main.cpp
+//  Bo ESP32-S3 không có màn cảm ứng của QR Box, nhưng ../esp32-s3-panel/src/main.cpp
 //  được biên dịch nguyên vẹn (xem platformio.ini) nên nó vẫn gọi đủ 5 hàm của
 //  namespace Ui. File này là bản thay thế: thay vì vẽ lên màn 2.8", nó in ra
 //  serial.

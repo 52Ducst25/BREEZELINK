@@ -1,12 +1,12 @@
 # Giao diện màn hình cho node TRONG NHÀ — bo `QR_Box_Advance_TouchScreen`
 
 Thiết kế màn hình cảm ứng cho node indoor, thay bo ESP32 DevKit V1 trần hiện tại
-(`../esp32-indoor/`). Trước bản này node indoor **không có hiển thị tại chỗ**:
+(`../esp32-qrbox/`). Trước bản này node indoor **không có hiển thị tại chỗ**:
 mọi thứ chỉ nhìn được qua app/web, nên khi mất mạng người dùng đứng cạnh máy mà
 không biết node còn sống hay không.
 
 Tài liệu này là **nguồn sự thật của phần giao diện**. Code nằm ở
-`../esp32-indoor/src/ui/`, build bằng env `qrbox-touch`.
+`../esp32-s3-panel/src/ui/`, build bằng env `qrbox-touch`.
 
 - `Lopaka/` — bản phác Lopaka của một dự án khác, giữ lại làm **tham chiếu API**
   (`tft.drawRoundRect`, `tft.setFreeFont`, `tft.pushImage`…). Không dùng trực
@@ -104,7 +104,7 @@ nghi vấn đa lõi và nhiễu đường truyền, chỉ còn khả năng sai d
 
 ---
 
-## 3. Ba xung đột với firmware `esp32-indoor` hiện tại
+## 3. Ba xung đột với firmware `esp32-qrbox` hiện tại
 
 Firmware indoor cần 3 chân mà bo này đã dùng hết:
 
@@ -636,8 +636,11 @@ Khuyến nghị: **topic mới**. Đây là việc backend, nằm ngoài phạm 
 ## 9. Build
 
 ```bash
-cd FirmWare/esp32-indoor
+# Mã nguồn (kể cả config.h) nay ở FirmWare/esp32-s3-panel/src/ — thư mục
+# esp32-qrbox/ chỉ còn cấu hình build cho bo QR Box.
+cd FirmWare/esp32-s3-panel
 cp src/config.h.example src/config.h      # điền như README §2
+cd ../esp32-qrbox
 pio run -e qrbox-touch -t upload --upload-port COMx   # USB-TTL cắm vào P3
 pio device monitor -p COMx -b 115200
 ```

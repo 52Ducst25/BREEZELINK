@@ -65,7 +65,7 @@ Dự án gồm năm phần chạy chung một backend:
 
 ### Bảng điều khiển tại chỗ (gateway có màn)
 
-Màn cảm ứng 2.8" trên bản gateway QR Box, dùng được cả khi mất mạng: nhiệt/ẩm trong nhà
+Màn cảm ứng 2.8" trên panel treo tường, dùng được cả khi mất mạng: nhiệt/ẩm trong nhà
 (trung vị các góc) và ngoài trời, chế độ hiện tại, huy hiệu **TỰ ĐỘNG**/**GHI ĐÈ**, trang
 chẩn đoán 8 dòng (WiFi, MQTT, nhiệt độ **từng góc**, số mã IR, phiên bản firmware), danh
 sách mã IR đã học và nhật ký 8 lệnh gần nhất.
@@ -330,12 +330,16 @@ AirConditioner/
 │   └── alembic/           #   Migration CSDL
 ├── app-flutter/           # App khách hàng (Flutter)
 ├── FirmWare/              # Firmware ESP32 (PlatformIO)
-│   ├── esp32-indoor/      #   GATEWAY có màn (QR Box): IR + LVGL + ESP-NOW + UART
-│   │   ├── src/ui/        #     Giao diện LVGL (chạy trên lõi 0)
-│   │   ├── src/ir-*        #     Phát/học IR + kho mã trong NVS
-│   │   ├── src/unoq-link.* #     Đường UART tới Arduino UNO Q
-│   │   └── src/room-registry.*  # Bảng 4 góc + trung vị
-│   ├── esp32-s3-gateway/  #   GATEWAY không màn (ESP32-S3): dùng lại nguồn esp32-indoor
+│   ├── esp32-s3-panel/    #   PANEL TREO TƯỜNG CHÍNH THỨC (bo 2.8" ESP32-S3)
+│   │   ├── src/           #     MÃ NGUỒN PANEL — bản DUY NHẤT, cả 3 env dùng chung
+│   │   │   ├── ui/        #       Giao diện LVGL (chạy trên lõi 0)
+│   │   │   ├── ir-*        #       Phát/học IR + kho mã trong NVS
+│   │   │   ├── unoq-link.* #       Đường UART tới Arduino UNO Q
+│   │   │   ├── board-pins.h #      Sơ đồ chân THEO BO, chọn bằng cờ -D BOARD_*
+│   │   │   └── room-registry.*  #  Bảng 4 góc + trung vị
+│   │   └── tools/         #     Sinh font VLW / ảnh LVGL, đọc serial
+│   ├── esp32-qrbox/      #   Bo QR Box cũ — chỉ cấu hình build, trỏ về src/ ở trên
+│   ├── esp32-s3-gateway/  #   Bo GỠ LỖI không màn (ESP32-S3): in mọi gói ra serial
 │   ├── esp32-room/        #   4 NODE GÓC PHÒNG (env ss1..ss4, mỗi node một UUID)
 │   ├── esp32-outdoor/     #   Node NGOÀI TRỜI (+ bản WiFi dự phòng)
 │   ├── shared/            #   Khuôn gói ESP-NOW + radio slave + giao thức UART với UNO Q
@@ -402,9 +406,10 @@ chỉ lộ ra lúc đóng gói.
 trị ở web quản trị → *Khách hàng* → mở node → **"Nạp firmware"**.
 
 ```bash
-# GATEWAY — chọn MỘT trong hai bo:
-cd FirmWare/esp32-indoor      && pio run -e qrbox-touch   -t upload   # bản có màn
-cd FirmWare/esp32-s3-gateway  && pio run -e esp32s3-gateway -t upload # bản không màn
+# GATEWAY / PANEL — cùng một mã nguồn (FirmWare/esp32-s3-panel/src/), chọn MỘT bo:
+cd FirmWare/esp32-s3-panel    && pio run -e esp32s3-panel   -t upload # CHÍNH THỨC (có màn)
+cd FirmWare/esp32-qrbox      && pio run -e qrbox-touch     -t upload # bo QR Box cũ
+cd FirmWare/esp32-s3-gateway  && pio run -e esp32s3-gateway -t upload # bo gỡ lỗi, không màn
 
 # 4 NODE GÓC PHÒNG — nodes.ini khai từng bo, nạp lần lượt
 cd FirmWare/esp32-room
@@ -435,7 +440,7 @@ Sáu điều dễ mất thời gian nhất nếu không biết trước:
 pio device monitor -p COMx -b 115200    # có RESET bo -> xem được log khởi động
 
 # KHÔNG reset -> giữ nguyên trạng thái đã tích luỹ, dùng khi đang truy lỗi
-python FirmWare/esp32-indoor/tools/read_serial.py COMx 30
+python FirmWare/esp32-s3-panel/tools/read_serial.py COMx 30
 ```
 
 ### 4. Edge AI trên Arduino UNO Q

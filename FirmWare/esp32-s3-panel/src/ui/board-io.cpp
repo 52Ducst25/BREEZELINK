@@ -68,6 +68,10 @@ uint8_t backlightGet() { return blPercent; }
 // ---------------------------------------------------------------------------
 void buzzerBegin(uint8_t pin) {
   buzzPin = pin;
+  // Bo không có còi (BUZZER_PIN = PIN_NONE) -> KHÔNG gọi pinMode. 255 không phải
+  // chân hợp lệ; Arduino-ESP32 tra bảng chân bằng chỉ số đó và đọc ra ngoài mảng.
+  // beep()/silence()/buzzerTick() đều đã kiểm 255 sẵn, nên phần còn lại tự im.
+  if (buzzPin == 255) return;
   pinMode(buzzPin, OUTPUT);
   digitalWrite(buzzPin, LOW);
 }
@@ -118,6 +122,7 @@ void beep(uint16_t ms, uint16_t freq) {
 }
 
 void buzzerTick() {
+  if (buzzPin == 255) return;
   if (buzzUntil == 0 || millis() < buzzUntil) return;
   buzzUntil = 0;
   pwmWrite(buzzPin, LEDC_BUZZ, 0);
@@ -131,12 +136,14 @@ void buzzerTick() {
 }
 
 // ---------------------------------------------------------------------------
-//  DS1307
+//  Đồng hồ — DS1307 nếu bo có, còn không thì đồng hồ hệ thống (xem board-pins.h)
 // ---------------------------------------------------------------------------
+#if HAS_RTC_DS1307
 static const uint8_t DS1307_ADDR = 0x68;
 
 static uint8_t bcd2dec(uint8_t b) { return (uint8_t)((b >> 4) * 10 + (b & 0x0F)); }
 static uint8_t dec2bcd(uint8_t d) { return (uint8_t)(((d / 10) << 4) | (d % 10)); }
+#endif
 
 /// Múi giờ Việt Nam, UTC+7, KHÔNG có giờ mùa hè.
 ///
@@ -150,6 +157,36 @@ static uint8_t dec2bcd(uint8_t d) { return (uint8_t)(((d / 10) << 4) | (d % 10))
 /// theo kiểu im lặng.
 static const char *const TZ_INFO = "ICT-7";
 
+#if !HAS_RTC_DS1307
+// ---------------------------------------------------------------------------
+//  BO KHÔNG CÓ RTC (bo panel ESP32-S3) — giờ lấy từ đồng hồ hệ thống
+// ---------------------------------------------------------------------------
+//  SNTP (ntpBegin) tự cập nhật đồng hồ hệ thống trong tác vụ riêng của lwIP, nên
+//  ở đây chỉ việc đọc ra. Không có chip nào để ghi xuống -> clockWrite() là hàm
+//  rỗng, và ntpPoll() ở dưới vẫn chạy đúng vì nó kiểm tm_year TRƯỚC khi ghi.
+//
+//  KHÁC BIỆT PHẢI BIẾT so với bo có DS1307: mất điện là MẤT GIỜ. Không có pin
+//  nuôi, nên sau mỗi lần khởi động thanh trạng thái hiện "--:--" cho tới khi có
+//  mạng và SNTP trả lời. Đổi lại, không bao giờ gặp ca tệ hơn của DS1307 — một
+//  giờ SAI được pin nuôi giữ vĩnh viễn mà bit CH vẫn báo hợp lệ.
+bool clockRead(Clock &out) {
+  struct tm tm_now;
+  // timeout 0: không chờ. Cùng lý do như ntpPoll — hàm này chạy trong tác vụ UI.
+  if (!getLocalTime(&tm_now, 0)) return false;
+  // < năm 2020 = SNTP chưa trả lời, đây mới là giá trị mặc định lúc khởi động.
+  if (tm_now.tm_year < 120) return false;
+  out.hh = (uint8_t)tm_now.tm_hour;
+  out.mm = (uint8_t)tm_now.tm_min;
+  out.ss = (uint8_t)tm_now.tm_sec;
+  return true;
+}
+
+bool clockWrite(uint8_t hh, uint8_t mm, uint8_t ss) {
+  (void)hh; (void)mm; (void)ss;
+  return true;   // không có chip để ghi; SNTP đã đặt đồng hồ hệ thống rồi
+}
+
+#else
 bool clockRead(Clock &out) {
   Wire.beginTransmission(DS1307_ADDR);
   Wire.write((uint8_t)0x00);
@@ -176,6 +213,7 @@ bool clockWrite(uint8_t hh, uint8_t mm, uint8_t ss) {
   Wire.write(dec2bcd(hh) & 0x3F);      // ép chế độ 24h (xoá bit 6)
   return Wire.endTransmission() == 0;
 }
+#endif  // HAS_RTC_DS1307
 
 void ntpBegin() {
   // SNTP của lwIP chạy trong tác vụ riêng của nó và tự cập nhật đồng hồ hệ
