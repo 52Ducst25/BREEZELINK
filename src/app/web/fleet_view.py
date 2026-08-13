@@ -20,9 +20,10 @@ from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.device import Device, DeviceStatus
+from app.models.device import Device
 from app.models.organization import Organization
 from app.services import (
+    device_presence,
     device_service,
     organization_service,
     redis_room_state_service,
@@ -41,7 +42,10 @@ class FleetNode:
 
     @property
     def online(self) -> bool:
-        return self.device.status == DeviceStatus.online
+        # KHÔNG đọc thẳng device.status: node phòng/ngoài trời không có phiên MQTT
+        # riêng, gateway publish trạng thái hộ chúng — gateway chết là cờ của
+        # chúng đóng băng ở "online" vĩnh viễn. Xem services/device_presence.py.
+        return device_presence.is_online(self.device)
 
 
 @dataclass

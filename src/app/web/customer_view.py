@@ -16,11 +16,11 @@ from dataclasses import dataclass
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.device import Device, DeviceStatus
+from app.models.device import Device
 from app.models.invite_code import InviteCode
 from app.models.organization import Organization
 from app.models.user import User, UserRole
-from app.services import organization_service
+from app.services import device_presence, organization_service
 
 
 @dataclass
@@ -45,7 +45,10 @@ async def _device_counts(session: AsyncSession) -> dict[uuid.UUID, tuple[int, in
         select(
             Device.org_id,
             func.count(Device.id),
-            func.count(Device.id).filter(Device.status == DeviceStatus.online),
+            # Cùng luật với fleet_view (device_presence.is_online), viết bằng SQL.
+            # Đếm theo cờ status thôi là sai: gateway chết thì cờ của các slave
+            # đóng băng ở "online" mãi — xem services/device_presence.py.
+            func.count(Device.id).filter(device_presence.online_filter()),
         ).group_by(Device.org_id)
     )
     return {org_id: (total, online) for org_id, total, online in rows.all()}
