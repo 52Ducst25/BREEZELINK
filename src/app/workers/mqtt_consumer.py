@@ -109,6 +109,20 @@ async def _dispatch(client: aiomqtt.Client, message: aiomqtt.Message) -> None:
         return
 
     try:
-        await handler(client, parsed, payload)
+        #  `status` NHẬN THÊM CỜ RETAIN, các kind khác thì không.
+        #
+        #  Bản tin `status` được publish RETAIN, nên mỗi lần worker nối lại là
+        #  broker phát lại bản cuối cùng của MỌI node — kể cả node đã chết từ
+        #  hôm trước. Không phân biệt được thì `last_seen_at` bị đặt lại thành
+        #  "bây giờ" bởi một bản tin KHÔNG MANG THỜI GIAN, và ngưỡng tươi trong
+        #  device_presence mất hiệu lực đúng vào lúc cần nhất.
+        #
+        #  Chỉ truyền cho status thay vì đổi chữ ký mọi handler: ba handler kia
+        #  không có khái niệm này, thêm tham số chúng không dùng chỉ mời người
+        #  sau hiểu nhầm là có ý nghĩa.
+        if parsed.kind == _STATUS_TOPIC_KIND:
+            await handler(client, parsed, payload, retained=bool(message.retain))
+        else:
+            await handler(client, parsed, payload)
     except Exception:  # noqa: BLE001 — never crash the consume loop (design §5 risk)
         logger.exception("Handler failed for topic=%s", topic_str)

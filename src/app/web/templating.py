@@ -12,6 +12,8 @@ from pathlib import Path
 from fastapi import Request
 from fastapi.templating import Jinja2Templates
 
+from app.services import device_presence
+
 TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 
 def _asset_version() -> str:
@@ -214,6 +216,13 @@ templates.env.filters["node_type"] = _node_type_label
 templates.env.filters["datetime"] = _format_datetime
 templates.env.filters["ago"] = _format_ago
 templates.env.filters["online"] = _is_online
+#  Bộ lọc RIÊNG cho THIẾT BỊ — đừng dùng "online" ở trên cho node.
+#
+#  Hai thứ khác nhau: "online" nhận một MỐC THỜI GIAN (lần đăng nhập cuối của
+#  người dùng), còn cái này nhận cả ĐỐI TƯỢNG Device vì luật của thiết bị cần
+#  cả cờ status lẫn độ tươi. Trộn hai cái là một trong hai chỗ sẽ im lặng cho
+#  kết quả sai — xem services/device_presence.py.
+templates.env.filters["device_online"] = device_presence.is_online
 templates.env.filters["initials"] = _initials
 templates.env.filters["mac"] = _format_mac
 templates.env.filters["num"] = _format_number

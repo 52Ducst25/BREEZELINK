@@ -40,13 +40,47 @@ chết trong vòng 1–2,5 phút.
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import and_
+from sqlalchemy import and_, func
 
 from app.models.device import Device, DeviceStatus
 
-#  Bao lâu không nghe thấy thì coi như mất kết nối. Xem docstring đầu file trước
-#  khi đổi — con số này gắn với STATUS_REFRESH_MS của firmware.
-PRESENCE_TTL = timedelta(seconds=150)
+#  Bao lâu không nghe thấy thì coi như mất kết nối.
+#
+#  210s = 3,5 lần nhịp 60s. Bản đầu đặt 150s (2,5 lần) và ĐÓ LÀ CON SỐ QUÁ SÁT:
+#  `publishSlaveStatus` ở firmware BỎ QUA giá trị trả về của `mqtt.publish`
+#  (main.cpp:190), nên một lần publish hỏng lặng lẽ đã ăn 60s, hai lần là 120s,
+#  cộng jitter gói là vượt 150s — node sống bị nhấp nháy offline đúng lúc mạng
+#  chập chờn, tức đúng lúc người ta nhìn vào bảng điều khiển.
+#
+#  Đổi STATUS_REFRESH_MS ở firmware thì phải đổi số này.
+PRESENCE_TTL = timedelta(seconds=210)
+
+
+def is_fresh(last_seen_at: datetime | None) -> bool:
+    """Mốc nghe-lần-cuối này còn trong ngưỡng không.
+
+    Tách riêng khỏi [is_online] để DTO (schemas/device.py) dùng lại được — nó chỉ
+    có mốc thời gian trong tay, không có đối tượng Device.
+    """
+    if last_seen_at is None:
+        return False
+    #  CHẶN datetime NGÂY THƠ (naive) — nổ to còn hơn sai âm thầm.
+    #
+    #  `astimezone()` KHÔNG ném lỗi với datetime naive: từ Python 3.6 nó lặng lẽ
+    #  coi đó là giờ HỆ THỐNG. Máy chủ chạy giờ VN thì một mốc UTC naive sẽ được
+    #  đọc thành UTC+7 — tức "tương lai 7 tiếng" — nên `is_fresh` luôn trả True
+    #  và một node chết sẽ hiện trực tuyến MÃI MÃI, không một dòng log nào báo.
+    #
+    #  Hôm nay mọi mốc đều aware (cột là `DateTime(timezone=True)`, người ghi duy
+    #  nhất là utcnow()). Chốt chặn này là để ngày ai đó đưa vào một chuỗi ISO
+    #  không offset, hoặc chạy test trên SQLite, thì hỏng ngay chỗ đó.
+    if last_seen_at.tzinfo is None:
+        raise ValueError(
+            "last_seen_at phải là datetime có múi giờ; nhận được naive "
+            f"{last_seen_at!r} — xem chú thích trong device_presence.is_fresh"
+        )
+    seen = last_seen_at.astimezone(timezone.utc)
+    return datetime.now(timezone.utc) - seen < PRESENCE_TTL
 
 
 def is_online(device: Device) -> bool:
@@ -54,12 +88,7 @@ def is_online(device: Device) -> bool:
 
     Hai điều kiện, cả hai đều cần: cờ nói online, VÀ lần nghe cuối còn tươi.
     """
-    if device.status != DeviceStatus.online:
-        return False
-    if device.last_seen_at is None:
-        return False
-    seen = device.last_seen_at.astimezone(timezone.utc)
-    return datetime.now(timezone.utc) - seen < PRESENCE_TTL
+    return device.status == DeviceStatus.online and is_fresh(device.last_seen_at)
 
 
 def online_filter():
@@ -69,8 +98,18 @@ def online_filter():
     tách chúng ra hai file là lệch nhau ngay lần sửa đầu tiên — triệu chứng sẽ là
     trang tổng quan đếm 4/6 trong khi danh sách bên dưới hiện 2 node trực tuyến.
     """
+    #  MỐC THỜI GIAN TÍNH BẰNG ĐỒNG HỒ POSTGRES (`func.now()`), không phải đồng
+    #  hồ tiến trình Python. Hai lý do, cả hai đều thật:
+    #
+    #  1. `last_seen_at` do Postgres lưu; so nó với đồng hồ của app chỉ đúng khi
+    #     hai bên cùng máy — hiện đúng do tình cờ, không do thiết kế.
+    #  2. `datetime.now()` bị tính lúc DỰNG biểu thức. Hàm này gọi mới mỗi lần
+    #     nên hôm nay không sao, nhưng chỉ cần ai đó viết
+    #     `ONLINE = online_filter()` ở mức module là mốc đóng băng lúc import:
+    #     mọi node online vĩnh viễn, rồi 210s sau offline vĩnh viễn, không có gì
+    #     báo lỗi. `func.now()` không có cửa cho tai nạn đó.
     return and_(
         Device.status == DeviceStatus.online,
         Device.last_seen_at.is_not(None),
-        Device.last_seen_at > datetime.now(timezone.utc) - PRESENCE_TTL,
+        Device.last_seen_at > func.now() - PRESENCE_TTL,
     )

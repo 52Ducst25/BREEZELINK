@@ -728,6 +728,29 @@ static void serviceNetwork() {
     return;
   }
 
+  // --- Nhịp "gateway còn sống" ---------------------------------------------
+  //  TRƯỚC ĐÂY `status` CHỈ GỬI MỘT LẦN, trong mqttTryConnect(). Backend nay coi
+  //  một node là trực tuyến khi `last_seen_at` còn tươi (services/device_presence.py),
+  //  mà cột đó CHỈ được ghi khi có bản tin trên topic `status`. Nên một gateway
+  //  chạy hoàn hảo vẫn bị báo ngoại tuyến sau PRESENCE_TTL — đã dính thật: bo
+  //  chạy 9 phút, WiFi và MQTT đều nối, mà web hiện "Ngoại tuyến".
+  //
+  //  Gateway PHẢI TỰ NÓI VỀ MÌNH chứ không suy ra từ telemetry của slave: suy
+  //  gián tiếp sẽ biến quan hệ hiện diện thành vòng tròn (slave sống nhờ gateway
+  //  publish hộ, gateway lại sống nhờ slave gửi về), và khi ESP-NOW chết hẳn thì
+  //  gateway khoẻ mạnh vẫn bị báo offline.
+  //
+  //  DÙNG CHUNG STATUS_REFRESH_MS với slave để MỘT hằng số chi phối ngưỡng bên
+  //  backend — đổi nhịp ở đây thì phải đổi PRESENCE_TTL, và chú thích ở cả hai
+  //  đầu đều trỏ về nhau.
+  //
+  //  Phép trừ không dấu nên millis() tràn vẫn đúng — cùng khuôn với slave-watch.cpp.
+  static uint32_t lastOwnStatusMs = 0;
+  if (now - lastOwnStatusMs >= SlaveWatch::STATUS_REFRESH_MS) {
+    lastOwnStatusMs = now;
+    mqtt.publish(tStatus.c_str(), "online", true);
+  }
+
   mqtt.loop();
 }
 
