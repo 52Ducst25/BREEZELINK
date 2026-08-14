@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, get_mqtt_publisher
+from app.comfort.comfort_constants import AC_TEMP_MAX, AC_TEMP_MIN
 from app.core.exceptions import AppException, NotFoundError
 from app.models.enums import AcMode
 from app.models.user import User
@@ -68,11 +69,16 @@ async def set_override(
     # would 422 a power-OFF (or DRY/FAN) that merely carries a stale/out-of-range
     # setpoint, so the AC could never be turned off from a client whose dial is
     # not itself clamped to the real bounds (e.g. a member with no owner config).
-    if data.mode == AcMode.COOL and not (
-        float(cfg["clamp_min"]) <= data.setpoint <= float(cfg["clamp_max"])
-    ):
+    #
+    # GIAO của knob và DẢI PHẦN CỨNG (16..30), không phải riêng knob. Schema đã
+    # chặn không cho đặt clamp_max ngoài dải kể từ nay, nhưng một hàng `configs`
+    # ghi TRƯỚC luật đó vẫn có thể mang 32 — và ở đây thì nó cho qua một setpoint
+    # mà không remote nào có mã, tức là lệnh đi tới panel rồi chết lặng.
+    lo = max(float(cfg["clamp_min"]), AC_TEMP_MIN)
+    hi = min(float(cfg["clamp_max"]), AC_TEMP_MAX)
+    if data.mode == AcMode.COOL and not (lo <= data.setpoint <= hi):
         raise AppException(
-            f"setpoint must be within [{cfg['clamp_min']}, {cfg['clamp_max']}]",
+            f"setpoint must be within [{lo}, {hi}]",
             status_code=422,
         )
 

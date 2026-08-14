@@ -91,8 +91,28 @@ class _OverridePanelState extends State<OverridePanel> {
   DateTime? _touchedAt;
 
   bool get _on => _mode != AcMode.off;
-  int get _min => widget.bounds?.clampMin.round() ?? 16;
-  int get _max => widget.bounds?.clampMax.round() ?? 32;
+
+  /// Dải dial = GIAO của knob máy chủ và dải THẬT của máy lạnh (16..30).
+  ///
+  /// 16..30 là thuộc tính phần cứng, không phải mặc định đoán bừa: remote điều
+  /// hoà chỉ có ngần ấy mức nên chỉ ngần ấy mức có mã IR để học, và panel treo
+  /// tường mã hoá đúng dải đó thành 15 bit (`Ui::Model::coolMask`). Bản trước
+  /// lấy thẳng `clampMax` và rơi về **32** khi thiếu bounds — thành viên không
+  /// đọc được `/configs` (chỉ owner mới đọc) rơi vào đúng nhánh đó, kéo dial tới
+  /// 32, và lệnh đi hết đường tới panel rồi chết lặng vì không có mã nào cho
+  /// mức ấy. Xem `AC_TEMP_MIN/MAX` trong `comfort/comfort_constants.py`.
+  static const _kAcTempMin = 16;
+  static const _kAcTempMax = 30;
+
+  int get _min {
+    final b = widget.bounds?.clampMin.round();
+    return b == null || b < _kAcTempMin ? _kAcTempMin : b;
+  }
+
+  int get _max {
+    final b = widget.bounds?.clampMax.round();
+    return b == null || b > _kAcTempMax ? _kAcTempMax : b;
+  }
 
   bool get _editing =>
       _touchedAt != null && DateTime.now().difference(_touchedAt!) < _kEditLock;

@@ -10,6 +10,26 @@ site-tunable knobs (design §1.2 note).
 
 from dataclasses import dataclass
 
+# ---------------------------------------------------------------------------
+#  DẢI NHIỆT ĐỘ CỦA MÁY LẠNH — 16..30 °C, KHÔNG PHẢI MỘT KNOB
+# ---------------------------------------------------------------------------
+#  Đây là thuộc tính của PHẦN CỨNG, không phải tham số tinh chỉnh được: remote
+#  điều hoà chỉ có ngần này mức, nên chỉ ngần này mức có mã IR để mà học. Panel
+#  treo tường mã hoá đúng dải này thành 15 bit (`Ui::Model::coolMask`, bit i =
+#  COOL 16+i) và lớp phủ "MÃ IR ĐÃ HỌC" dựng đúng 15 hàng COOL + DRY/FAN/OFF.
+#
+#  `clamp_min`/`clamp_max` là knob, nhưng chúng phải nằm TRONG dải này. Đặt
+#  clamp_max = 32 thì hỏng theo kiểu im lặng, và đó là ca đã thật sự tồn tại:
+#  app cho kéo dial tới 32, `/comfort/override` nhận vì nó chỉ đối chiếu với
+#  clamp_max, rồi panel không có bit nào cho 31/32 nên nút hiện "chưa học mã" —
+#  trong khi hộ đó đã học đủ mọi mức máy lạnh thật sự có.
+#
+#  ĐỂ Ở ĐÂY chứ không ở setpoint_calculator.py: file đó giữ hằng số KHOA HỌC
+#  (hồi quy ASHRAE, điểm gãy độ ẩm), còn hai số này là giới hạn của cái máy.
+#  Và để cạnh clamp_min/clamp_max vì chúng tồn tại để chặn đúng hai trường đó.
+AC_TEMP_MIN = 16.0
+AC_TEMP_MAX = 30.0
+
 
 @dataclass(frozen=True)
 class ComfortConfig:

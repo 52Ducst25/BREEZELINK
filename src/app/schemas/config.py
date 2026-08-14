@@ -10,6 +10,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.comfort.comfort_constants import AC_TEMP_MAX, AC_TEMP_MIN
+
 
 class ConfigUpdate(BaseModel):
     """Partial update — every field optional; only provided ones change."""
@@ -19,8 +21,16 @@ class ConfigUpdate(BaseModel):
     dwell_sec: int | None = Field(default=None, ge=0)
     dry_rh: float | None = Field(default=None, ge=0, le=100)
     humid_slope: float | None = Field(default=None, ge=0)
-    clamp_min: float | None = Field(default=None, ge=-10, le=50)
-    clamp_max: float | None = Field(default=None, ge=-10, le=50)
+    # KẸP TRONG DẢI CỦA MÁY LẠNH (16..30), không phải [-10, 50] như trước.
+    #
+    # Dải cũ rộng tới mức nó không chặn được gì có thật: clamp_max = 32 vẫn qua,
+    # và hỏng ở mãi đầu kia của hệ — panel không có bit mã IR nào cho 31/32 nên
+    # nút hiện "chưa học mã" ở một hộ đã học đủ. Xem AC_TEMP_MIN/MAX.
+    #
+    # Cả API `/configs` lẫn form web quản trị đều đi qua đây (customer_routes
+    # dựng ConfigUpdate rồi mới gọi service), nên một chỗ này là đủ.
+    clamp_min: float | None = Field(default=None, ge=AC_TEMP_MIN, le=AC_TEMP_MAX)
+    clamp_max: float | None = Field(default=None, ge=AC_TEMP_MIN, le=AC_TEMP_MAX)
     override_hours: int | None = Field(default=None, gt=0)
     night_start: int | None = Field(default=None, ge=0, le=23)
     night_end: int | None = Field(default=None, ge=0, le=23)

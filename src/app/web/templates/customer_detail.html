@@ -273,13 +273,18 @@
   <div class="form-row">
     <div class="form-group">
       <label class="form-label" for="clamp_min">Nhiệt độ mục tiêu thấp nhất (°C)</label>
-      <input class="input" id="clamp_min" type="number" name="clamp_min" step="0.1" value="{{ cfg.clamp_min|field }}" required>
+      <input class="input" id="clamp_min" type="number" name="clamp_min" step="0.1" min="16" max="30" value="{{ cfg.clamp_min|field }}" required>
+      <span class="form-help">Máy lạnh chỉ nhận 16–30 °C — ngoài dải đó không có mã IR nào để học.</span>
     </div>
     <div class="form-group">
       <label class="form-label" for="clamp_max">Nhiệt độ mục tiêu cao nhất (°C)</label>
-      <input class="input" id="clamp_max" type="number" name="clamp_max" step="0.1" value="{{ cfg.clamp_max|field }}" required>
+      <input class="input" id="clamp_max" type="number" name="clamp_max" step="0.1" min="16" max="30" value="{{ cfg.clamp_max|field }}" required>
+      <span class="form-help">Trên 28,7 °C thì vòng tự động không bao giờ chạm tới (RP-884 kẹp ở đó); chỉ ghi đè thủ công dùng được khoảng đó.</span>
     </div>
   </div>
+  {# `min`/`max` ở đây chỉ là phản hồi sớm cho người nhập — thuộc tính HTML thì bỏ
+     qua được, nên luật THẬT nằm ở ConfigUpdate (schemas/config.py). Đổi số thì
+     đổi AC_TEMP_MIN/MAX trong comfort/comfort_constants.py cùng lúc. #}
 
   <h3 class="ac-form-group-title">Lịch đêm</h3>
   <div class="form-row">
