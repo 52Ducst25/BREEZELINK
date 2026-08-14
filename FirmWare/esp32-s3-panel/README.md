@@ -123,6 +123,12 @@ strapping thả nổi là thứ không nên có.
 đó. Bo có loa I2S nên tiếng bíp vẫn khả thi sau này, chỉ là phải phát mẫu PCM qua I2S
 chứ không PWM một chân.
 
+> Vì vậy **hàng `ÂM THANH` trong màn Cài đặt đã gỡ hẳn**. Một công tắc bật/tắt cho
+> phần cứng không tồn tại là kiểu điều khiển tệ nhất: bấm được, đổi màu, và không
+> làm gì cả — người dùng sẽ đi tìm lỗi ở loa. Đường phát tiếng
+> (`Theme::setPressSound` → `BoardIo::beep`) thì GIỮ NGUYÊN: `beep()` tự im khi
+> chân = 255, còn bo QR Box dùng chung mã nguồn này thì vẫn có còi thật.
+
 **Mất RTC** nên mất điện là mất giờ: thanh trạng thái hiện `--:--` vài giây tới khi
 SNTP trả lời. Đổi lại thoát được ca tệ hơn của DS1307 — pin nuôi giữ một giờ **sai**
 vĩnh viễn mà `clockRead()` vẫn khẳng định hợp lệ, đúng ca đã gặp trên bo cũ.
@@ -190,6 +196,31 @@ có tác dụng.
 
 Hình đúng nhưng **lộn ngược 180°** thì đổi `TFT_ROTATION` từ 1 sang 3.
 
+### Ba thứ TFT_eSPI bắt trả giá trên ESP32-S3 — đã chốt trên bo thật (14/08/2026)
+
+Cả ba đều đã nằm sẵn trong `platformio.ini`; ghi lại đây vì **cả ba đều hỏng theo
+kiểu không nói ra nguyên nhân**, và hai cái đầu làm bo lặp khởi động vô hạn.
+
+| Cờ | Vì sao bắt buộc |
+|---|---|
+| `-D USE_FSPI_PORT` | Thiếu nó, `Processors/TFT_eSPI_ESP32_S3.c` lấy **tham chiếu** tới `SPI` toàn cục (`SPIClass& spi = SPI`) thay vì tự dựng bus. `spi.begin()` không cấp được bus, `_spi` vẫn NULL, và lời gọi `beginTransaction()` đầu tiên ghi vào `0x10`. Sập ngay trong `tft.init()`. FSPI chứ không HSPI: FSPI mới có IOMUX cho IO10..13, giữ được 40 MHz. |
+| `-D TFT_USE_DMA=0` | `dma_end_callback()` của thư viện ghi vào `SPI_DMA_CONF_REG(spi_host)`, thanh ghi này **không ánh xạ như trên ESP32 cổ điển**. Sập trong NGẮT ở lần truyền DMA đầu tiên (`EXCVADDR: 0x30`). `initDMA()` vẫn trả **true**, nên không thể phát hiện bằng giá trị trả về — phải chặn từ cấu hình. |
+| `-D DISPLAY_INVERT=1` | **Ngược với bo QR Box.** TFT_eSPI gửi `INVON` vô điều kiện cho ST7789 nhưng không gửi cho ILI9341V, nên cùng một trị số cho hai kết quả trái ngược. |
+
+Hai crash đầu rất dễ chẩn nhầm vì log **dừng ở một chỗ trông hoàn toàn bình
+thường**: cái thứ nhất ngay sau `Cam ung: OK`, cái thứ hai ngay sau
+`Bo dem ve: 2 x 48 dong ...` — tức là sau khi màn đã init xong. Nhìn log thì
+giống hết RAM hoặc hỏng cấu hình LVGL; nó không phải cả hai. Giải mã backtrace là
+đường nhanh nhất:
+
+```bash
+~/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-addr2line \
+    -pfiaC -e .pio/build/esp32s3-panel/firmware.elf 0x42016ea8 0x42016f81 ...
+```
+
+Cái giá của `TFT_USE_DMA=0`: mỗi lượt flush do CPU đẩy (`pushColors`) thay vì DMA.
+Chấp nhận được — nhịp vẽ 200 ms và vùng bẩn thường nhỏ hơn nhiều một màn hình.
+
 ---
 
 ## 5. Sự cố hay gặp
@@ -200,7 +231,10 @@ Hình đúng nhưng **lộn ngược 180°** thì đổi `TFT_ROTATION` từ 1 s
 | Lặp `rst:0x3 (SW_RESET)`, không log | Khai flash lớn hơn thật, hoặc thiếu `board_upload.offset_address` |
 | Màn tối, log vẫn chạy | Thiếu `-D BOARD_S3_PANEL=1` → biên dịch nhầm chân bo QR Box |
 | `fillScreen` đúng màu, chữ thì nhiễu/xé | Sai chip màn (ILI9341 ↔ ST7789) |
-| Toàn bộ giao diện âm bản | `DISPLAY_INVERT` ngược |
+| Lặp khởi động ngay sau `Cam ung: OK` | Thiếu `-D USE_FSPI_PORT` — xem §4 |
+| Lặp khởi động ngay sau `Bo dem ve: ...` | Thiếu `-D TFT_USE_DMA=0` — xem §4 |
+| Toàn bộ giao diện âm bản (ô TRẮNG ra ĐEN) | `DISPLAY_INVERT` ngược |
+| Ô TRẮNG vẫn trắng nhưng xanh dương ra đỏ/cam | Đảo thứ tự R↔B, **không** phải đảo màu → `-D TFT_RGB_ORDER=TFT_RGB` |
 | Chạm lệch trục | §4 bước 4 |
 | UNO Q không nhận gói | TX-TX (chưa đấu chéo), hoặc thiếu GND chung |
 | Máy lạnh không nhúc nhích, log vẫn "da phat" | Chưa hàn LED IR, hoặc module phát thiếu transistor |

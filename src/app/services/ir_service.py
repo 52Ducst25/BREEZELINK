@@ -81,12 +81,41 @@ async def push_all_codes(
     two in step: the node has the code the moment it processes the message, and
     a lost message leaves the cache claiming a code the node lacks — which the
     ``need_raw`` path already repairs.
+
+    STANDALONE ACTION CODES GO DOWN TOO, and that is not a nicety. The panel now
+    blasts fan levels and drives the humidifier BY ITSELF, straight from NVS —
+    no round trip to the server, so it keeps working with the internet down.
+    That only holds if the node actually has those frames, and there is no other
+    way for it to get them: action codes carry no ``ir_code_id`` (see
+    ``publish_ir_action``), so the ``need_raw`` repair path cannot ask for one.
+    Leaving them out means a household that learned every fan level in the app
+    still has a dead fan card on the wall panel after one ``erase_flash``.
     """
-    from app.services import redis_ir_cache  # cục bộ: tránh vòng import ở tầng module
+    from app.services import ir_action_service, redis_ir_cache  # cục bộ: tránh vòng import
 
     codes = await list_codes(session, uuid.UUID(org_id))
     topic = mqtt_naming.topic(org_id, device_uuid, "cmd")
     sent = 0
+
+    # Nút rời đi TRƯỚC, có chủ đích: chúng ít (tối đa ~19) và là thứ panel không
+    # có đường nào khác để xin lại, còn ma trận (mode, temp) thì lệnh kế tiếp tự
+    # sửa được qua `need_raw`. Hàng đợi MQTT có thể đứt giữa chừng, nên gửi thứ
+    # không cứu được bằng cách khác lên đầu.
+    for action in sorted(await ir_action_service.list_actions(session, uuid.UUID(org_id))):
+        raw = await ir_action_service.get_action_raw(session, org_id, action)
+        if not raw:
+            continue
+        payload = {
+            "store_only": True,
+            # KHÔNG có "ir_code_id": bảng ir_action_codes khoá theo (org, action),
+            # không sinh UUID. Node lưu thẳng dưới bí danh chính là tên nút.
+            "action": action,
+            "ir_raw": list(raw),
+            "reason": "resync",
+        }
+        await client.publish(topic, json.dumps(payload), qos=1, retain=False)
+        sent += 1
+
     for code in codes:
         # Mã chỉ có `state_bytes` (đường thư viện theo hãng) chưa dùng tới ở
         # firmware hiện tại — nó chỉ biết phát mảng thời gian thô.

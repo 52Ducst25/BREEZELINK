@@ -60,18 +60,30 @@ Dự án gồm năm phần chạy chung một backend:
 - **Kích hoạt bằng mã** — nhập mã được cấp khi mua máy để tạo tài khoản.
 - **Bảng điều khiển** — nhiệt độ đặt hiện tại + chuỗi tính toán (có thể kiểm chứng).
 - **Điều khiển** — chọn chế độ, ghi đè thủ công, học mã hồng ngoại (IR learn).
+- **Nút rời của remote** — tốc độ quạt, ngủ, tiết kiệm, đảo gió… và **hai nút máy tạo
+  độ ẩm** (`HUMID_ON`/`HUMID_OFF`). App là nơi **dạy** mọi mã này; panel là nơi dùng
+  chúng để tự chạy.
 - **Số đo trực tiếp** — trong/ngoài nhà, biểu đồ lịch sử.
 - **Tự cập nhật OTA** — báo có bản mới, tải và cài trực tiếp.
 
 ### Bảng điều khiển tại chỗ (gateway có màn)
 
-Màn cảm ứng 2.8" trên panel treo tường, dùng được cả khi mất mạng: nhiệt/ẩm trong nhà
-(trung vị các góc) và ngoài trời, chế độ hiện tại, huy hiệu **TỰ ĐỘNG**/**GHI ĐÈ**, trang
-chẩn đoán 8 dòng (WiFi, MQTT, nhiệt độ **từng góc**, số mã IR, phiên bản firmware), danh
-sách mã IR đã học và nhật ký 8 lệnh gần nhất.
+Màn cảm ứng 2.8" trên panel treo tường, **năm trang**, dùng được cả khi mất mạng:
+nhiệt/ẩm trong nhà (trung vị các góc) và ngoài trời, điều khiển máy lạnh, **máy tạo
+độ ẩm**, trang chẩn đoán 8 dòng (WiFi, MQTT, nhiệt độ **từng góc**, số mã IR, phiên
+bản firmware), danh sách mã IR đã học và nhật ký 8 lệnh gần nhất.
 
 Trang góc phòng phân biệt `—` (góc mất kết nối) với `??` (góc còn sống nhưng cảm biến
 hỏng) — hai ca dẫn tới hai việc phải làm khác hẳn nhau.
+
+**Đang chạy tự động thì nút chỉnh bị khoá.** `±` và bốn nút chế độ mờ đi cho tới khi
+bấm **THỦ CÔNG**. Trước đây chúng vẫn bấm được nhưng không gửi đi đâu, và vòng lặp
+comfort kế tiếp kéo con số về — người dùng thấy máy nghe lời mình vài giây rồi tự ý
+đổi lại, và đọc ra là bo hỏng.
+
+**Tốc độ quạt và máy tạo độ ẩm chạy bằng mã học từ app.** Cả hai là *nút rời* trong
+bảng `ir_action_codes`: app dạy mã một lần, panel giữ một bản trong NVS rồi bắn
+thẳng — nên chúng vẫn hoạt động khi mất mạng, khác app vốn phải đi qua máy chủ.
 
 ### Trang theo dõi Edge AI (cổng 7000)
 
@@ -211,6 +223,12 @@ không phải một con số cố định:
 
 Tham số ở bước 1, 3, 4, 5 tinh chỉnh được cho **từng khách**. Hằng số hồi quy (0.31 / 17.8)
 là khoa học cố định, không chỉnh.
+
+`clamp_min`/`clamp_max` chỉnh được, **nhưng phải nằm trong 16–30 °C** — đó là dải của
+chính cái máy lạnh, không phải một sở thích: remote chỉ có ngần ấy mức nên chỉ ngần ấy
+mức có mã IR để học, và panel mã hoá đúng dải đó thành 15 bit. Luật nằm ở
+`AC_TEMP_MIN`/`AC_TEMP_MAX` (`src/app/comfort/comfort_constants.py`) và được áp ở cả
+API `/configs` lẫn form web quản trị.
 
 Chống dao động ba lớp: EMA đầu vào, `deadband` (vùng trễ quanh nhiệt độ đặt), và
 `dwell_sec` (thời gian giữ chế độ tối thiểu) bảo vệ block máy nén khỏi bật/tắt liên tục.

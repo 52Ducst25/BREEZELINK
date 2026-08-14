@@ -156,6 +156,21 @@ void publish(const Model &m) {
                   m.learnLabel, (unsigned long)m.learnRemainSec, IR_RX_PIN);
   }
 
+  // --- Máy tạo độ ẩm ----------------------------------------------------------
+  // Bo này KHÔNG có màn nên đây là chỗ duy nhất nhìn được vòng điều khiển máy tạo
+  // ẩm đang nghĩ gì.
+  //
+  // CỐ Ý KHÔNG IN `m.humidNote`. Trường đó là câu giải thích dành cho MÀN HÌNH
+  // nên nó có dấu tiếng Việt, mà log serial trong dự án này thì không (xem đầu
+  // file). Lý do vẫn đọc được: HumidifierControl in một dòng "[am] ..." không dấu
+  // mỗi lần nó thật sự bật/tắt máy, và đó mới là lúc cần biết vì sao.
+  Serial.printf("  May tao am %s", m.humidOn ? "DANG CHAY" : "da tat");
+  if (!isnan(m.humidRh)) Serial.printf(" (do am muot %.0f%%)", m.humidRh);
+  Serial.printf("  ·  %s\n", m.humidOverride ? "GHI DE" : "tu dong");
+  if (!m.humidHasOn) {
+    Serial.println("    CHUA HOC MA HUMID_ON — vao app de hoc, khong thi no khong bao gio chay");
+  }
+
   Serial.printf("  UNO Q %s (da nhan %lu)  |  ESP-NOW nhan %lu, rot %lu  |  ma IR trong NVS: %u\n",
                 onOff(m.unoqUp, "da noi", "chua noi"), (unsigned long)m.unoqRx,
                 (unsigned long)m.espnowRx, (unsigned long)m.espnowDrop, m.irCodeCount);

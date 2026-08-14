@@ -20,15 +20,19 @@ namespace Screens {
 /// Người dùng bấm GUI / TU DONG. ui.cpp đẩy tiếp vào hàng đợi cho loop().
 using CommandFn = void (*)(const Ui::Command &cmd);
 
-/// Người dùng bấm trong màn CAI DAT. ui.cpp thi hành (đèn nền, còi, NTP, reset)
-/// vì đó là phần cứng thuộc quyền tác vụ UI.
+/// Người dùng bấm trong màn CAI DAT. ui.cpp thi hành (đèn nền, NTP, reset) vì đó
+/// là phần cứng thuộc quyền tác vụ UI.
 ///
-/// BUZZER_ON và BUZZER_OFF là HAI mục riêng, không phải một BUZZER_TOGGLE.
-/// Trước đây cả nút BẬT lẫn nút TẮT cùng gửi TOGGLE, nên hành vi phụ thuộc vào
-/// trạng thái hiện tại chứ không phải vào nút vừa bấm: bấm TẮT hai lần là còi
-/// bật lại, bấm BẬT lúc đang bật là thành tắt. Nút có nhãn khẳng định ("BẬT")
-/// thì phải LUÔN cho ra trạng thái đó, bấm bao nhiêu lần cũng vậy.
-enum Setting : uint8_t { BRIGHT_DOWN, BRIGHT_UP, BUZZER_ON, BUZZER_OFF, REBOOT };
+/// KHÔNG CÒN BUZZER_ON / BUZZER_OFF. Hàng "ÂM THANH" đã bị gỡ khỏi màn Cài đặt:
+/// bo panel ESP32-S3 KHÔNG CÓ CÒI (board-pins.h: `BUZZER_PIN = PIN_NONE` — bốn
+/// chân tự do đã đi hết cho IR và UART sang UNO Q). Một công tắc bật/tắt cho phần
+/// cứng không tồn tại là kiểu điều khiển tệ nhất: nó bấm được, nó đổi màu, và nó
+/// không làm gì cả — người dùng sẽ đi tìm lỗi ở loa.
+///
+/// Tiếng bấm thì GIỮ NGUYÊN đường dây (Theme::setPressSound -> BoardIo::beep):
+/// beep() tự im khi chân = 255, còn bo QR Box cũ dùng chung mã nguồn này thì vẫn
+/// có còi thật.
+enum Setting : uint8_t { BRIGHT_DOWN, BRIGHT_UP, REBOOT };
 using SettingFn = void (*)(Setting s);
 
 /// Dựng toàn bộ. Gọi một lần trong Ui::begin(), sau Theme::init().
@@ -54,7 +58,6 @@ void setClock(bool valid, uint8_t hh, uint8_t mm, uint8_t ss);
 
 /// Phản ánh trạng thái phần cứng lên màn CAI DAT.
 void setBrightness(uint8_t percent);
-void setBuzzer(bool on);
 
 /// Thêm một dòng vào nhật ký lệnh (mới nhất lên đầu, giữ 8 dòng gần nhất).
 ///

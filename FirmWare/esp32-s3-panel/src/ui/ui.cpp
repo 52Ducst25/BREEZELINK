@@ -42,22 +42,55 @@ TFT_eSPI tft;
 //  lên khi nghi ngờ màu; nhìn 3 giây là biết ngay chiều đảo nào đúng, thay vì
 //  nạp lại firmware nhiều lần để đoán.
 //
-//  ĐANG TẮT — chiều đảo màu đã chốt (DISPLAY_INVERT=0, kiểm chứng trên bo thật:
-//  3 ô ra đúng XANH DUONG / TRANG / XANH LA). Giữ bật thì mỗi lần bật nguồn
-//  người dùng phải nhìn 3 giây màn kiểm tra kỹ thuật trước khi thấy giao diện —
-//  trên một bảng điều khiển treo tường đó là màn hình lỗi, không phải màn khởi
-//  động. Bật lại (1) nếu đổi lô màn hoặc nghi ngờ màu.
+//  CHIỀU ĐẢO MÀU KHÁC NHAU GIỮA HAI BO — ĐỪNG CHỐT MỘT SỐ Ở ĐÂY:
 //
-//  CẢ HAI ĐỀU ĐÈ ĐƯỢC TỪ build_flags (-D DISPLAY_SELFTEST=1). Hai bo panel dùng
-//  chung file này nhưng KHÁC CHIP MÀN — QR Box là ST7789 (TFT_eSPI gửi INVON vô
-//  điều kiện), bo S3 là ILI9341 (không gửi). Nên trị số chốt được cho bo này
-//  chưa chắc đúng cho bo kia, và sửa thẳng vào đây là sửa cho cả hai.
+//      bo QR Box (ST7789)   -> DISPLAY_INVERT = 0   (mặc định dưới đây)
+//      bo S3 panel (ILI9341V) -> DISPLAY_INVERT = 1 (đo trên bo thật: để 0 thì
+//                                MỌI MÀU ra âm bản; xem -D trong platformio.ini)
+//
+//  Lý do hai bo ngược nhau: TFT_eSPI gửi lệnh INVON VÔ ĐIỀU KIỆN cho ST7789
+//  nhưng KHÔNG gửi cho ILI9341, nên cùng một trị số cho ra hai kết quả trái
+//  ngược. Vì vậy trị số thật nằm ở build_flags CỦA TỪNG ENV, còn đây chỉ là mặc
+//  định — sửa thẳng con số dưới đây là sửa cho CẢ HAI bo, tức là chữa bo này thì
+//  hỏng bo kia.
+//
+//  CẢ HAI CỜ ĐỀU ĐÈ ĐƯỢC TỪ build_flags (-D DISPLAY_INVERT=1, -D DISPLAY_SELFTEST=1).
 // ============================================================================
 #ifndef DISPLAY_INVERT
 #define DISPLAY_INVERT   0
 #endif
 #ifndef DISPLAY_SELFTEST
 #define DISPLAY_SELFTEST 0
+#endif
+
+// ============================================================================
+//  TFT_USE_DMA — TẮT TRÊN ESP32-S3, VÀ ĐÓ LÀ LỖI CỦA THƯ VIỆN
+// ----------------------------------------------------------------------------
+//  Đặt 1 thì dùng pushPixelsDMA (CPU rảnh trong lúc đẩy pixel); 0 thì
+//  pushColors thường — vẫn đúng, chỉ tốn CPU hơn. Xem flushCb().
+//
+//  Bo S3 PHẢI để 0. TFT_eSPI 2.5.43 có callback kết thúc DMA hỏng trên S3
+//  (Processors/TFT_eSPI_ESP32_S3.c:828):
+//
+//      void IRAM_ATTR dma_end_callback(spi_transaction_t *spi_tx) {
+//        WRITE_PERI_REG(SPI_DMA_CONF_REG(spi_host), 0);
+//      }
+//
+//  SPI_DMA_CONF_REG không ánh xạ như trên ESP32 cổ điển, nên địa chỉ tính ra là
+//  rác và lần truyền DMA ĐẦU TIÊN làm bo chết trong NGẮT:
+//
+//      Guru Meditation Error: Core 1 panic'ed (StoreProhibited)
+//      EXCVADDR: 0x00000030
+//      dma_end_callback() ... spi_post_trans() ... spi_intr()
+//
+//  Triệu chứng dễ chẩn nhầm nhất: bo lặp khởi động NGAY SAU dòng "Bo dem ve:
+//  ..." — tức là sau khi màn đã init xong và log trông hoàn toàn bình thường,
+//  nên rất giống hết RAM hoặc hỏng cấu hình LVGL. Nó không phải cả hai.
+//
+//  initDMA() KHÔNG báo lỗi gì: nó trả true, và chỉ tới lần truyền đầu mới sập.
+//  Vì vậy phải chặn Ở ĐÂY chứ không trông vào giá trị trả về của nó.
+#ifndef TFT_USE_DMA
+#define TFT_USE_DMA 1
 #endif
 
 /// Hiện 3 ô màu có ghi tên. Vẽ THẲNG bằng TFT_eSPI, không qua LVGL — nên nó
@@ -274,13 +307,6 @@ void onSetting(Screens::Setting s) {
       blSet(gBrightness);
       Screens::setBrightness(gBrightness);
       break;
-    case Screens::BUZZER_ON:
-    case Screens::BUZZER_OFF: {
-      const bool on = (s == Screens::BUZZER_ON);
-      BoardIo::buzzerEnable(on);
-      Screens::setBuzzer(on);
-      break;
-    }
     case Screens::REBOOT:
       Screens::toast("KHỞI ĐỘNG LẠI...");
       lv_timer_handler();             // kịp vẽ dòng thông báo trước khi tắt
@@ -461,9 +487,13 @@ bool begin() {
   gBlNow = 100;   // đồng bộ lại để blTick() không kéo ngược xuống rồi lên
 #endif
   tft.setSwapBytes(false);   // cặp đôi với LV_COLOR_16_SWAP=1 — xem flushCb()
-  gDma = tft.initDMA();
+  // Không gọi initDMA() khi đã tắt: trên S3 nó trả true rồi mới sập ở lần truyền
+  // đầu tiên (xem khối TFT_USE_DMA ở đầu file), nên hỏi nó là vô ích và có hại.
+  gDma = TFT_USE_DMA ? tft.initDMA() : false;
   Serial.printf("Man hinh: DMA %s\n",
-                gDma ? "BAT" : "TAT (chay pushColors thuong — van dung, chi cham hon)");
+                gDma ? "BAT"
+                     : (TFT_USE_DMA ? "TAT (initDMA that bai)"
+                                    : "TAT theo cau hinh (pushColors thuong — van dung, chi cham hon)"));
 
   // Cấp bộ đệm vẽ từ RAM TRONG có DMA. Hỏng thì hạ dần số dòng chứ không bỏ
   // cuộc: màn hình ít dòng đệm vẫn chạy, chỉ kém mượt — còn không có đệm thì
@@ -509,7 +539,9 @@ bool begin() {
   Theme::setPressSound([] { BoardIo::beep(); });   // mọi nút kêu bíp, kể cả tab
   Screens::build(onCommand, onSetting);
   Screens::setBrightness(gBrightness);
-  Screens::setBuzzer(BoardIo::buzzerEnabled());
+  // KHÔNG CÒN Screens::setBuzzer(): hàng ÂM THANH đã gỡ khỏi màn Cài đặt (bo
+  // không có còi). BoardIo::buzzerEnabled() vẫn mặc định true, nên tiếng bấm vẫn
+  // kêu trên bo QR Box cũ vốn CÓ còi và dùng chung mã nguồn này.
 
   // Vẽ khung đầu RỒI mới bật đèn nền — tránh chớp một màn rác lúc khởi động.
   lv_timer_handler();

@@ -3,6 +3,27 @@
 Đo độ ẩm phòng, thấy khô thì bật máy xông tinh dầu bằng hồng ngoại, đủ ẩm thì tắt.
 Bấm nút bật/tắt tay lúc nào cũng được. **Không nối mạng** — chạy độc lập hoàn toàn.
 
+> ## ⚠ BO NÀY LÀ BÀN THỬ, KHÔNG PHẢI SẢN PHẨM LẮP CHO KHÁCH
+>
+> Nó tồn tại để **thử logic** trên phần cứng rời trước khi nạp lên bo thật. Bản
+> **chạy thật** của cùng thuật toán này nằm trong panel treo tường:
+> [`../esp32-s3-panel/src/humidifier-control.cpp`](../esp32-s3-panel/src/humidifier-control.cpp)
+> — cùng sáu nhánh ưu tiên, cùng ba lớp chống dao động, cùng mọi hằng số.
+>
+> **Đừng lắp cả hai vào một phòng.** Hai bộ điều khiển bắn cùng một loại mã IR vào
+> cùng một cái máy sẽ đánh nhau, và với remote bập bênh thì mỗi lần "đánh nhau" là
+> một lần đảo trạng thái mà cả hai bên đều tưởng mình vừa đặt đúng.
+>
+> Ba chỗ bản panel làm khác, và cả ba đều do panel có thứ bo này không có:
+>
+> | | bo này | panel |
+> |---|---|---|
+> | Nguồn độ ẩm | DHT gắn ngay trên bo | **trung vị 4 node góc phòng** |
+> | Học mã IR | nút BOOT giữ 3 giây | **từ app** (`HUMID_ON`/`HUMID_OFF`) |
+> | Remote bập bênh | cờ biên dịch `DIFFUSER_IR_TOGGLE` | **tự nhận ra** (ô TẮT rỗng) |
+>
+> **Sửa lỗi logic ở một bên thì ngó sang bên kia.**
+
 | | |
 |---|---|
 | Chip | **ESP32-D0WD-V3** rev 3.1 (ESP32 cổ điển, Xtensa 2 lõi) — *đã đọc bằng esptool, không phải suy đoán* |

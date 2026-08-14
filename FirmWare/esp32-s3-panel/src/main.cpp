@@ -49,6 +49,10 @@
 #include "unoq-link.h"
 #include "ir-io.h"
 #include "ir-store.h"
+#include "ac-actions.h"
+// Máy tạo độ ẩm: panel tự lái bằng độ ẩm trung vị của 4 góc phòng, KHÔNG qua máy
+// chủ. Backend chỉ tham gia ở khâu học mã (hai nút rời HUMID_ON/HUMID_OFF).
+#include "humidifier-control.h"
 // Nhật ký từng gói vào/ra. TẮT trừ khi biên dịch với -D GATEWAY_TRACE=1, và khi
 // tắt thì mọi lời gọi dưới đây bị trình biên dịch xoá sạch (thân hàm rỗng).
 #include "serial-trace.h"
@@ -138,6 +142,15 @@ static float    lastSlaveT = NAN, lastSlaveH = NAN;
 static uint32_t lastSlaveMs = 0;
 static char     actMode[8] = "";
 static int      actSetpoint = -1;
+
+/// Mức quạt panel VỪA BẮN THÀNH CÔNG. 0xFF = phiên này chưa bắn mức nào.
+///
+/// Chỉ đặt SAU khi IrIo::blast() đã chạy, không phải lúc nhận lệnh: đây là con số
+/// duy nhất màn hình dựa vào để nói "quạt đang ở mức nào", và nói mức mà panel
+/// không hề phát được là bịa. Nó cũng KHÔNG phải trạng thái thật của máy — ai
+/// cầm remote thật bấm một cái là nó sai, và panel không có cách nào biết (xem
+/// Ui::Model::fanLast).
+static uint8_t  lastFanIdx = 0xFF;
 
 /// Nhiệt độ có tham gia vào khoá tra mã IR không.
 /// Chỉ COOL mới có ma trận (mode, temp); DRY/FAN/OFF là mã cố định — đúng theo
@@ -267,6 +280,21 @@ static bool isAcMode(const char *s) {
          strcmp(s, "FAN")  == 0 || strcmp(s, "OFF") == 0;
 }
 
+/// Nút rời này có phải thứ PANEL tự bắn được không (mức quạt, máy tạo độ ẩm)?
+///
+/// TẬP CON CÓ CHỦ ĐÍCH của ir_action_service.KNOWN_ACTIONS — xem ac-actions.h.
+/// Chỉ những nút có mặt trên màn mới đáng giữ một bản trong NVS: mỗi khung chiếm
+/// ~600 byte, và SLEEP/ECO/SWING/TIMER... không có nút nào trên panel để bấm nên
+/// bản sao đó sẽ không bao giờ được phát. Chúng vẫn học và bắn bình thường TỪ
+/// APP, đường đó không đi qua NVS của node.
+static bool isPanelAction(const char *s) {
+  for (uint8_t i = 0; i < AcActions::FAN_COUNT; i++) {
+    if (strcmp(s, AcActions::fanWire(i)) == 0) return true;
+  }
+  return strcmp(s, AcActions::humidWire(true)) == 0 ||
+         strcmp(s, AcActions::humidWire(false)) == 0;
+}
+
 static void startLearn(const char *label) {
   const char *space = strchr(label, ' ');
   size_t nameLen = space ? (size_t)(space - label) : strlen(label);
@@ -317,6 +345,25 @@ static void publishLearned(const uint16_t *raw, uint16_t len) {
     }
   } else {
     doc["action"] = learnLabel;
+
+    // GIỮ LUÔN MỘT BẢN Ở NODE cho những nút panel tự bắn được — cùng lý do và
+    // cùng khuôn với nhánh chế độ ở trên, và ở đây còn cấp thiết hơn: mã nút rời
+    // KHÔNG CÓ ir_code_id, nên đường "backend gửi lệnh kèm ir_raw rồi node lưu
+    // lại" không tồn tại cho chúng. Không lưu ở đây thì cách duy nhất còn lại để
+    // panel có mã là người dùng bấm XIN MÃ, mà họ không có lý do gì để nghĩ tới
+    // việc đó ngay sau khi vừa học xong.
+    //
+    // temp = -1: nút rời không có nhiệt độ, đúng quy ước của IrStore::saveAlias.
+    if (isPanelAction(learnLabel)) {
+      if (IrStore::saveLearned(learnLabel, -1, raw, len)) {
+        aliasDirty = true;
+        Serial.printf("[learn] da luu nut roi %s vao NVS — panel dung duoc ngay\n",
+                      learnLabel);
+      } else {
+        Serial.printf("[learn] KHONG luu duoc %s vao NVS — panel se van bao chua hoc ma\n",
+                      learnLabel);
+      }
+    }
   }
 
   String out;
@@ -344,22 +391,56 @@ static char lastReqId[24] = "";
 /// chờ được đánh dấu.
 static void storeCode(JsonDocument &doc) {
   const char *codeId = doc["ir_code_id"];
+  const char *action = doc["action"];
   const char *mode   = doc["mode"] | "";
   const int   setp   = doc["setpoint"] | -1;
   JsonArray   irRaw  = doc["ir_raw"];
 
-  if (codeId == nullptr || irRaw.isNull() || mode[0] == '\0') {
-    Serial.println("[sync] goi store_only thieu truong — bo qua");
+  if (irRaw.isNull()) {
+    Serial.println("[sync] goi store_only khong co ir_raw — bo qua");
     return;
   }
   if (irRaw.size() > IrIo::RAW_MAX) {
-    Serial.printf("[sync] ma %s dai %u moc > gioi han %u — bo qua\n",
-                  codeId, (unsigned)irRaw.size(), IrIo::RAW_MAX);
+    Serial.printf("[sync] ma dai %u moc > gioi han %u — bo qua\n",
+                  (unsigned)irRaw.size(), IrIo::RAW_MAX);
     return;
   }
 
   uint16_t n = 0;
   for (JsonVariant v : irRaw) irBuf[n++] = (uint16_t)v.as<uint32_t>();
+
+  // --- NÚT RỜI (mức quạt, máy tạo độ ẩm) ---
+  //
+  // KHÁC MA TRẬN (chế độ, nhiệt độ) ở đúng một chỗ, và chỗ đó quyết định cả
+  // nhánh này: bảng `ir_action_codes` khoá theo (org, action) chứ không sinh
+  // UUID, nên gói không mang `ir_code_id`. Không có id thì không có gì để đối
+  // chiếu, và cũng không có đường `need_raw` để xin lại — đây là lần DUY NHẤT
+  // panel nhận được mã này ngoài lúc chính nó học.
+  //
+  // Dùng saveLearned() (id tạm "local-FAN_60") thay vì save()+saveAlias(): id
+  // tạm chính là thứ IrStore sinh ra để phục vụ mã không có UUID của backend.
+  if (action != nullptr && action[0] != '\0') {
+    if (!isPanelAction(action)) {
+      // Backend đẩy cả kho nút rời; panel chỉ giữ những nút nó có chỗ để bấm.
+      // Bỏ qua trong im lặng là ĐÚNG ở đây — không phải lỗi, và in một dòng cho
+      // mỗi nút bị bỏ sẽ làm log resync dài gấp đôi vì một chuyện bình thường.
+      return;
+    }
+    if (!IrStore::saveLearned(action, -1, irBuf, n)) {
+      Serial.printf("[sync] khong luu duoc nut roi %s — NVS day?\n", action);
+      Ui::reply("NVS ĐẦY — KHÔNG LƯU ĐƯỢC MÃ");
+      return;
+    }
+    aliasDirty = true;
+    Serial.printf("[sync] da nhan nut roi %s (%u moc)\n", action, n);
+    return;
+  }
+
+  // --- ma trận (chế độ, nhiệt độ) ---
+  if (codeId == nullptr || mode[0] == '\0') {
+    Serial.println("[sync] goi store_only thieu truong — bo qua");
+    return;
+  }
 
   if (!IrStore::save(codeId, irBuf, n)) {
     Serial.printf("[sync] khong luu duoc %s — NVS day?\n", codeId);
@@ -754,6 +835,38 @@ static void serviceNetwork() {
   mqtt.loop();
 }
 
+// ---------------------------------------------------------------------------
+//  Máy tạo độ ẩm
+// ---------------------------------------------------------------------------
+/// Bắn khung IR cho hướng [on]. Trả false khi CHƯA HỌC MÃ cho hướng đó —
+/// HumidifierControl dựa vào giá trị trả về để không tin nhầm là máy đã đổi.
+///
+/// REMOTE BẬP BÊNH ĐƯỢC XỬ LÝ Ở ĐÂY, và chỉ ở đây. Rất nhiều máy tạo ẩm chỉ có
+/// MỘT nút nguồn: bấm lúc đang tắt thì bật, bấm lúc đang chạy thì tắt. Hộ như vậy
+/// chỉ học được ô BẬT, nên chiều TẮT rơi về đúng khung đó.
+///
+/// BẢN Ở BO esp32-humidity DÙNG MỘT CỜ BIÊN DỊCH (`DIFFUSER_IR_TOGGLE`) cho việc
+/// này, và cờ đó là thứ chỉ sai được ngoài hiện trường: khai 0 trong khi cả hai ô
+/// đều học nút bập bênh thì mã "TẮT" thật ra cũng đảo trạng thái, và bo BẬT máy
+/// đúng lúc nó tưởng mình đang tắt. Ở đây không có gì để khai — "ô TẮT có mã hay
+/// không" là một sự kiện đọc được từ NVS, và màn MÁY TẠO ẨM nói thẳng ra nó.
+///
+/// Định nghĩa TRƯỚC setup() vì setup() truyền nó cho HumidifierControl::begin().
+static bool humidifierEmit(bool on) {
+  uint16_t n = IrStore::loadAlias(AcActions::humidWire(on), -1, irBuf, IrIo::RAW_MAX);
+  bool viaToggle = false;
+  if (n == 0 && !on) {
+    n = IrStore::loadAlias(AcActions::humidWire(true), -1, irBuf, IrIo::RAW_MAX);
+    viaToggle = (n > 0);
+  }
+  if (n == 0) return false;
+
+  IrIo::blast(irBuf, n);
+  Serial.printf("[am] da phat %u moc -> %s%s\n", n, on ? "BAT" : "TAT",
+                viaToggle ? " (dung lai o BAT: remote bap benh)" : "");
+  return true;
+}
+
 void setup() {
   Serial.begin(115200);
   delay(300);
@@ -772,6 +885,9 @@ void setup() {
     // Không chặn khởi động: node vẫn chạy được, chỉ là mọi lệnh phải kèm ir_raw.
     Serial.println("NVS loi — se khong cache duoc ma IR, moi lenh deu phai co ir_raw");
   }
+  // SAU IrStore::begin(): bộ điều khiển máy tạo ẩm nạp lại niềm tin trạng thái từ
+  // NVS, và emitter của nó tra kho mã. Trước đó thì cả hai đều rỗng.
+  HumidifierControl::begin(humidifierEmit);
   buildTopics();
 
   connectWifi();
@@ -830,6 +946,56 @@ static unsigned long lastPub = 0;
 
 /// Người dùng bấm GUI trên màn: tra mã theo bí danh rồi bắn ngay tại chỗ.
 static void runPanelCommand(const Ui::Command &c) {
+  if (c.kind == Ui::Command::FAN_SET) {
+    // KHÔNG đụng overrideLocal, và KHÔNG publish `override`: mức quạt không mang
+    // (chế độ, nhiệt độ) nên nó không tranh quyền với vòng lặp comfort. Cùng luật
+    // đã áp cho gói `action:` đến từ app — xem cuối takeCommand().
+    //
+    // Cũng KHÔNG đi qua máy chủ: mã đã nằm trong NVS, nên bấm ở đây vẫn chạy khi
+    // mất mạng. Đó là cả lý do panel giữ một bản.
+    if (c.arg >= AcActions::FAN_COUNT) return;
+    const char *wire = AcActions::fanWire(c.arg);
+    const uint16_t n = IrStore::loadAlias(wire, -1, irBuf, IrIo::RAW_MAX);
+    if (n == 0) {
+      Serial.printf("[panel] quat %s: chua co ma trong NVS\n", wire);
+      Ui::reply("CHƯA HỌC MÃ — vào app để học");
+      return;
+    }
+    IrIo::blast(irBuf, n);
+    lastFanIdx = c.arg;
+    Serial.printf("[panel] da phat %u moc -> quat %s\n", n, wire);
+
+    // Ghi vào nhật ký lệnh như mọi lệnh khác. `mode` giữ nguyên chế độ máy lạnh
+    // đang chạy: mức quạt KHÔNG đổi chế độ, nên ghi "FAN_60" vào ô chế độ sẽ
+    // dựng lên một trạng thái máy lạnh chưa từng có.
+    Ui::CmdLog e{};
+    copyStr(e.mode, sizeof(e.mode), actMode[0] ? actMode : "--");
+    snprintf(e.reason, sizeof(e.reason), "panel:%s", wire);
+    e.setpoint = actSetpoint;
+    e.result   = Ui::CmdLog::SENT;
+    Ui::logCommand(e);
+    return;
+  }
+
+  if (c.kind == Ui::Command::HUMID_SET) {
+    const uint32_t now = millis();
+    if (c.arg == Ui::HUMID_AUTO_ARG) {
+      HumidifierControl::backToAuto(now);
+      Ui::reply("MÁY TẠO ẨM: TỰ ĐỘNG");
+      return;
+    }
+    const bool want = (c.arg == Ui::HUMID_ON_ARG);
+    HumidifierControl::manualSet(want, now);
+    // Nói ra KẾT CỤC THẬT, không nói lại cái nút vừa bấm: manualSet() có thể
+    // không bắn được vì chưa học mã, và khi đó máy không đổi gì cả. Báo "ĐÃ BẬT"
+    // trong ca đó là màn khẳng định sai — đúng thứ luật NAN-chứ-không-0 của ui.h
+    // ngăn cấm, chỉ ở tầng khác.
+    const HumidifierControl::Status st = HumidifierControl::status(now);
+    if (st.on == want) Ui::reply(want ? "MÁY TẠO ẨM: ĐÃ BẬT" : "MÁY TẠO ẨM: ĐÃ TẮT");
+    else               Ui::reply("CHƯA HỌC MÃ — vào app để học");
+    return;
+  }
+
   if (c.kind == Ui::Command::AUTO) {
     overrideLocal = false;
     // Gỡ cổng ghi đè trên máy chủ, không chỉ đổi huy hiệu trên màn. Thiếu dòng
@@ -1151,6 +1317,8 @@ static void pushUiModel() {
   // Quét NVS đúng một lần rồi giữ lại — xem ghi chú ở `aliasDirty`.
   static uint16_t coolMask = 0;
   static bool     hasDry = false, hasFan = false, hasOff = false;
+  static uint8_t  fanMask = 0;
+  static bool     humidHasOn = false, humidHasOff = false;
   if (aliasDirty) {
     coolMask = 0;
     for (uint8_t i = 0; i < 15; i++) {
@@ -1159,12 +1327,36 @@ static void pushUiModel() {
     hasDry = IrStore::hasAlias("DRY", -1);
     hasFan = IrStore::hasAlias("FAN", -1);
     hasOff = IrStore::hasAlias("OFF", -1);
+
+    // Nút rời. CÙNG bộ đếm `aliasDirty` với ma trận trên, không thêm cờ thứ hai:
+    // mọi đường ghi mã (học tại chỗ, backend gửi lệnh, resync) đều đã bật cờ đó,
+    // nên tách ra chỉ tạo thêm một chỗ để quên bật.
+    fanMask = 0;
+    for (uint8_t i = 0; i < AcActions::FAN_COUNT; i++) {
+      if (IrStore::hasAlias(AcActions::fanWire(i), -1)) fanMask |= (uint8_t)(1u << i);
+    }
+    humidHasOn  = IrStore::hasAlias(AcActions::humidWire(true), -1);
+    humidHasOff = IrStore::hasAlias(AcActions::humidWire(false), -1);
+
     aliasDirty = false;
   }
   m.coolMask = coolMask;
   m.hasDry   = hasDry;
   m.hasFan   = hasFan;
   m.hasOff   = hasOff;
+  m.fanMask  = fanMask;
+  m.fanLast  = lastFanIdx;
+
+  {
+    const HumidifierControl::Status st = HumidifierControl::status(millis());
+    m.humidOn       = st.on;
+    m.humidOverride = st.overriding;
+    m.humidRh       = st.rh;
+    m.humidNote     = HumidifierControl::reasonText(st.reason);
+    m.humidOverrideLeftSec = st.overrideLeftSec;
+    m.humidHasOn    = humidHasOn;
+    m.humidHasOff   = humidHasOff;
+  }
 
   m.learning = IrIo::learning();
   copyStr(m.learnLabel, sizeof(m.learnLabel), learnLabel);
@@ -1238,6 +1430,27 @@ void loop() {
   // BLE — cùng luật đã áp cho callback MQTT và ESP-NOW (xem unoq-link.h §1).
   runUnoQIncoming();
   pushUnoQSnapshot();
+
+  // --- Máy tạo độ ẩm: một lượt đo + quyết định ------------------------------
+  //  NHỊP GIỮ Ở ĐÂY, không giấu trong module: EMA_ALPHA của nó gắn chặt với nhịp
+  //  gọi (0.2 ở 5 giây = hằng số thời gian ~25 giây), nên cái nhịp đó phải nằm ở
+  //  chỗ đọc được. Xem HumidifierControl::tick().
+  //
+  //  ĐỘ ẨM LÀ TRUNG VỊ CÁC GÓC, cùng con số mà màn hình và cloud dùng — không
+  //  phải một phép đo riêng. Trung vị thất bại (chưa góc nào có số) thì `h` giữ
+  //  nguyên NAN, và tick() hiểu đó là "chưa có số đo" rồi cắt máy sau
+  //  SENSOR_STALE_SEC. Đúng nguyên tắc "nghi ngờ thì TẮT".
+  {
+    static uint32_t lastHumidMs = 0;
+    const uint32_t nowMs = millis();
+    if (nowMs - lastHumidMs >= HumidifierControl::TICK_MS) {
+      lastHumidMs = nowMs;
+      float ht = NAN, hh = NAN;
+      uint8_t hv = 0;
+      RoomRegistry::median(ht, hh, &hv);
+      HumidifierControl::tick(hh, nowMs);
+    }
+  }
 
   // KHÔNG CÒN KHỐI PUBLISH TELEMETRY CỦA CHÍNH BO NÀY.
   //

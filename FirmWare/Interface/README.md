@@ -360,13 +360,19 @@ màn. Xem §7.
                           ┌──────────────┐
                  ┌────────┤ THANH TRẠNG THÁI (luôn hiện, y 0..21) │
                  │        └──────────────┘
-   ┌─────────┬───┴─────┬──────────┬─────────┐
-   │TRANG CHU│DIEU KHIEN│THONG TIN │ CAI DAT │   ← thanh điều hướng y 206..239
-   └─────────┴─────────┴──────────┴─────────┘
+   ┌────────┬───┴────┬────────┬────────┬────────┐
+   │TRANG CHU│DIEU KHIEN│MAY TAO AM│THONG TIN│CAI DAT│  ← nav y 206..239, 5 × 64
+   └────────┴────────┴────────┴────────┴────────┘
                  │
                  └── HỌC REMOTE: lớp phủ toàn màn, tự bật khi server gửi
                      {"learn":"COOL 25"}, tự tắt khi xong/hết giờ
 ```
+
+**NĂM tab, mỗi tab 64 px** (trước là bốn tab × 80). Tab thứ năm là `MAY TAO AM` —
+xem §5.3. Nó được một trang riêng chứ không nhét vào `DIEU KHIEN`: trang đó đã có
+một cặp `THU CONG`/`TU DONG` cho máy lạnh, và một cặp thứ hai giống hệt cho một
+cái máy khác trên cùng màn thì câu hỏi "nút này đang nói về máy nào" không trả
+lời được bằng cách nhìn.
 
 Lưới chung: màn 320×240, đệm 6 px, thanh trạng thái cao 22, thanh nav cao 34,
 vùng nội dung `y = 24…203`.
@@ -403,28 +409,82 @@ vùng nội dung `y = 24…203`.
 ### 5.2 DIEU KHIEN
 
 ```
-├────────────────────────────────────────────────┤ 24
+├────────────────────────────────────────────────┤ 24 (y bên dưới tính từ mốc này)
 │ ┌──────┐ ┌────────────────────┐ ┌──────┐       │
-│ │      │ │                    │ │      │       │
-│ │  −   │ │       26 °C        │ │  +   │       │ 8,28,68,76 · 84,28,152,76 · 244,28,68,76
-│ │      │ │                    │ │      │       │
+│ │  −   │ │       26 °C        │ │  +   │       │ 8,2,68,68 · 84,2,152,68 · 244,2,68,68
 │ └──────┘ └────────────────────┘ └──────┘       │
 │ ┌──────┐┌──────┐┌──────┐┌──────┐               │
-│ │ LANH ││ KHO  ││ QUAT ││ TAT  │               │ y=110 h=44 w=74 @ x 6/84/162/240
+│ │ LANH ││ KHO  ││ QUAT ││ TAT  │               │ y=74 h=38 w=74 @ x 6/84/162/240
 │ └──────┘└──────┘└──────┘└──────┘               │
 │ ┌──────────────┐  ┌──────────────┐             │
-│ │     GUI      │  │   TU DONG    │             │ 6,160,150,42 · 164,160,150,42
+│ │  THU CONG    │  │   TU DONG    │             │ 6,116,150,36 · 164,116,150,36
 │ └──────────────┘  └──────────────┘             │
+│  QUAT                    60%      [  CHON  ]   │ y=156 h=24, nút 244,156,68,24
 ```
 
-Thay đổi được **gom lại rồi mới gửi** khi bấm `GUI` — giống nút submit của
-`OverridePanel` trong app, không bắn IR theo từng lần chạm `+`. Bấm `TU DONG` =
-bỏ ghi đè cục bộ, trả quyền cho vòng lặp comfort của server.
+Thay đổi ± được **gom lại 500 ms rồi tự gửi** (đúng `_tempDebounce` của app), còn
+đổi chế độ thì gửi ngay. Bấm `TU DONG` = trả quyền cho vòng lặp comfort của server.
+
+**ĐANG TỰ ĐỘNG THÌ ± VÀ 4 NÚT CHẾ ĐỘ BỊ KHOÁ** (mờ, không nhận chạm). Trước đây
+chúng vẫn bấm được: con số trên màn đổi, nhưng không có gì được gửi đi và vòng lặp
+comfort kế tiếp kéo nó về — người dùng thấy máy nghe lời mình vài giây rồi tự ý
+đổi lại, và đọc ra là bo hỏng. Dòng dưới ô nhiệt độ nói thứ tự phải làm:
+`TU DONG — BAM THU CONG DE CHINH`. Hai nút `THU CONG`/`TU DONG` và hàng `QUAT`
+**không** bị khoá.
 
 Nút chế độ chưa có mã IR trong NVS → tô `carbonUp` + chữ `whiteDim`, chạm vào
 hiện toast `CHUA HOC MA — vao app de hoc`. Không bao giờ im lặng.
 
-### 5.3 THONG TIN — chẩn đoán tại chỗ
+**Hàng `QUAT`** mở lớp phủ chọn tốc độ (7 hàng: 20/40/60/80/100 % · `TU DONG` ·
+`NUT VONG`). Mỗi mức là **một mã nút rời học từ app** (`ir_action_codes`), panel
+tra NVS rồi bắn thẳng — nên nó chạy cả khi mất mạng, khác app vốn phải qua máy
+chủ. Mức chưa học thì hàng đó mờ, không ẩn.
+
+> Mức quạt **KHÔNG PHẢI** chế độ `QUAT` ở hàng trên. Chế độ `QUAT` = máy thổi mà
+> không làm lạnh, nằm trong ma trận (chế độ, nhiệt độ). Mức quạt = tốc độ gió,
+> đặt được ở mọi chế độ. Cùng chữ "quạt" cho hai thứ là điều đáng tiếc của tiếng
+> Việt ở đây, nên hai chỗ hiện chúng cố tình có **hình dạng khác hẳn nhau**.
+
+Con số bên phải chữ `QUAT` là **mức panel vừa bắn**, không phải trạng thái thật của
+máy — ai cầm remote thật bấm một cái là nó sai và panel không có cách nào biết.
+Cùng luật (và cùng lý do) với `_fanWire` trong `override_panel.dart`.
+
+### 5.3 MAY TAO AM
+
+```
+├────────────────────────────────────────────────┤ 24
+│ ┌────────────────────────────────────────────┐ │
+│ │ MAY TAO DO AM                   [TU DONG]  │ │ 6,2,308,88
+│ │ DANG CHAY                           52 %   │ │ ← 52 % là số ĐÃ LÀM MƯỢT (EMA)
+│ │ phòng khô hơn ngưỡng bật                   │ │
+│ └────────────────────────────────────────────┘ │
+│ ┌────────────────────────────────────────────┐ │
+│ │ MA IR                                      │ │ 6,94,308,38
+│ │ DA CO MA BAT VA TAT                        │ │
+│ └────────────────────────────────────────────┘ │
+│ ┌────────┐ ┌────────┐ ┌──────────┐             │
+│ │  BAT   │ │  TAT   │ │ TU DONG  │             │ y=136 h=42
+│ └────────┘ └────────┘ └──────────┘             │
+```
+
+Panel **tự lái** máy tạo ẩm: đo bằng **trung vị độ ẩm 4 góc phòng**, quyết định
+bằng bản port của `esp32-humidity/src/diffuser-control.cpp` (xem
+`src/humidifier-control.h`), bắn bằng chính LED IR của panel. **Không qua máy
+chủ** — backend chỉ tham gia ở khâu học mã.
+
+- Số % là **độ ẩm đã làm mượt** (EMA α=0.2 ở nhịp 5 s), không phải số thô ở trang
+  chủ. Nó mới là thứ giải thích được vì sao máy bật hay tắt.
+- Dòng dưới trạng thái là **lý do**, một câu — `DEADBAND`, `DWELL_HOLD`,
+  `LOCKOUT`, `SENSOR_LOST`, `NO_CODE`… Đang ghi đè thì kèm luôn "tự động lại sau
+  N phút": ghi đè có hạn 2 giờ, không nói ra thì máy tự chạy lại và người bấm
+  `TAT` sẽ kết luận nút không ăn.
+- Thẻ `MA IR` có **ba** kết cục, không phải hai:
+  `DA CO MA BAT VA TAT` · `CHI CO MA BAT — DUNG NHU REMOTE BAP BENH` ·
+  `CHUA HOC MA`. Ca giữa là ca dễ hiểu nhầm nhất nên nó được gọi tên riêng.
+- `BAT`/`TAT` mờ khi chưa học mã `HUMID_ON`; `TU DONG` **không bao giờ** mờ —
+  người dùng phải luôn thoát được khỏi ghi đè.
+
+### 5.4 THONG TIN — chẩn đoán tại chỗ
 
 Tám dòng nhãn/giá trị, `y = 30` bước 21 px, nhãn trái x=14, giá trị phải x=306:
 
@@ -435,15 +495,24 @@ Dòng chân trang: `MAC xx:xx:… · KENH n`.
 Màn này tồn tại để người đi lắp trả lời được "vì sao web không thấy node" mà
 không phải cắm laptop — đúng những dòng đang phải đọc bằng `pio device monitor`.
 
-### 5.4 CAI DAT
+### 5.5 CAI DAT
 
-Bốn hàng đầy chiều rộng, `x=6 w=308 h=40`, `y = 28 / 74 / 120 / 166`:
+Bốn hàng đầy chiều rộng, `x=6 w=308 h=40`, `y = 4 / 48 / 92 / 136` (toạ độ trong
+vùng nội dung). Vừa khít 180 px nên trang này **không cuộn**.
 
 | Hàng | Điều khiển | Ghi chú |
 |---|---|---|
-| `DO SANG` | `−` `70%` `+` | PWM LEDC lên GPIO27, bước 10 %, sàn 10 % (0 % = màn như hỏng) |
-| `AM BAO` | `BAT` / `TAT` | còi GPIO13, bíp 40 ms mỗi lần chạm |
-| `KHOI DONG LAI` | `CHAY` | `ESP.restart()`, có bước xác nhận |
+| `DO SANG` | `−` `70%` `+` | PWM LEDC, bước 10 %, sàn 10 % (0 % = màn như hỏng). Giữ nút để chạy liên tục |
+| `KHOI DONG LAI` | ↻ | `ESP.restart()`, có bước xác nhận |
+| `MA IR DA HOC` | `XEM` | lớp phủ 18 tổ hợp, kèm `XIN MA` và `XOA` từng dòng |
+| `NHAT KY LENH` | `XEM` | 8 lệnh gần nhất từ backend + kết quả |
+
+> Hàng `AM BAO` **đã bỏ**. Bo panel ESP32-S3 không có còi (`BUZZER_PIN =
+> PIN_NONE` — bốn chân tự do đã đi hết cho IR và UART sang UNO Q). Một công tắc
+> bật/tắt cho phần cứng không tồn tại là kiểu điều khiển tệ nhất: nó bấm được, nó
+> đổi màu, và nó không làm gì cả. Tiếng bấm thì vẫn còn đường dây
+> (`Theme::setPressSound`) nên bo QR Box cũ — dùng chung mã nguồn, CÓ còi thật —
+> vẫn kêu.
 
 > Hàng `DONG BO GIO` **đã bỏ** cùng toàn bộ đường NTP (`ntpBegin`/`ntpPoll`/
 > `clockWrite`). Node chỉ còn **đọc** DS1307 để hiện giờ trên thanh trạng thái.
@@ -453,7 +522,7 @@ Bốn hàng đầy chiều rộng, `x=6 w=308 h=40`, `y = 28 / 74 / 120 / 166`:
 Không có mục "đổi WiFi" — cấu hình WiFi nằm trong `config.h`, thêm màn nhập mật
 khẩu bằng bàn phím ảo là một dự án riêng.
 
-### 5.5 HỌC REMOTE — lớp phủ
+### 5.6 HỌC REMOTE — lớp phủ
 
 Tự bật khi `IrIo::learning()` = true (server gửi `{"learn":"COOL 25"}`), không
 phải do người dùng bấm. Hộp `16,30,288,168`:

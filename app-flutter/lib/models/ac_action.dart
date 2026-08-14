@@ -36,4 +36,15 @@ const kAcActions = <AcAction>[
   AcAction('SWING_H', 'Đảo ngang', Icons.swap_horiz),
   AcAction('LIGHT', 'Đèn', Icons.lightbulb_outline),
   AcAction('TEMP_UNIT', '°C/°F', Icons.thermostat_outlined),
+  // Máy tạo độ ẩm — KHÔNG phải nút của remote điều hoà, mà của một máy khác
+  // trong cùng phòng. Nằm chung danh sách này vì cơ chế y hệt: một khung IR học
+  // được, phát lại nguyên văn.
+  //
+  // ĐIỀU PHẢI BIẾT KHI BẤM HAI NÚT NÀY TRONG APP: chúng chỉ bắn một phát ngay
+  // lúc bấm. Việc lái máy tạo ẩm theo độ ẩm phòng do PANEL tự làm, liên tục, kể
+  // cả khi mất mạng — nên bấm ở đây là "bật/tắt ngay bây giờ", còn panel sẽ
+  // quyết định lại ở lần kiểm kế tiếp. Muốn giữ nguyên ý mình thì bấm GHI ĐÈ
+  // trên panel.
+  AcAction('HUMID_ON', 'Tạo ẩm: bật', Icons.water_drop),
+  AcAction('HUMID_OFF', 'Tạo ẩm: tắt', Icons.water_drop_outlined),
 ];

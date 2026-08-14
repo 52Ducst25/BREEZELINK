@@ -38,9 +38,29 @@ FAN_SPEED = "FAN_SPEED"
 #  vài mức, các mức còn lại vẫn hiện nhưng máy chủ trả "chưa học" khi bấm.
 FAN_LEVELS = ("FAN_20", "FAN_40", "FAN_60", "FAN_80", "FAN_100", "FAN_AUTO")
 
+#  MÁY TẠO ĐỘ ẨM — hai ô mã, và panel tự lái nó bằng độ ẩm trong phòng.
+#
+#  Ở ĐÂY, KHÔNG PHẢI MỘT BẢNG RIÊNG: đây vẫn đúng là "một khung IR học được,
+#  phát lại nguyên văn" — cùng khuôn với mọi nút rời khác, nên dùng chung luồng
+#  học/xoá/liệt kê đã có thay vì dựng một đường song song chỉ khác cái tên.
+#
+#  MÁY TẠO ẨM KHÔNG ĐI QUA MÁY CHỦ lúc chạy: panel giữ mã trong NVS, đo độ ẩm
+#  bằng trung vị 4 node góc phòng, và tự quyết định bật/tắt. Backend chỉ tham gia
+#  ở khâu HỌC MÃ và ở khâu đẩy lại mã khi panel xin (`push_all_codes`). Nối vòng
+#  điều khiển lên cloud chỉ đổi được đúng một thứ: nó sẽ ngừng chạy khi rớt mạng.
+#
+#  HAI Ô, KHÔNG PHẢI MỘT: rất nhiều remote máy xông chỉ có một nút nguồn bập
+#  bênh. Hộ nào như vậy thì học cùng một khung vào cả hai ô — panel tự nhận ra và
+#  chuyển sang chế độ bập bênh (xem humidifier-control.cpp). Hộ nào remote có nút
+#  BẬT và nút TẮT rời nhau thì hai ô mang hai khung khác nhau, và bắn lại vô hại.
+HUMID_ON = "HUMID_ON"
+HUMID_OFF = "HUMID_OFF"
+
 KNOWN_ACTIONS = frozenset({
     FAN_SPEED,   # nút vòng của remote — GIỮ LẠI cho org đã học từ trước
     *FAN_LEVELS,
+    HUMID_ON,    # máy tạo độ ẩm: bật
+    HUMID_OFF,   # máy tạo độ ẩm: tắt
     "SUPER",     # turbo / siêu tốc
     "SLEEP",     # chế độ ngủ
     "ECO",       # tiết kiệm điện

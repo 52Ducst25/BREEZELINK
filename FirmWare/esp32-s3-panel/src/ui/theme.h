@@ -103,7 +103,11 @@ enum : lv_coord_t {
   PAD       = 6,
   STATUS_H  = 22,          // y 0..21
   CONTENT_Y = 24, CONTENT_H = 180,   // y 24..203
-  NAV_Y     = 206, NAV_H = 34, NAV_W = 80,   // 4 tab × 80
+  // NAV_W = 64 CHỨ KHÔNG CÒN 80: thêm tab MÁY TẠO ẨM là 5 tab, và 5 × 64 = 320
+  // vừa khít bề ngang. Ô chạm hẹp lại 16px nhưng vẫn 64×34 — trên ngưỡng 44×44
+  // của hướng dẫn cảm ứng theo chiều dọc, và bề ngang thì ngón tay không cần
+  // nhiều bằng: bốn tab cũ nằm sát nhau và chưa lần nào bấm nhầm.
+  NAV_Y     = 206, NAV_H = 34, NAV_W = 64,   // 5 tab × 64
   CH_SM = 4, CH_MD = 6, CH_LG = 10           // độ vát
 };
 

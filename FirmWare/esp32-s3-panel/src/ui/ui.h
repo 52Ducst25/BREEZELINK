@@ -102,6 +102,38 @@ struct Model {
   uint16_t coolMask = 0;
   bool     hasDry = false, hasFan = false, hasOff = false;
 
+  // --- tốc độ quạt: mã NÚT RỜI, học từ app ---
+  //
+  // KHÔNG PHẢI chế độ FAN ở trên. Hai thứ khác hẳn nhau và rất dễ lẫn:
+  //   chế độ FAN  -> máy lạnh thổi mà không làm lạnh; nằm trong ma trận (chế độ,
+  //                  nhiệt độ), một mã cố định.
+  //   mức quạt    -> tốc độ gió, đặt được ở MỌI chế độ; mỗi mức một mã rời trong
+  //                  bảng `ir_action_codes` của backend.
+  // bit i = có mã cho AcActions::fanWire(i).
+  uint8_t  fanMask = 0;
+  /// Mức quạt panel VỪA BẮN. 0xFF = phiên này chưa bắn mức nào.
+  ///
+  /// KHÔNG PHẢI trạng thái thật của máy, và màn không được trình bày nó như vậy
+  /// — cùng luật đã ghi trong app (override_panel.dart `_fanWire`). Lệnh quạt là
+  /// một khung IR bắn đi một chiều; ai cầm remote thật bấm một cái là con số này
+  /// sai ngay mà panel không có cách nào biết.
+  uint8_t  fanLast = 0xFF;
+
+  // --- máy tạo độ ẩm (panel tự lái, không qua máy chủ) ---
+  bool     humidOn        = false;   ///< niềm tin: máy đang chạy
+  bool     humidOverride  = false;   ///< đang GHI ĐÈ tay (chưa hết hạn)
+  bool     humidHasOn     = false;   ///< đã học mã ô BẬT
+  bool     humidHasOff    = false;   ///< đã học mã ô TẮT
+  float    humidRh        = NAN;     ///< độ ẩm đã làm mượt mà nó đang dùng
+  uint32_t humidOverrideLeftSec = 0;
+  /// Vì sao đang ở trạng thái đó, một câu đọc được.
+  ///
+  /// Con trỏ chứ không phải mảng: HumidifierControl::reasonText() trả về chuỗi
+  /// hằng nằm trong flash, nên nó sống mãi và memcpy Model qua lõi khác vẫn an
+  /// toàn — đúng khuôn với `fw` ở dưới. Mảng 40 byte chỉ để chép lại một chuỗi
+  /// bất biến là phí, và Model này đã được memcpy 5 lần mỗi giây.
+  const char *humidNote = "";
+
   // --- học remote ---
   bool     learning = false;
   char     learnLabel[24] = "";
@@ -121,13 +153,27 @@ struct Model {
 /// quyền loop() ở lõi 1 (xem bảng chia sở hữu ở đầu file). Gọi IrStore từ lõi 0
 /// là hai lõi cùng mở một namespace Preferences — hỏng theo kiểu ngẫu nhiên.
 struct Command {
-  /// RESYNC: xin máy chủ gửi lại toàn bộ kho mã IR. Không mang mode/setpoint.
-  enum Kind : uint8_t { MANUAL, AUTO, DEL_CODE, RESYNC } kind;
+  /// RESYNC:    xin máy chủ gửi lại toàn bộ kho mã IR. Không mang mode/setpoint.
+  /// FAN_SET:   bắn một mức quạt đã học. Xem `arg`.
+  /// HUMID_SET: đổi chế độ máy tạo độ ẩm. Xem `arg`.
+  enum Kind : uint8_t { MANUAL, AUTO, DEL_CODE, RESYNC, FAN_SET, HUMID_SET } kind;
   char mode[8];
   /// MANUAL: nhiệt độ đặt. DEL_CODE: nhiệt độ của tổ hợp cần xoá, -1 cho mã cố
   /// định (DRY/FAN/OFF) — cùng quy ước với IrStore::removeAlias().
   int  setpoint;
+
+  /// FAN_SET:   chỉ số mức quạt, 0..AcActions::FAN_COUNT-1.
+  /// HUMID_SET: HUMID_OFF_ARG / HUMID_ON_ARG / HUMID_AUTO_ARG dưới đây.
+  ///
+  /// Ô RIÊNG chứ không nhét vào `mode`: `mode` chỉ chứa được 7 ký tự, mà nhãn
+  /// nút rời dài tới 9 ("FAN_SPEED", "HUMID_OFF"). Nhét vào là snprintf cắt âm
+  /// thầm thành "FAN_SPE" — một khoá tra NVS không tồn tại, nên nút trở thành
+  /// phím chết mà không có lỗi nào để đọc.
+  uint8_t arg;
 };
+
+/// Giá trị của `Command::arg` khi kind = HUMID_SET.
+enum : uint8_t { HUMID_OFF_ARG = 0, HUMID_ON_ARG = 1, HUMID_AUTO_ARG = 2 };
 
 /// Một dòng nhật ký: lệnh vừa nhận từ backend và node đã làm gì với nó.
 ///

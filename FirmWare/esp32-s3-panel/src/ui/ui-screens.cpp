@@ -1,5 +1,6 @@
 ﻿#include "ui-screens.h"
 #include "theme.h"
+#include "../ac-actions.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -16,10 +17,18 @@ CommandFn gOnCmd     = nullptr;
 SettingFn gOnSetting = nullptr;
 
 // --- Khung chung -------------------------------------------------------------
+/// 5 tab: TRANG CHỦ · ĐIỀU KHIỂN · MÁY TẠO ẨM · THÔNG TIN · CÀI ĐẶT.
+///
+/// MÁY TẠO ẨM ĐƯỢC MỘT TAB RIÊNG, không nhét vào màn ĐIỀU KHIỂN — dù chỗ trống
+/// ở đó vẫn còn. Màn ĐIỀU KHIỂN đã có sẵn một cặp THỦ CÔNG / TỰ ĐỘNG cho máy
+/// lạnh; đặt thêm một cặp nữa cho máy tạo ẩm lên cùng màn thì hai cặp nút giống
+/// hệt nhau điều khiển hai cái máy khác nhau, và câu hỏi "nút này đang nói về
+/// máy nào" không trả lời được bằng cách nhìn.
+constexpr uint8_t TABS = 5;
 lv_obj_t *gStatusBar, *gNav;
 lv_obj_t *gLblClock, *gDotWifi, *gDotMqtt;
-lv_obj_t *gTabBtn[4], *gTabMark[4];
-lv_obj_t *gPage[4];                 // 4 vùng nội dung, ẩn/hiện theo tab
+lv_obj_t *gTabBtn[TABS], *gTabMark[TABS];
+lv_obj_t *gPage[TABS];              // vùng nội dung, ẩn/hiện theo tab
 uint8_t   gTab = 0;
 
 lv_obj_t *gToast, *gToastLbl;
@@ -33,6 +42,8 @@ lv_obj_t *gAcMode, *gAcSet, *gAcBadge, *gAcBadgeLbl, *gAcAge;
 
 // --- DIEU KHIEN --------------------------------------------------------------
 lv_obj_t *gSetBig, *gModeBtn[4], *gSendBtn, *gAutoBtn, *gLimitLbl;
+lv_obj_t *gMinusBtn, *gPlusBtn;     // giữ lại để khoá được khi đang TỰ ĐỘNG
+lv_obj_t *gFanVal, *gFanBtn;        // hàng "QUẠT" ở đáy màn
 int   gPendSet  = 26;               // thay đổi được GOM LẠI, chỉ gửi khi bấm GUI
 int   gPendMode = 0;                // 0=COOL 1=DRY 2=FAN 3=OFF
 
@@ -73,6 +84,18 @@ const char *const kModeName[4] = {"COOL", "DRY", "FAN", "OFF"};
 const char *const kModeLabel[4] = {"LẠNH", "KHÔ", "QUẠT", "TẮT"};
 bool  gModeOk[4] = {false, false, false, false};   // có mã IR trong NVS chưa
 
+// --- TỐC ĐỘ QUẠT (lớp phủ) ---------------------------------------------------
+//  Mã học TỪ APP (bảng `ir_action_codes`), panel chỉ tra NVS rồi bắn — nên nó
+//  chạy được cả khi mất mạng, khác hẳn app vốn phải đi qua máy chủ.
+lv_obj_t *gFanOverlay, *gFanList;
+lv_obj_t *gFanRow[AcActions::FAN_COUNT], *gFanEmpty;
+uint8_t   gFanMask = 0;             // bản sao ở lõi 0, để khỏi dựng lại vô ích
+uint8_t   gFanLast = 0xFF;
+
+// --- MAY TAO AM --------------------------------------------------------------
+lv_obj_t *gHumState, *gHumRh, *gHumNote, *gHumBadge, *gHumBadgeLbl, *gHumCodes;
+lv_obj_t *gHumBtnOn, *gHumBtnOff, *gHumBtnAuto;
+
 // --- THONG TIN ---------------------------------------------------------------
 // Hàng "ESP-NOW" (bộ đếm gói) đã nhường chỗ cho "GÓC PHÒNG": bốn cảm biến là
 // thứ người đi lắp phải kiểm mỗi lần, còn bộ đếm gói chỉ dùng khi truy lỗi — nó
@@ -83,7 +106,8 @@ const char *const kInfoRow[8] = {"WIFI", "IP", "SÓNG", "MQTT",
 lv_obj_t *gInfoVal[8], *gInfoFoot;
 
 // --- CAI DAT -----------------------------------------------------------------
-lv_obj_t *gBrightLbl, *gBuzzOn, *gBuzzOff, *gIrCountLbl;
+//  Hàng "ÂM THANH" đã gỡ — bo không có còi, xem ui-screens.h::Setting.
+lv_obj_t *gBrightLbl, *gIrCountLbl;
 
 // --- MA IR DA HOC (lớp phủ) --------------------------------------------------
 //  18 tổ hợp: COOL 16..30 (15 mức) + DRY + FAN + OFF — đúng dải mà `coolMask`
@@ -206,10 +230,10 @@ lv_obj_t *dot(lv_obj_t *parent, lv_coord_t x, lv_coord_t y, lv_color_t c) {
 }
 
 void showTab(uint8_t i) {
-  if (i > 3) return;
+  if (i >= TABS) return;
   const bool changed = (gTab != i);
   gTab = i;
-  for (uint8_t k = 0; k < 4; k++) {
+  for (uint8_t k = 0; k < TABS; k++) {
     if (k == i) {
       lv_obj_clear_flag(gPage[k], LV_OBJ_FLAG_HIDDEN);
       // Nội dung trượt vào từ hai bên. CHỈ khi thật sự đổi tab — bấm lại đúng
@@ -306,14 +330,16 @@ void buildChrome() {
   // CHỌN BIỂU TƯỢNG THEO VIỆC NÓ LÀM, không theo cái nó vẽ:
   //   nhà       -> TRANG CHỦ, quy ước ai cũng hiểu
   //   nguồn     -> ĐIỀU KHIỂN; việc chính ở trang đó là bật/tắt và đổi chế độ
+  //   giọt nước -> MÁY TẠO ẨM; TINT là giọt nước, và độ ẩm thì không có biểu
+  //                tượng nào khác trong bộ này gần nghĩa hơn
   //   danh sách -> THÔNG TIN; đúng là 8 dòng chẩn đoán xếp thành danh sách
   //   bánh răng -> CÀI ĐẶT, quy ước ai cũng hiểu
   // Không có biểu tượng "thanh trượt" trong bộ này, nên "nguồn" là cái gần
   // nghĩa nhất — đừng đổi sang bút chì hay cây kéo cho lạ mắt.
-  static const char *kTab[4] = {
-      LV_SYMBOL_HOME, LV_SYMBOL_POWER, LV_SYMBOL_LIST, LV_SYMBOL_SETTINGS};
-  for (uint8_t i = 0; i < 4; i++) {
-    // Ô chạm nguyên 80×34 — kiosk.css đòi ô lớn, và đây là ô nhỏ nhất trên màn.
+  static const char *kTab[TABS] = {LV_SYMBOL_HOME, LV_SYMBOL_POWER, LV_SYMBOL_TINT,
+                                   LV_SYMBOL_LIST, LV_SYMBOL_SETTINGS};
+  for (uint8_t i = 0; i < TABS; i++) {
+    // Ô chạm nguyên 64×34 — kiosk.css đòi ô lớn, và đây là ô nhỏ nhất trên màn.
     gTabBtn[i] = lv_btn_create(gNav);
     lv_obj_remove_style_all(gTabBtn[i]);
     lv_obj_set_pos(gTabBtn[i], NAV_W * i, 0);
@@ -351,8 +377,8 @@ void buildChrome() {
   lv_obj_center(gToastLbl);
   chamfer(gToast, CH_SM, bgPrimary());
 
-  // --- 4 vùng nội dung ---
-  for (uint8_t i = 0; i < 4; i++) {
+  // --- vùng nội dung, mỗi tab một trang ---
+  for (uint8_t i = 0; i < TABS; i++) {
     gPage[i] = lv_obj_create(scr);
     lv_obj_remove_style_all(gPage[i]);
     lv_obj_set_pos(gPage[i], 0, CONTENT_Y);
@@ -421,12 +447,38 @@ void refreshControl() {
   char b[12];
   snprintf(b, sizeof b, "%d°C", gPendSet);
   setText(gSetBig, b);
+
+  // MÁY CHỦ ĐANG CẦM LÁI -> KHOÁ MỌI NÚT CHỈNH.
+  //
+  // Trước đây bấm ± hoặc đổi chế độ trong lúc TỰ ĐỘNG vẫn "ăn": con số trên màn
+  // đổi ngay. Nhưng KHÔNG có gì được gửi đi (onAdjust chỉ tự phát khi đang giữ
+  // quyền), và vòng lặp comfort kế tiếp kéo con số về giá trị của nó. Người dùng
+  // thấy máy nghe lời mình vài giây rồi tự ý đổi lại — đọc ra là bo hỏng, không
+  // phải "đang chạy tự động".
+  //
+  // Nút mờ thì nói thẳng ra thứ tự phải làm: giành quyền trước, chỉnh sau. Và nút
+  // THỦ CÔNG ngay bên dưới — CỐ Ý không bị khoá — làm đúng việc đó.
+  const bool locked = !gOverrideNow;
+  buttonDisable(gMinusBtn, locked);
+  buttonDisable(gPlusBtn, locked);
+
   for (uint8_t i = 0; i < 4; i++) {
     buttonSelect(gModeBtn[i], i == gPendMode);
-    buttonDisable(gModeBtn[i], !gModeOk[i]);
+    // Hai lý do khoá, gộp làm một: chưa học mã thì bấm cũng không bắn được gì,
+    // còn đang TỰ ĐỘNG thì bấm cũng không gửi đi đâu. Dòng chữ dưới ô nhiệt độ
+    // phân biệt hai ca đó, vì cách xử lý khác hẳn nhau.
+    buttonDisable(gModeBtn[i], !gModeOk[i] || locked);
   }
   // Chỉ COOL mới có nhiệt độ; các chế độ khác không dùng setpoint.
   lv_obj_set_style_text_color(gSetBig, gPendMode == 0 ? accent() : textMuted(), 0);
+
+  // Hàng QUẠT: mức vừa bắn, và có mức nào bấm được không.
+  bool anyFan = gFanMask != 0;
+  buttonDisable(gFanBtn, !anyFan);
+  if (!anyFan)                       setText(gFanVal, "CHƯA HỌC MÃ");
+  else if (gFanLast >= AcActions::FAN_COUNT) setText(gFanVal, "CHƯA ĐẶT");
+  else                               setText(gFanVal, AcActions::fanLabel(gFanLast));
+  lv_obj_set_style_text_color(gFanVal, anyFan ? textPrimary() : textMuted(), 0);
 
   // KHÔNG làm mờ nút THỦ CÔNG dù chưa học mã.
   //
@@ -442,9 +494,14 @@ void refreshControl() {
 
   // Dòng dưới ô nhiệt độ nói trước là bấm vào sẽ không bắn được mã, để người
   // dùng biết trước chứ không phải bấm rồi mới thấy thông báo lỗi.
+  //
+  // THỨ TỰ ƯU TIÊN CÓ NGHĨA: "chưa học mã" đứng TRÊN "đang tự động". Cả hai đều
+  // làm nút mờ, nhưng chỉ một trong hai gỡ được bằng nút ngay bên dưới — bảo
+  // người ta bấm THỦ CÔNG trong khi bo chưa có mã nào là chỉ đường vào ngõ cụt.
   bool anyCode = false;
   for (uint8_t i = 0; i < 4; i++) anyCode = anyCode || gModeOk[i];
-  if (!anyCode)               setText(gLimitLbl, "CHƯA HỌC MÃ — VÀO APP ĐỂ HỌC");
+  if (!anyCode)                 setText(gLimitLbl, "CHƯA HỌC MÃ — VÀO APP ĐỂ HỌC");
+  else if (locked)              setText(gLimitLbl, "TỰ ĐỘNG — BẤM THỦ CÔNG ĐỂ CHỈNH");
   else if (!gModeOk[gPendMode]) setText(gLimitLbl, "CHẾ ĐỘ NÀY CHƯA HỌC MÃ");
   else                          setText(gLimitLbl, "");
 }
@@ -474,9 +531,11 @@ void onAdjust(lv_event_t *e) {
 
   // Tự phát khi bấm ± — nhưng CHỈ khi cả hai điều kiện dưới đây đúng.
   //
-  //  1. Đang giữ quyền. Máy chủ đang cầm lái thì ± chỉ đổi số chờ, không tự giành
-  //     quyền: chạm nhầm vào màn treo tường không được phép hất máy chủ ra khỏi
-  //     vòng điều khiển. Muốn giành thì bấm THỦ CÔNG, một cú bấm có chủ đích.
+  //  1. Đang giữ quyền. GIỜ LÀ LƯỚI THỨ HAI, không còn là lưới duy nhất:
+  //     refreshControl() đã khoá hẳn hai nút ± khi máy chủ cầm lái, nên nhánh này
+  //     không chạy tới. Giữ lại vì nó rẻ và vì trạng thái khoá do một hàm KHÁC
+  //     quyết định — ai đó bỏ dòng buttonDisable kia đi thì điều kiện ở đây là
+  //     thứ duy nhất còn chặn một cú chạm nhầm hất máy chủ khỏi vòng điều khiển.
   //
   //  2. Đang ở COOL. Chỉ COOL có ma trận (chế độ, nhiệt độ); DRY/FAN/OFF dùng mã
   //     cố định và aliasTemp() bỏ hẳn nhiệt độ. Không có điều kiện này thì bấm ±
@@ -554,25 +613,81 @@ void onAuto(lv_event_t *) {
   toast("ĐÃ TRẢ QUYỀN CHO MÁY CHỦ");
 }
 
+/// Mở lớp phủ chọn tốc độ quạt. Thuần hiện/ẩn widget nên KHÔNG đi qua SettingFn —
+/// cùng lý do đã ghi ở onIrOpen().
+void onFanOpen(lv_event_t *) {
+  if (!gFanOverlay) return;
+  lv_obj_clear_flag(gFanOverlay, LV_OBJ_FLAG_HIDDEN);
+  // KHÔNG move_foreground — cùng lý do đã ghi ở onIrOpen(): thứ tự dựng trong
+  // build() đã cho đúng z-order, còn đẩy lên trên cùng thì lớp phủ HỌC REMOTE bị
+  // che nếu backend kích hoạt học lúc danh sách đang mở, và người dùng ngồi nhìn
+  // một bảng chọn không giải thích được vì sao máy đang chờ.
+  lv_obj_scroll_to_y(gFanList, 0, LV_ANIM_OFF);
+}
+
+void onFanClose(lv_event_t *) {
+  if (gFanOverlay) lv_obj_add_flag(gFanOverlay, LV_OBJ_FLAG_HIDDEN);
+}
+
+/// Chọn một mức quạt: đặt hàng cho loop() bắn, rồi đóng lớp phủ.
+///
+/// KHÔNG ĐỤNG gOverrideNow, và đây không phải bỏ sót. Mức quạt là một nút RỜI:
+/// nó không mang (chế độ, nhiệt độ) và không đặt cổng ghi đè nào phía máy chủ,
+/// nên suy ra quyền điều khiển từ nó là bịa. Đổi tốc độ gió trong lúc máy chủ
+/// đang tự chạy thì máy chủ VẪN đang tự chạy — đúng luật đã áp cho gói
+/// `action:` đến từ app (xem cuối takeCommand() trong main.cpp).
+///
+/// Cũng vì vậy mà nút này KHÔNG bị khoá khi đang TỰ ĐỘNG: nó không tranh quyền
+/// với ai cả.
+void onFanPick(lv_event_t *e) {
+  const uint8_t i = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
+  if (i >= AcActions::FAN_COUNT || !gOnCmd) return;
+  if (!((gFanMask >> i) & 1u)) {   // "không phím chết": nói lý do thay vì im lặng
+    toast("MỨC NÀY CHƯA HỌC MÃ — VÀO APP ĐỂ HỌC", true);
+    return;
+  }
+
+  Ui::Command c{};
+  c.kind = Ui::Command::FAN_SET;
+  c.arg  = i;
+  gOnCmd(c);
+
+  gFanLast = i;
+  refreshControl();
+  onFanClose(nullptr);
+
+  char b[40];
+  snprintf(b, sizeof b, "QUẠT %s", AcActions::fanLabel(i));
+  toast(b);
+}
+
 void buildControl() {
   lv_obj_t *p = gPage[1];
 
-  lv_obj_t *minus = buttonImg(p, 8, 4, 68, 76, &img_minus);
-  lv_obj_add_event_cb(minus, onAdjust, LV_EVENT_CLICKED, (void *)(intptr_t)-1);
+  // BỐ CỤC ĐÃ NÉN LẠI ĐỂ NHÉT VỪA HÀNG QUẠT — và cố ý KHÔNG cho trang này cuộn.
+  // Màn Cài đặt được cuộn vì hàng thứ 5 của nó là mục ít dùng; ở đây thì mọi
+  // hàng đều là điều khiển chính, mà một nút điều khiển phải cuộn mới thấy thì
+  // trên bảng treo tường coi như không tồn tại.
+  //   y   2..70   [−] [ nhiệt độ ] [+]
+  //   y  74..112  4 nút chế độ
+  //   y 116..152  THỦ CÔNG / TỰ ĐỘNG
+  //   y 156..180  hàng QUẠT
+  gMinusBtn = buttonImg(p, 8, 2, 68, 68, &img_minus);
+  lv_obj_add_event_cb(gMinusBtn, onAdjust, LV_EVENT_CLICKED, (void *)(intptr_t)-1);
 
-  lv_obj_t *box = card(p, 84, 4, 152, 76);
-  gSetBig = label(box, 0, 8, "26", fontHero(), accent());
+  lv_obj_t *box = card(p, 84, 2, 152, 68);
+  gSetBig = label(box, 0, 6, "26", fontHero(), accent());
   lv_obj_set_width(gSetBig, 152);
   lv_obj_set_style_text_align(gSetBig, LV_TEXT_ALIGN_CENTER, 0);
-  gLimitLbl = label(box, 0, 56, "GIỚI HẠN 16 - 30", fontTiny(), textMuted());
+  gLimitLbl = label(box, 0, 52, "GIỚI HẠN 16 - 30", fontTiny(), textMuted());
   lv_obj_set_width(gLimitLbl, 152);
   lv_obj_set_style_text_align(gLimitLbl, LV_TEXT_ALIGN_CENTER, 0);
 
-  lv_obj_t *plus = buttonImg(p, 244, 4, 68, 76, &img_plus);
-  lv_obj_add_event_cb(plus, onAdjust, LV_EVENT_CLICKED, (void *)(intptr_t)1);
+  gPlusBtn = buttonImg(p, 244, 2, 68, 68, &img_plus);
+  lv_obj_add_event_cb(gPlusBtn, onAdjust, LV_EVENT_CLICKED, (void *)(intptr_t)1);
 
   for (uint8_t i = 0; i < 4; i++) {
-    gModeBtn[i] = button(p, PAD + 78 * i, 86, 74, 44, kModeLabel[i]);
+    gModeBtn[i] = button(p, PAD + 78 * i, 74, 74, 38, kModeLabel[i]);
     lv_obj_add_event_cb(gModeBtn[i], onMode, LV_EVENT_CLICKED, (void *)(uintptr_t)i);
   }
 
@@ -583,19 +698,88 @@ void buildControl() {
   // KHÔNG primary=true. Cờ đó gắn nền xanh VĨNH VIỄN, và buttonSelect() ở dưới
   // không gỡ được nó — nút sẽ sáng kể cả khi máy đang chạy tự động. Đúng lỗi đã
   // xảy ra với nút BẬT của ÂM BÁO.
-  gSendBtn = button(p, PAD, 136, 150, 42, "THỦ CÔNG");
+  gSendBtn = button(p, PAD, 116, 150, 36, "THỦ CÔNG");
   lv_obj_add_event_cb(gSendBtn, onSend, LV_EVENT_CLICKED, nullptr);
-  gAutoBtn = button(p, 164, 136, 150, 42, "TỰ ĐỘNG");
+  gAutoBtn = button(p, 164, 116, 150, 36, "TỰ ĐỘNG");
   lv_obj_add_event_cb(gAutoBtn, onAuto, LV_EVENT_CLICKED, nullptr);
+
+  // --- hàng QUẠT ---
+  // Mức gió là thứ người ta chỉnh gần như mỗi lần bật máy, nên nó phải nằm ngay
+  // trên màn ĐIỀU KHIỂN chứ không giấu trong Cài đặt. Nhưng nó KHÔNG phải một
+  // "chế độ" thứ năm: bốn nút trên đổi (chế độ, nhiệt độ) và tranh quyền với máy
+  // chủ, còn cái này chỉ phát lại một khung IR rời. Nên nó được một hàng riêng,
+  // hình dạng khác hẳn — không phải nút vuông thứ năm xếp cùng hàng.
+  labelCaps(p, 12, 162, "QUẠT");
+  gFanVal = label(p, 56, 160, "CHƯA ĐẶT", fontLabel(), textPrimary());
+  lv_obj_set_width(gFanVal, 180);
+  lv_obj_set_style_text_align(gFanVal, LV_TEXT_ALIGN_RIGHT, 0);
+  gFanBtn = button(p, 244, 156, 68, 24, "CHỌN");
+  lv_obj_add_event_cb(gFanBtn, onFanOpen, LV_EVENT_CLICKED, nullptr);
 
   refreshControl();
 }
 
 // ---------------------------------------------------------------------------
-//  Màn 3 — THONG TIN
+//  Màn 3 — MAY TAO AM
+// ---------------------------------------------------------------------------
+/// Ba nút BẬT / TẮT / TỰ ĐỘNG. `arg` đi thẳng vào Ui::Command.
+///
+/// BA NÚT CHỨ KHÔNG PHẢI MỘT NÚT BẬP BÊNH + một nút tự động: "bật/tắt" là một
+/// câu khẳng định, và nút khẳng định thì bấm bao nhiêu lần cũng phải cho ra cùng
+/// một trạng thái. Panel chỉ TIN rằng máy đang chạy chứ không đo được (remote
+/// một chiều), nên một nút bập bênh sẽ lấy niềm tin có thể sai đó làm gốc — bấm
+/// "tắt" mà máy lại bật là kết cục có thật, không phải giả thuyết.
+void onHumid(lv_event_t *e) {
+  if (!gOnCmd) return;
+  Ui::Command c{};
+  c.kind = Ui::Command::HUMID_SET;
+  c.arg  = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
+  gOnCmd(c);
+}
+
+void buildHumidifier() {
+  lv_obj_t *p = gPage[2];
+
+  lv_obj_t *c1 = card(p, PAD, 2, 308, 88);
+  label(c1, 12, 8, "MÁY TẠO ĐỘ ẨM", fontTitle(), textPrimary());
+  gHumBadge = badge(c1, 228, 9, 68, "TỰ ĐỘNG", accent());
+  gHumBadgeLbl = lv_obj_get_child(gHumBadge, 0);
+
+  gHumState = label(c1, 12, 34, "--", fontBody(), textMuted());
+
+  // Độ ẩm ĐÃ LÀM MƯỢT mà bộ điều khiển đang dùng — KHÔNG phải con số thô trên
+  // trang chủ. Hai số này lệch nhau vài phần trăm là bình thường (EMA có hằng số
+  // thời gian ~25 giây), và đây phải là số ở đây: nó mới là thứ giải thích được
+  // vì sao máy bật hay tắt. Hiện số thô cạnh một quyết định lấy từ số mượt là
+  // mời người đọc đi tìm một mâu thuẫn không có thật.
+  gHumRh = label(c1, 196, 26, "--", fontBig(), accentText());
+  lv_obj_set_width(gHumRh, 100);
+  lv_obj_set_style_text_align(gHumRh, LV_TEXT_ALIGN_RIGHT, 0);
+
+  gHumNote = label(c1, 12, 60, "", fontTiny(), textMuted());
+  lv_obj_set_width(gHumNote, 284);
+
+  lv_obj_t *c2 = card(p, PAD, 94, 308, 38);
+  labelCaps(c2, 12, 6, "MÃ IR");
+  gHumCodes = label(c2, 12, 20, "--", fontTiny(), textMuted());
+  lv_obj_set_width(gHumCodes, 284);
+
+  // BẬT và TẮT rộng bằng nhau, TỰ ĐỘNG rộng hơn một chút cho vừa chữ. Đặt TỰ
+  // ĐỘNG ở CUỐI, cùng vị trí tương đối với nút TỰ ĐỘNG của màn ĐIỀU KHIỂN — hai
+  // màn cùng một cặp khái niệm thì không nên bắt tay tìm nút ở hai chỗ khác nhau.
+  gHumBtnOn = button(p, PAD, 136, 98, 42, "BẬT");
+  lv_obj_add_event_cb(gHumBtnOn, onHumid, LV_EVENT_CLICKED, (void *)(uintptr_t)Ui::HUMID_ON_ARG);
+  gHumBtnOff = button(p, 108, 136, 98, 42, "TẮT");
+  lv_obj_add_event_cb(gHumBtnOff, onHumid, LV_EVENT_CLICKED, (void *)(uintptr_t)Ui::HUMID_OFF_ARG);
+  gHumBtnAuto = button(p, 210, 136, 104, 42, "TỰ ĐỘNG");
+  lv_obj_add_event_cb(gHumBtnAuto, onHumid, LV_EVENT_CLICKED, (void *)(uintptr_t)Ui::HUMID_AUTO_ARG);
+}
+
+// ---------------------------------------------------------------------------
+//  Màn 4 — THONG TIN
 // ---------------------------------------------------------------------------
 void buildInfo() {
-  lv_obj_t *p = gPage[2];
+  lv_obj_t *p = gPage[3];
   for (uint8_t i = 0; i < 8; i++) {
     const lv_coord_t y = 4 + 20 * i;
     labelCaps(p, 12, y, kInfoRow[i]);
@@ -615,7 +799,7 @@ void buildInfo() {
 }
 
 // ---------------------------------------------------------------------------
-//  Màn 4 — CAI DAT
+//  Màn 5 — CAI DAT
 // ---------------------------------------------------------------------------
 void onSetting(lv_event_t *e) {
   if (gOnSetting) gOnSetting((Setting)(uintptr_t)lv_event_get_user_data(e));
@@ -811,7 +995,7 @@ void onLogClose(lv_event_t *) {
 }
 
 void buildSettings() {
-  lv_obj_t *p = gPage[3];
+  lv_obj_t *p = gPage[4];
 
   lv_obj_t *r0 = card(p, PAD, 4, 308, 40);
   label(r0, 12, 12, "ĐỘ SÁNG", fontBody(), textPrimary());
@@ -836,25 +1020,14 @@ void buildSettings() {
   lv_obj_add_event_cb(bu, onSetting, LV_EVENT_SHORT_CLICKED, (void *)(uintptr_t)BRIGHT_UP);
   lv_obj_add_event_cb(bu, onSetting, LV_EVENT_LONG_PRESSED_REPEAT, (void *)(uintptr_t)BRIGHT_UP);
 
-  lv_obj_t *r1 = card(p, PAD, 50, 308, 40);
-  label(r1, 12, 12, "ÂM THANH", fontBody(), textPrimary());
-  // KHÔNG dùng primary=true ở đây. `primary` gắn style nền xanh VĨNH VIỄN, mà
-  // buttonSelect() chỉ thêm/bớt style "đang chọn" — nó không gỡ nổi style
-  // primary, nên nút BẬT sáng mãi kể cả sau khi đã bấm TẮT.
+  // HÀNG "ÂM THANH" ĐÃ GỠ HẲN — bo panel S3 không có còi (board-pins.h:
+  // BUZZER_PIN = PIN_NONE). Xem ui-screens.h::Setting cho lý do đầy đủ.
   //
-  // Sâu hơn: đây là cặp CHỌN MỘT TRONG HAI, không phải một hành động chính kèm
-  // một hành động phụ. "Primary" nghĩa là "việc nên làm ở màn này" — với bật/tắt
-  // thì không có việc nào nên làm hơn việc nào. Trạng thái do buttonSelect()
-  // quyết định, và chỉ nó thôi.
-  gBuzzOn  = button(r1, 218, 6, 36, 28, "BẬT");
-  lv_obj_add_event_cb(gBuzzOn, onSetting, LV_EVENT_CLICKED, (void *)(uintptr_t)BUZZER_ON);
-  gBuzzOff = button(r1, 258, 6, 36, 28, "TẮT");
-  lv_obj_add_event_cb(gBuzzOff, onSetting, LV_EVENT_CLICKED, (void *)(uintptr_t)BUZZER_OFF);
-
-  // Hàng "ĐỒNG BỘ GIỜ" đã bỏ -> KHỞI ĐỘNG LẠI dời lên y=96 thế chỗ. Để nguyên
-  // y=142 thì màn hở một khoảng trống bằng đúng một hàng, nhìn ra là thiếu mất
-  // một mục chứ không phải là bố cục có chủ đích.
-  lv_obj_t *r2 = card(p, PAD, 96, 308, 40);
+  // Hai hàng đã bỏ ("ĐỒNG BỘ GIỜ" trước đây, "ÂM THANH" lần này) nên bốn hàng
+  // còn lại dồn lên hết: 4 · 48 · 92 · 136, hàng cuối kết thúc ở 176 — vừa trong
+  // vùng nội dung 180. Để nguyên toạ độ cũ thì màn hở đúng một khoảng bằng một
+  // hàng, và nó đọc ra là "thiếu mất một mục" chứ không phải bố cục có chủ đích.
+  lv_obj_t *r2 = card(p, PAD, 48, 308, 40);
   label(r2, 12, 12, "KHỞI ĐỘNG LẠI", fontBody(), textPrimary());
   // Biểu tượng thay chữ "CHẠY" — chữ đó nói hành động chung chung, còn mũi tên
   // vòng lại thì nói đúng việc: khởi động lại.
@@ -878,9 +1051,7 @@ void buildSettings() {
   // nhầm là chuyện có thật — và hậu quả ở đây là cả nhà mất điều khiển ~20 giây.
   lv_obj_add_event_cb(br, onRebootAsk, LV_EVENT_CLICKED, nullptr);
 
-  // y=142 là chỗ KHỞI ĐỘNG LẠI từng nằm trước khi dời lên; hàng cuối vừa khít
-  // vùng nội dung (142 + 40 = 182 < CONTENT_H 180+2 mép card).
-  lv_obj_t *r3 = card(p, PAD, 142, 308, 40);
+  lv_obj_t *r3 = card(p, PAD, 92, 308, 40);
   label(r3, 12, 12, "MÃ IR ĐÃ HỌC", fontBody(), textPrimary());
   // Đếm ngay trên hàng, không bắt mở ra mới biết: người lắp cần trả lời "bo này
   // đã học đủ chưa" trong một cái liếc, giống ô MÃ IR ở màn THÔNG TIN.
@@ -890,14 +1061,10 @@ void buildSettings() {
   lv_obj_t *bl = button(r3, 226, 6, 68, 28, "XEM");
   lv_obj_add_event_cb(bl, onIrOpen, LV_EVENT_CLICKED, nullptr);
 
-  // Hàng thứ 5 vượt quá vùng nội dung (188 + 40 = 228 > CONTENT_H 180), nên
-  // trang này — VÀ CHỈ TRANG NÀY — được cuộn dọc. Ba trang kia vẫn cố định:
-  // cho cuộn ở nơi không có gì để cuộn chỉ tạo ra cảm giác "trang bị xê dịch"
-  // mỗi khi vuốt trượt tay.
-  lv_obj_add_flag(p, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_set_scroll_dir(p, LV_DIR_VER);
-
-  lv_obj_t *r4 = card(p, PAD, 188, 308, 40);
+  // KHÔNG CÒN CHO CUỘN. Bốn hàng vừa khít 180 px sau khi gỡ ÂM THANH, mà cho
+  // cuộn ở nơi không có gì để cuộn chỉ tạo ra cảm giác "trang bị xê dịch" mỗi
+  // lần vuốt trượt tay. Thêm hàng thứ 5 vào đây thì bật lại hai dòng đã xoá.
+  lv_obj_t *r4 = card(p, PAD, 136, 308, 40);
   label(r4, 12, 12, "NHẬT KÝ LỆNH", fontBody(), textPrimary());
   lv_obj_t *bg = button(r4, 226, 6, 68, 28, "XEM");
   lv_obj_add_event_cb(bg, onLogOpen, LV_EVENT_CLICKED, nullptr);
@@ -972,6 +1139,55 @@ void buildIrList() {
   lv_obj_set_width(gIrEmpty, SCREEN_W);
   lv_obj_set_style_text_align(gIrEmpty, LV_TEXT_ALIGN_CENTER, 0);
 
+}
+
+// ---------------------------------------------------------------------------
+//  Lớp phủ — TOC DO QUAT
+// ---------------------------------------------------------------------------
+void buildFanList() {
+  lv_obj_t *scr = lv_scr_act();
+  gFanOverlay = lv_obj_create(scr);
+  lv_obj_remove_style_all(gFanOverlay);
+  lv_obj_set_pos(gFanOverlay, 0, 0);
+  lv_obj_set_size(gFanOverlay, SCREEN_W, SCREEN_H);
+  lv_obj_set_style_bg_color(gFanOverlay, bgPrimary(), 0);
+  lv_obj_set_style_bg_opa(gFanOverlay, LV_OPA_COVER, 0);
+  lv_obj_clear_flag(gFanOverlay, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_add_flag(gFanOverlay, LV_OBJ_FLAG_HIDDEN);
+
+  lv_obj_t *t = label(gFanOverlay, 16, 10, "TỐC ĐỘ QUẠT", fontLabel(), accent());
+  lv_obj_set_style_text_letter_space(t, 2, 0);
+
+  lv_obj_t *bc = button(gFanOverlay, 236, 6, 68, 26, "ĐÓNG");
+  lv_obj_add_event_cb(bc, onFanClose, LV_EVENT_CLICKED, nullptr);
+
+  // 7 hàng × 34 px = 238 px trong khung 166 -> phải cuộn. LV_DIR_VER thôi, cùng
+  // lý do với danh sách mã: cho cuộn ngang thì một cú vuốt chéo là danh sách
+  // trôi sang bên và không có gì kéo nó về.
+  gFanList = lv_obj_create(gFanOverlay);
+  lv_obj_remove_style_all(gFanList);
+  lv_obj_set_pos(gFanList, 16, 38);
+  lv_obj_set_size(gFanList, 288, 166);
+  lv_obj_set_flex_flow(gFanList, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_style_pad_row(gFanList, 4, 0);
+  lv_obj_set_scroll_dir(gFanList, LV_DIR_VER);
+  lv_obj_add_flag(gFanList, LV_OBJ_FLAG_SCROLLABLE);
+
+  for (uint8_t i = 0; i < AcActions::FAN_COUNT; i++) {
+    // CẢ HÀNG là nút, không phải nhãn kèm một nút nhỏ bên phải: ở đây mỗi hàng
+    // chỉ làm đúng MỘT việc (chọn mức này), khác danh sách mã vốn có hai việc
+    // (xem và xoá) nên mới phải tách nút riêng. Ô chạm 272×30 rộng gấp bốn.
+    lv_obj_t *row = button(gFanList, 0, 0, 272, 30, AcActions::fanLabel(i));
+    lv_obj_add_event_cb(row, onFanPick, LV_EVENT_CLICKED, (void *)(uintptr_t)i);
+    gFanRow[i] = row;
+  }
+
+  // Trạng thái rỗng nói VIỆC PHẢI LÀM. Panel không tự học nút rời được — luồng
+  // học nằm trong app (POST /api/v1/ir/learn-action), nên chỉ đường tới đó.
+  gFanEmpty = label(gFanOverlay, 0, 104, "CHƯA HỌC MỨC QUẠT NÀO\nVÀO APP ĐỂ HỌC REMOTE",
+                    fontTiny(), textMuted());
+  lv_obj_set_width(gFanEmpty, SCREEN_W);
+  lv_obj_set_style_text_align(gFanEmpty, LV_TEXT_ALIGN_CENTER, 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -1142,6 +1358,7 @@ void build(CommandFn onCmd, SettingFn onSetting) {
   buildChrome();
   buildHome();
   buildControl();
+  buildHumidifier();
   buildInfo();
   buildSettings();
   // THỨ TỰ CÓ NGHĨA: LVGL vẽ theo thứ tự tạo, nên lớp phủ học remote phải dựng
@@ -1149,6 +1366,7 @@ void build(CommandFn onCmd, SettingFn onSetting) {
   // người dùng đang mở danh sách, và khi đó thứ cần nhìn là "bấm nút trên remote
   // đi", không phải bảng liệt kê.
   buildIrList();
+  buildFanList();
   buildLogList();
   // Hộp xác nhận nằm TRÊN hai lớp phủ danh sách (nó hỏi về thứ trong đó) nhưng
   // DƯỚI lớp phủ học remote: học có đồng hồ đếm ngược 30 giây, còn câu hỏi thì
@@ -1261,7 +1479,88 @@ void update(const Ui::Model &m) {
   if (gModeOk[1] != m.hasDry) { gModeOk[1] = m.hasDry; changed = true; }
   if (gModeOk[2] != m.hasFan) { gModeOk[2] = m.hasFan; changed = true; }
   if (gModeOk[3] != m.hasOff) { gModeOk[3] = m.hasOff; changed = true; }
+  // Ai đang cầm lái quyết định NÚT NÀO BẤM ĐƯỢC, nên nó phải kéo theo một lần vẽ
+  // lại — thiếu dòng này thì các nút chỉ mở khoá ở lần đổi mã IR kế tiếp, tức là
+  // bấm THỦ CÔNG xong mà ± vẫn mờ.
+  static bool lastOverride = false;
+  if (lastOverride != m.overrideLocal) { lastOverride = m.overrideLocal; changed = true; }
+
+  // --- DIEU KHIEN: mức quạt ---
+  if (gFanMask != m.fanMask) {
+    gFanMask = m.fanMask;
+    changed = true;
+    uint8_t shown = 0;
+    for (uint8_t i = 0; i < AcActions::FAN_COUNT; i++) {
+      const bool have = (m.fanMask >> i) & 1u;
+      // MỜ chứ KHÔNG ẨN — "không phím chết" (README §4.1). Ẩn hẳn thì người dùng
+      // không biết máy có mức đó, và không biết là mình còn thiếu mã để học.
+      buttonDisable(gFanRow[i], !have);
+      if (have) shown++;
+    }
+    if (shown) lv_obj_add_flag(gFanEmpty, LV_OBJ_FLAG_HIDDEN);
+    else       lv_obj_clear_flag(gFanEmpty, LV_OBJ_FLAG_HIDDEN);
+  }
+  // Mức panel vừa bắn do lõi 1 xác nhận (nó mới biết có bắn được không). Con số
+  // ở lõi 0 chỉ là dự đoán lạc quan đặt lúc bấm — cái này đè lên nó.
+  if (gFanLast != m.fanLast) { gFanLast = m.fanLast; changed = true; }
+  for (uint8_t i = 0; i < AcActions::FAN_COUNT; i++) {
+    buttonSelect(gFanRow[i], i == gFanLast);
+  }
+
   if (changed) refreshControl();
+
+  // --- MAY TAO AM ---
+  {
+    if (m.humidOverride) {
+      lv_obj_set_style_bg_color(gHumBadge, warn(), 0);
+      setText(gHumBadgeLbl, "GHI ĐÈ");
+    } else {
+      lv_obj_set_style_bg_color(gHumBadge, accent(), 0);
+      setText(gHumBadgeLbl, "TỰ ĐỘNG");
+    }
+
+    setText(gHumState, m.humidOn ? "ĐANG CHẠY" : "ĐÃ TẮT");
+    lv_obj_set_style_text_color(gHumState, m.humidOn ? ok() : textMuted(), 0);
+
+    fmtUnit(b, sizeof b, m.humidRh, 0, " %");
+    setText(gHumRh, b);
+
+    // Ghi đè có HẠN, và cái hạn đó phải hiện ra. Người bấm TẮT rồi bỏ đi cần biết
+    // máy sẽ tự chạy lại — không nói thì hai tiếng sau máy bật lên và đọc ra là
+    // nút TẮT không ăn.
+    if (m.humidOverride && m.humidOverrideLeftSec > 0) {
+      snprintf(b, sizeof b, "%s · tự động lại sau %lu phút",
+               m.humidNote ? m.humidNote : "",
+               (unsigned long)((m.humidOverrideLeftSec + 59) / 60));
+      setText(gHumNote, b);
+    } else {
+      setText(gHumNote, m.humidNote ? m.humidNote : "");
+    }
+
+    // Hai ô mã, ba kết cục khác nhau — và ca giữa là ca dễ hiểu nhầm nhất, nên
+    // nó phải được gọi tên chứ không gộp vào "chưa đủ mã".
+    if (m.humidHasOn && m.humidHasOff) {
+      setText(gHumCodes, "ĐÃ CÓ MÃ BẬT VÀ TẮT");
+      lv_obj_set_style_text_color(gHumCodes, ok(), 0);
+    } else if (m.humidHasOn) {
+      setText(gHumCodes, "CHỈ CÓ MÃ BẬT — DÙNG NHƯ REMOTE BẬP BÊNH");
+      lv_obj_set_style_text_color(gHumCodes, warn(), 0);
+    } else {
+      setText(gHumCodes, "CHƯA HỌC MÃ — VÀO APP ĐỂ HỌC");
+      lv_obj_set_style_text_color(gHumCodes, err(), 0);
+    }
+
+    // Ba nút vừa là hành động vừa là đèn báo, đúng khuôn THỦ CÔNG/TỰ ĐỘNG của
+    // màn ĐIỀU KHIỂN: nút đang sáng nói "đang ở chế độ này", không phải "hết bấm
+    // được" — bấm lại vẫn có tác dụng (gia hạn ghi đè).
+    buttonSelect(gHumBtnAuto, !m.humidOverride);
+    buttonSelect(gHumBtnOn, m.humidOverride && m.humidOn);
+    buttonSelect(gHumBtnOff, m.humidOverride && !m.humidOn);
+    // Chưa có mã BẬT thì không có chiều nào bắn được — khoá cả hai nút tay, giữ
+    // TỰ ĐỘNG mở để người dùng luôn thoát được khỏi ghi đè.
+    buttonDisable(gHumBtnOn, !m.humidHasOn);
+    buttonDisable(gHumBtnOff, !m.humidHasOn);
+  }
 
   // --- CAI DAT: danh sách mã đã học ---
   // Chỉ dựng lại khi TẬP MÃ thật sự đổi. update() chạy 5 lần/giây, mà việc này
@@ -1438,11 +1737,6 @@ void addLog(const Ui::CmdLog &e, bool clockValid, uint8_t hh, uint8_t mm, uint32
 
   gLogLastMin = nowSec / 60;
   renderLog(nowSec);
-}
-
-void setBuzzer(bool on) {
-  buttonSelect(gBuzzOn, on);
-  buttonSelect(gBuzzOff, !on);
 }
 
 } // namespace Screens
