@@ -1,41 +1,49 @@
 // ============================================================================
-//  BreezeLink — QR Box Advance Touch · GATEWAY TRONG NHÀ + IR blaster
+//  BreezeLink - QR Box Advance Touch - INDOOR GATEWAY + IR blaster
 // ----------------------------------------------------------------------------
-//  Bo này KHÔNG CÒN ĐO NHIỆT ĐỘ. Bốn node ESP32-C3 đặt ở bốn góc phòng làm việc
-//  đó (FirmWare/esp32-room/), còn bo này làm năm việc của một cầu nối:
-//    1. Nhận ESP-NOW từ 4 node góc phòng + node ngoài trời -> trung chuyển lên
-//       MQTT hộ TỪNG node (mỗi node một topic riêng, theo uuid nó tự khai)
-//    2. Nhận lệnh từ cloud -> phát hồng ngoại điều khiển máy lạnh + học remote
-//    3. Hiển thị + cho điều khiển tại chỗ trên màn cảm ứng 2.8" (tác vụ lõi 0)
-//    4. Đẩy ảnh chụp sang Arduino UNO Q qua Bluetooth (GATT, vai peripheral)
-//    5. Nhận đề xuất/lệnh ngược từ UNO Q — và chỉ thi hành khi đó là LỆNH
+//  THIS BOARD NO LONGER MEASURES TEMPERATURE. Four ESP32-C3 nodes in the four
+//  corners of the room do that (FirmWare/esp32-room/), while this board does the
+//  five jobs of a bridge:
+//    1. Receive ESP-NOW from the 4 room-corner nodes + the outdoor node -> relay
+//       to MQTT on EACH node's behalf (one topic per node, keyed by the uuid it
+//       declares itself)
+//    2. Receive commands from the cloud -> transmit infrared to the air
+//       conditioner + learn the remote
+//    3. Display and allow local control on the 2.8" touch screen (a core-0 task)
+//    4. Push snapshots to the Arduino UNO Q over Bluetooth (GATT, peripheral role)
+//    5. Receive advice/commands back from the UNO Q -- and only execute when it is
+//       a COMMAND
 //
-//  VÌ SAO BỎ DHT22 KHỎI BO NÀY: một cảm biến treo trên tường không nói được
-//  nhiệt độ của phòng, nó nói nhiệt độ của CÁI TƯỜNG ĐÓ. Bốn góc chênh nhau
-//  3-4°C là chuyện thường (nắng cửa sổ, miệng gió, sau tủ). Nay số "trong nhà"
-//  là TRUNG VỊ của các góc còn tươi — xem room-registry.h cho lý do chọn trung
-//  vị thay vì trung bình cộng.
+//  WHY THE DHT22 WAS REMOVED FROM THIS BOARD: a sensor on a wall does not tell you
+//  the temperature of the room, it tells you the temperature of THAT WALL. Four
+//  corners differing by 3-4degC is routine (window sun, air outlet, behind a
+//  cabinet). The "indoor" number is now the MEDIAN of the fresh corners -- see
+//  room-registry.h for why the median rather than the mean.
 //
-//  HỆ QUẢ QUAN TRỌNG: bo này không publish `telemetry` nữa. Nó không có số đo
-//  nào của riêng mình, và gửi số mượn của node khác dưới tên mình là bịa. MAC
-//  của nó đi kèm gói `state` (state_handler.py đọc) để trang nạp firmware vẫn
-//  hiện được.
+//  AN IMPORTANT CONSEQUENCE: this board no longer publishes `telemetry`. It has no
+//  reading of its own, and sending another node's borrowed numbers under its own
+//  name would be fabrication. Its MAC ships with the `state` packet (read by
+//  state_handler.py) so the firmware-flashing page can still show it.
 //
-//  BA RADIO TRÊN MỘT ĂNG-TEN: WiFi/MQTT + ESP-NOW + BLE cùng dùng một khối
-//  2.4GHz. Bộ đồng tồn tại của IDF chia thời gian giúp. BLE ở đây NHẸ hơn hẳn
-//  phương án từng cân nhắc (quét advert của 4 node phòng): gateway chỉ quảng bá
-//  và giữ MỘT kết nối GATT với UNO Q, không quét gì cả — mà quét mới là thứ ăn
-//  sóng liên tục. Số đo phòng đi ESP-NOW, vốn đã chia sẻ radio WiFi sẵn có.
+//  THREE RADIOS ON ONE ANTENNA: WiFi/MQTT + ESP-NOW + BLE all share one 2.4GHz
+//  block. IDF's coexistence layer time-slices them. BLE here is far LIGHTER than
+//  the approach once considered (scanning for the 4 room nodes' advertisements):
+//  the gateway only advertises and holds ONE GATT connection to the UNO Q, with no
+//  scanning at all -- and scanning is the thing that eats airtime continuously.
+//  Room readings go over ESP-NOW, which already shares the existing WiFi radio.
 //
-//  6 topic đang dùng, khớp CHÍNH XÁC backend (src/app/utils/mqtt_naming.py):
+//  The 6 topics in use, matching the backend EXACTLY
+//  (src/app/utils/mqtt_naming.py):
 //    telemetry  node -> cloud   {ts,t,h,rssi,mac,fw}      (telemetry_handler.py)
-//                               bo này CHỈ gửi hộ node khác, không gửi của mình
-//    status     node -> cloud   "online"/"offline" retain (status_handler.py)
-//    cmd        cloud -> node   lệnh IR HOẶC lệnh học     (command_publisher.py)
-//    state      node -> cloud   {ack,mode,setpoint,mac} retain (state_handler.py)
+//                               this board ONLY sends on other nodes' behalf,
+//                               never its own
+//    status     node -> cloud   "online"/"offline" retained (status_handler.py)
+//    cmd        cloud -> node   an IR command OR a learn command
+//                                                          (command_publisher.py)
+//    state      node -> cloud   {ack,mode,setpoint,mac} retained (state_handler.py)
 //    learn      node -> cloud   {raw_timing,mode/action,temp} (learn_handler.py)
 //    override   node -> cloud   {mode,setpoint} | {clear}  (override_handler.py)
-//                               KHÔNG retain — xem buildTopics()
+//                               NOT retained -- see buildTopics()
 // ============================================================================
 #include <Arduino.h>
 #include <WiFi.h>
@@ -44,8 +52,9 @@
 #include "config.h"
 #include "espnow-message.h"
 #include "espnow-relay.h"
-// Ghim kênh ESP-NOW khi mất WiFi. Không có nó thì mất mạng = mất luôn số đo của
-// 4 góc phòng, vì radio panel lang thang theo vòng dò WiFi — xem espnow-channel.h.
+// Pin the ESP-NOW channel while WiFi is down. Without it, losing the network also
+// means losing the 4 room corners' readings, because the panel's radio wanders off
+// with the WiFi probe loop -- see espnow-channel.h.
 #include "espnow-channel.h"
 #include "room-registry.h"
 #include "slave-watch.h"
@@ -53,38 +62,44 @@
 #include "ir-io.h"
 #include "ir-store.h"
 #include "ac-actions.h"
-// Máy tạo độ ẩm: panel tự lái bằng độ ẩm trung vị của 4 góc phòng, KHÔNG qua máy
-// chủ. Backend chỉ tham gia ở khâu học mã (hai nút rời HUMID_ON/HUMID_OFF).
+// Humidifier: the panel drives it itself from the median humidity of the 4 room
+// corners, WITHOUT going through the server. The backend is only involved in
+// learning the codes (the two discrete buttons HUMID_ON/HUMID_OFF).
 #include "humidifier-control.h"
-// Nhật ký từng gói vào/ra. TẮT trừ khi biên dịch với -D GATEWAY_TRACE=1, và khi
-// tắt thì mọi lời gọi dưới đây bị trình biên dịch xoá sạch (thân hàm rỗng).
+// Per-packet IN/OUT trace log. OFF unless compiled with -D GATEWAY_TRACE=1, and
+// when off the compiler removes every call below entirely (empty function bodies).
 #include "serial-trace.h"
-// Bo QR Box Advance Touch Screen: màn 2.8" chạy trên TÁC VỤ RIÊNG Ở LÕI 0.
-// Thiết kế giao diện + lý do phải tách lõi: ../../Interface/README.md và ui.h.
-// loop() dưới đây không vẽ một pixel nào — nó chỉ đổ số liệu sang và rút lệnh về.
+// The QR Box Advance Touch Screen board: the 2.8" display runs in ITS OWN TASK ON
+// CORE 0. UI design and why the cores must be separated: ../../Interface/README.md
+// and ui.h. The loop() below does not draw a single pixel -- it only feeds data
+// across and collects commands back.
 #include "ui/ui.h"
 
-// KHÔNG CÓ BẢNG TRA NODE GÓC PHÒNG Ở ĐÂY, và đó là lý do chọn ESP-NOW.
+// THERE IS NO ROOM-NODE LOOKUP TABLE HERE, and that is the reason for choosing
+// ESP-NOW.
 //
-// Gói ESP-NOW chở được 250 byte nên mỗi node góc phòng mang thẳng device_uuid 32
-// ký tự của chính nó (shared/espnow-message.h). Gateway cứ thế publish vào topic
-// của node đó — thêm/bớt một góc thì chỉ nạp firmware cho góc mới, gateway không
-// phải sửa và không phải nạp lại.
+// An ESP-NOW frame carries 250 bytes, so each room-corner node carries its own
+// 32-character device_uuid directly (shared/espnow-message.h). The gateway simply
+// publishes to that node's topic -- adding or removing a corner only means flashing
+// the new corner; the gateway needs no change and no reflash.
 //
-// Phương án BLE từng cân nhắc thì ngược lại: advertising cổ điển chỉ có 31 byte,
-// chở không nổi uuid, nên sẽ buộc file này giữ một mảng ROOM_NODE_UUIDS mà lệch
-// một ô là số đo của góc A nộp lên cloud dưới tên góc B — biểu đồ vẫn có số,
-// không lỗi ở đâu cả, hai góc bị hoán tên vĩnh viễn.
+// The BLE approach once considered is the opposite: a classic advertising packet
+// is only 31 bytes and cannot carry the uuid, which would force this file to keep
+// a ROOM_NODE_UUIDS array where one slot out of place puts corner A's readings in
+// the cloud under corner B's name -- the charts still show numbers, nothing
+// anywhere reports an error, and the two corners stay permanently swapped.
 
-// Broker EMQX tự host trên VPS chạy plaintext 1883 (MQTT_TLS=false trong
-// docker-compose), nên dùng WiFiClient thường — KHÔNG phải WiFiClientSecure.
+// The self-hosted EMQX broker on the VPS runs plaintext on 1883 (MQTT_TLS=false in
+// docker-compose), so use a plain WiFiClient -- NOT WiFiClientSecure.
 static WiFiClient   net;
 static PubSubClient mqtt(net);
 
-/// PubSubClient mặc định chỉ có bộ đệm 256 byte và ÂM THẦM VỨT mọi gói lớn hơn.
-/// Lệnh IR mang `ir_raw` vài trăm số -> vài KB JSON, và gói learn node gửi lên
-/// cũng vậy. Không nới chỗ này thì mọi lệnh có ir_raw biến mất không dấu vết:
-/// log không báo gì, máy lạnh không nhúc nhích. 12KB dư cho 600 mốc.
+/// PubSubClient's default buffer is only 256 bytes and it SILENTLY DISCARDS
+/// anything larger. An IR command carries an `ir_raw` of several hundred numbers ->
+/// a few KB of JSON, and so does the learn packet the node uploads. Without
+/// enlarging this, every command containing ir_raw vanishes without a trace: the
+/// log says nothing and the air conditioner does not move. 12KB is ample for 600
+/// transitions.
 static const uint16_t MQTT_BUFFER_BYTES = 12288;
 
 static String tTelemetry, tStatus, tCmd, tState, tLearn, tOverride;
@@ -95,84 +110,95 @@ static void buildTopics() {
   tCmd       = base + "cmd";
   tState     = base + "state";
   tLearn     = base + "learn";
-  // `override` là đường để MÀN NÀY xin máy chủ nhường quyền — trước đây không có
-  // nên ghi đè tại chỗ chỉ sống được tới chu kỳ comfort kế tiếp. Xem
-  // ../Interface/README.md §8.3 và app/utils/mqtt_naming.py.
+  // `override` is the channel by which THIS SCREEN asks the server to hand over
+  // control -- it did not exist before, so a local override only survived until the
+  // next comfort cycle. See ../Interface/README.md §8.3 and
+  // app/utils/mqtt_naming.py.
   //
-  // PHẢI LÀ TOPIC RIÊNG, KHÔNG ĐƯỢC NHỒI VÀO `state`: publishState() gửi RETAIN,
-  // nên một cờ ghi đè nằm trong đó sẽ được broker phát lại mỗi lần node nối lại
-  // và tự bật ghi đè vĩnh viễn — máy chủ thôi tính comfort mãi mà không ai bấm gì.
+  // IT MUST BE ITS OWN TOPIC AND MUST NOT BE STUFFED INTO `state`: publishState()
+  // sends RETAINED, so an override flag inside it would be replayed by the broker
+  // every time the node reconnects and would switch override on permanently -- the
+  // server would stop computing comfort forever with nobody having pressed
+  // anything.
   tOverride  = base + "override";
 }
 
-/// Bộ đệm khung IR dùng chung cho cả phát lẫn học. Một node chỉ làm một việc
-/// tại một thời điểm nên không cần hai bộ đệm 1.2KB.
+/// IR frame buffer shared by both transmit and learn. A node only does one thing
+/// at a time, so two 1.2KB buffers are unnecessary.
 static uint16_t irBuf[IrIo::RAW_MAX];
 
-// --- Nhãn đang học -----------------------------------------------------------
+// --- The label currently being learned ---------------------------------------
 // "COOL 25" -> label="COOL", temp=25   |   "FAN_SPEED" -> label="FAN_SPEED", temp=-1
 static char learnLabel[24] = "";
 static int  learnTemp = -1;
 
-// --- Dấu vết quyền điều khiển ------------------------------------------------
-// Ai đang cầm lái: máy chủ, hay một người (ở màn này HOẶC trong app).
+// --- Control-authority tracking ----------------------------------------------
+// Who is in control: the server, or a person (on this screen OR in the app).
 //
-// `overrideLocal` GIỜ CÓ HIỆU LỰC THẬT, không còn là cờ trang trí: bấm THỦ CÔNG
-// publish lên topic `override` và `override_handler.py` đặt cổng ghi đè trong
-// Redis, nên vòng lặp comfort thực sự nhường quyền (Interface/README.md §8.3 —
-// khoảng trống đó đã lấp).
+// `overrideLocal` NOW HAS REAL EFFECT and is no longer a decorative flag: pressing
+// MANUAL publishes to the `override` topic and `override_handler.py` opens the
+// override window in Redis, so the comfort loop genuinely hands over control
+// (Interface/README.md §8.3 -- that gap has been filled).
 //
-// VÀ NÓ PHẢI PHẢN ÁNH CẢ GHI ĐÈ ĐẶT TỪ APP, không chỉ từ màn này. Trước đây mọi
-// gói `cmd` đều kéo cờ này về false, kể cả gói do chính app phát khi người dùng
-// vừa ghi đè trong app — nên đứng ở tường thì thấy huy hiệu TU DONG trong lúc
-// máy chủ đã nhường quyền cho app xong. Màn khẳng định sai về việc ai đang cầm
-// lái. Nay cờ bám theo `reason` của gói, xem cuối takeCommand().
+// AND IT MUST ALSO REFLECT AN OVERRIDE SET FROM THE APP, not only from this
+// screen. Every `cmd` packet used to pull this flag back to false, including
+// packets the app itself triggered when the user had just overridden in the app --
+// so standing at the wall you saw the AUTO badge while the server had already
+// handed control to the app. The screen was asserting something false about who
+// was in control. The flag now follows the packet's `reason`, see the end of
+// takeCommand().
 static uint32_t lastCmdMs = 0;
 static bool     overrideLocal = false;
 
-// Bảng "chế độ nào đã có mã IR trong NVS", dùng để làm mờ nút chưa học trên màn.
-// PHẢI cache: tra thẳng NVS trong pushUiModel() là 18 khoá MỖI VÒNG loop(), và
-// mỗi khoá TRƯỢT lại khiến thư viện Preferences in một dòng ERROR — trên bo chưa
-// học mã nào thì log serial bị nhấn chìm hoàn toàn, đúng lúc cần log nhất để tìm
-// lỗi lắp đặt. Bảng chỉ đổi khi học được mã mới, nên tính lại đúng lúc đó.
-static bool     aliasDirty = true;   // true = phải quét lại NVS ở lần đẩy kế tiếp
+// The "which modes already have an IR code in NVS" table, used to dim unlearned
+// buttons on screen.
+// It MUST be cached: querying NVS directly inside pushUiModel() is 18 keys EVERY
+// loop(), and every MISS makes the Preferences library print an ERROR line -- on a
+// board that has learned nothing the serial log is drowned completely, at exactly
+// the moment the log is most needed to debug an installation. The table only
+// changes when a new code is learned, so recompute it then.
+static bool     aliasDirty = true;   // true = rescan NVS on the next push
 
-// Số đo ngoài trời và trạng thái máy lạnh gần nhất — CHỈ để hiển thị. Giữ riêng
-// chứ không đọc ké `pending`: pending.mode được điền ngay khi bóc gói, kể cả
-// những lệnh sau đó bị bỏ vì chưa học mã, nên lấy nó ra hiển thị là màn hình
-// khoe một trạng thái máy lạnh chưa bao giờ xảy ra.
+// The latest outdoor readings and air conditioner state -- FOR DISPLAY ONLY. Kept
+// separately rather than borrowing `pending`: pending.mode is filled in as soon as
+// a packet is unpacked, including commands that are then dropped for having no
+// learned code, so displaying it would make the screen show off an air conditioner
+// state that never happened.
 static float    lastSlaveT = NAN, lastSlaveH = NAN;
 static uint32_t lastSlaveMs = 0;
 static char     actMode[8] = "";
 static int      actSetpoint = -1;
 
-/// Mức quạt panel VỪA BẮN THÀNH CÔNG. 0xFF = phiên này chưa bắn mức nào.
+/// The fan level the panel has JUST TRANSMITTED SUCCESSFULLY. 0xFF = no level has
+/// been transmitted this session.
 ///
-/// Chỉ đặt SAU khi IrIo::blast() đã chạy, không phải lúc nhận lệnh: đây là con số
-/// duy nhất màn hình dựa vào để nói "quạt đang ở mức nào", và nói mức mà panel
-/// không hề phát được là bịa. Nó cũng KHÔNG phải trạng thái thật của máy — ai
-/// cầm remote thật bấm một cái là nó sai, và panel không có cách nào biết (xem
-/// Ui::Model::fanLast).
+/// Set only AFTER IrIo::blast() has run, not on receiving the command: this is the
+/// only number the screen relies on to say "what level is the fan at", and naming a
+/// level the panel never managed to transmit is fabrication. It is also NOT the
+/// unit's real state -- one press of the actual remote makes it wrong and the panel
+/// has no way to know (see Ui::Model::fanLast).
 static uint8_t  lastFanIdx = 0xFF;
 
-/// Nhiệt độ có tham gia vào khoá tra mã IR không.
-/// Chỉ COOL mới có ma trận (mode, temp); DRY/FAN/OFF là mã cố định — đúng theo
+/// Does the temperature take part in the IR code lookup key.
+/// Only COOL has a (mode, temp) matrix; DRY/FAN/OFF are fixed codes -- matching
 /// ir_service._REQUIRED_* ("COOL 24..28 + DRY + FAN + OFF").
 static int aliasTemp(const char *mode, int setpoint) {
   return (strcmp(mode, "COOL") == 0) ? setpoint : -1;
 }
 
-// --- Lệnh chờ thi hành -------------------------------------------------------
-// Callback của PubSubClient chạy NGAY GIỮA lúc thư viện đang đọc gói vào bộ đệm
-// nội bộ của nó. Gọi mqtt.publish() ở đó là ghi đè lên chính bộ đệm đang đọc.
-// Nên callback chỉ bóc gói ra rồi đặt hàng, còn loop() mới phát IR + gửi ack.
+// --- Commands awaiting execution ---------------------------------------------
+// PubSubClient's callback runs RIGHT IN THE MIDDLE of the library reading a packet
+// into its own internal buffer. Calling mqtt.publish() there overwrites the very
+// buffer being read. So the callback only unpacks the message and places an order,
+// while loop() is what transmits the IR and sends the ack.
 static struct {
-  bool     hasFrame;      // có khung IR chờ phát
+  bool     hasFrame;      // an IR frame is waiting to be transmitted
   uint16_t frameLen;
-  bool     needAck;       // có ack chờ gửi (kể cả khi không phát được gì)
-  // ir_code_id cần xin server gửi lại mảng, rỗng = không xin gì. Phải ĐẶT HÀNG
-  // như hasFrame/needAck chứ không publish thẳng trong callback — cùng đúng lý
-  // do ghi ở đầu struct này. 37 byte đủ cho UUID 36 ký tự + '\0'.
+  bool     needAck;       // an ack is waiting to be sent (even if nothing was transmitted)
+  // The ir_code_id whose array must be re-requested from the server; empty = no
+  // request. It has to be QUEUED like hasFrame/needAck rather than published
+  // directly in the callback -- for exactly the reason at the top of this struct.
+  // 37 bytes is enough for a 36-character UUID + '\0'.
   char     needRawId[40];
   char     reqId[24];
   char     mode[8];
@@ -186,10 +212,11 @@ static String macToText(const uint8_t m[6]) {
   return String(buf);
 }
 
-/// Chép chuỗi từ JSON ra bộ đệm riêng.
-/// BẮT BUỘC chép chứ không giữ con trỏ: ArduinoJson bóc gói ở chế độ zero-copy
-/// (chuỗi trỏ thẳng vào bộ đệm của PubSubClient), mà bộ đệm đó bị dùng lại ngay
-/// ở gói kế tiếp — giữ con trỏ thì tới lúc loop() gửi ack, req_id đã thành rác.
+/// Copy a string out of the JSON into our own buffer.
+/// COPYING IS MANDATORY rather than keeping the pointer: ArduinoJson parses in
+/// zero-copy mode (the strings point straight into PubSubClient's buffer), and that
+/// buffer is reused by the very next packet -- keep the pointer and by the time
+/// loop() sends the ack, req_id is garbage.
 static void copyStr(char *dst, size_t dstSize, const char *src) {
   if (src == nullptr) { dst[0] = '\0'; return; }
   strncpy(dst, src, dstSize - 1);
@@ -197,31 +224,33 @@ static void copyStr(char *dst, size_t dstSize, const char *src) {
 }
 
 // ---------------------------------------------------------------------------
-//  ESP-NOW: chuyển tiếp số đo của node outdoor
+//  ESP-NOW: relaying the outdoor node's readings
 // ---------------------------------------------------------------------------
-/// Master ĐỨNG TÊN slave báo trạng thái: slave không có kết nối MQTT nên broker
-/// không thể sinh Last Will cho nó. Retained để web/app mở lên là thấy ngay.
+/// The master reports status ON THE SLAVE'S BEHALF: a slave has no MQTT connection
+/// so the broker cannot produce a Last Will for it. Retained so the web/app show it
+/// immediately on opening.
 static void publishSlaveStatus(const char *uuid, bool online) {
   String topic = String("bl/") + ORG_ID + "/" + uuid + "/status";
   mqtt.publish(topic.c_str(), online ? "online" : "offline", true);
-  Serial.printf("[slave] %s -> %s\n", uuid, online ? "ONLINE" : "OFFLINE (mat nhip tim)");
+  Serial.printf("[slave] %s -> %s\n", uuid, online ? "ONLINE" : "OFFLINE (heartbeat lost)");
 }
 
 // ---------------------------------------------------------------------------
-//  ESP-NOW: chuyển tiếp số đo của node góc phòng + node ngoài trời
+//  ESP-NOW: relaying the room-corner + outdoor nodes' readings
 // ---------------------------------------------------------------------------
-/// Đẩy số đo của MỘT node slave lên topic của chính nó.
+/// Push ONE slave node's readings to that node's own topic.
 ///
-/// Dùng chung cho cả node góc phòng lẫn node ngoài trời: gói ESP-NOW tự mang
-/// uuid nên gateway không cần biết đó là loại node nào để trung chuyển. Loại
-/// node chỉ quyết định gateway XẾP số đó vào đâu để hiển thị (xem onSlavePacket).
+/// Shared by both the room-corner and the outdoor nodes: an ESP-NOW packet carries
+/// its own uuid, so the gateway does not need to know which kind of node it is in
+/// order to relay it. The node kind only decides where the gateway FILES the number
+/// for display (see onSlavePacket).
 static void publishSlaveTelemetry(const char *uuid, const uint8_t mac[6],
                                   float t, float h) {
   JsonDocument doc;
   doc["ts"]   = (uint32_t)(millis() / 1000);
   doc["t"]    = t;
   doc["h"]    = h;
-  doc["rssi"] = 0;                    // slave không nối WiFi nên không có RSSI
+  doc["rssi"] = 0;                    // slaves do not join WiFi, so there is no RSSI
   doc["fw"]   = FW_VERSION;
   doc["mac"]  = macToText(mac);
   doc["via"]  = "espnow";
@@ -229,35 +258,38 @@ static void publishSlaveTelemetry(const char *uuid, const uint8_t mac[6],
   const size_t n = serializeJson(doc, buf);
   const String topic = String("bl/") + ORG_ID + "/" + uuid + "/telemetry";
   const bool ok = mqtt.publish(topic.c_str(), (const uint8_t *)buf, n, false);
-  Serial.printf("[relay] %s t=%.1f h=%.0f -> %s\n", uuid, t, h, ok ? "da chuyen" : "LOI");
+  Serial.printf("[relay] %s t=%.1f h=%.0f -> %s\n", uuid, t, h, ok ? "relayed" : "ERROR");
   SerialTrace::mqttOut(topic.c_str(), (const uint8_t *)buf, n, ok);
 }
 
-/// Một gói vừa tới từ bất kỳ node slave nào — góc phòng hoặc ngoài trời.
+/// A packet has just arrived from any slave node -- a room corner or outdoor.
 static void onSlavePacket(const AcEspNowPacket &pkt, const uint8_t mac[6]) {
   const char *uuid = pkt.device_uuid;
   const bool isRoom = (pkt.node_kind == AC_NODE_ROOM);
 
-  // TRƯỚC MỌI THỨ KHÁC: ghi lại gói đúng như nó tới. Các nhánh dưới đây lọc NaN,
-  // chặn theo nhịp, bỏ qua bảng đầy — nên đặt trace sau chúng là mất đúng những
-  // gói cần nhìn nhất khi đi tìm mất sóng.
+  // BEFORE ANYTHING ELSE: record the packet exactly as it arrived. The branches
+  // below filter NaN, rate limit, and skip when the table is full -- so putting the
+  // trace after them loses precisely the packets you most need to see when chasing
+  // a radio problem.
   SerialTrace::packetIn(pkt, mac);
 
-  // MỌI gói đều tính là nhịp tim -> phát hiện mất kết nối nhanh. Kể cả gói
-  // KHÔNG có số đo (NaN, do cảm biến slave lỗi): node vẫn sống, chỉ cảm biến
-  // hỏng — hai chuyện khác nhau, không được gộp thành "mất kết nối".
+  // EVERY packet counts as a heartbeat -> fast disconnection detection. Including
+  // packets with NO reading (NaN, because the slave's sensor failed): the node is
+  // still alive, only its sensor is broken -- two different things that must not be
+  // merged into "disconnected".
   SlaveWatch::heard(uuid, publishSlaveStatus);
   if (SlaveWatch::dueForStatusRefresh(uuid)) publishSlaveStatus(uuid, true);
 
-  // Ghi vào bảng hiển thị TRƯỚC khi lọc NaN: bảng cần biết góc này còn sống, và
-  // NaN trong đó là câu trả lời đúng cho "sống nhưng cảm biến hỏng".
+  // Write to the display table BEFORE filtering NaN: the table needs to know this
+  // corner is alive, and a NaN in it is the correct answer to "alive but the sensor
+  // is broken".
   if (isRoom) {
     if (!RoomRegistry::update(pkt)) {
       static bool warned = false;
       if (!warned) {
         warned = true;
-        Serial.printf("[room] bang day (%u o) — goc thu %u tro di khong hien tren man, "
-                      "nhung VAN duoc chuyen tiep len cloud\n",
+        Serial.printf("[room] table full (%u slots) - corner %u onwards will not appear on "
+                      "screen, but IS STILL relayed to the cloud\n",
                       RoomRegistry::MAX_ROOMS, RoomRegistry::MAX_ROOMS + 1);
       }
     }
@@ -268,7 +300,7 @@ static void onSlavePacket(const AcEspNowPacket &pkt, const uint8_t mac[6]) {
   }
 
   if (isnan(pkt.temp) || isnan(pkt.humidity)) {
-    Serial.printf("[%s] %s con song nhung cam bien loi (NaN)\n",
+    Serial.printf("[%s] %s alive but its sensor is faulty (NaN)\n",
                   isRoom ? "room" : "slave", uuid);
     return;
   }
@@ -276,20 +308,22 @@ static void onSlavePacket(const AcEspNowPacket &pkt, const uint8_t mac[6]) {
 }
 
 // ---------------------------------------------------------------------------
-//  HỌC remote
+//  LEARNING the remote
 // ---------------------------------------------------------------------------
 static bool isAcMode(const char *s) {
   return strcmp(s, "COOL") == 0 || strcmp(s, "DRY") == 0 ||
          strcmp(s, "FAN")  == 0 || strcmp(s, "OFF") == 0;
 }
 
-/// Nút rời này có phải thứ PANEL tự bắn được không (mức quạt, máy tạo độ ẩm)?
+/// Is this discrete button something THE PANEL can transmit itself (fan level,
+/// humidifier)?
 ///
-/// TẬP CON CÓ CHỦ ĐÍCH của ir_action_service.KNOWN_ACTIONS — xem ac-actions.h.
-/// Chỉ những nút có mặt trên màn mới đáng giữ một bản trong NVS: mỗi khung chiếm
-/// ~600 byte, và SLEEP/ECO/SWING/TIMER... không có nút nào trên panel để bấm nên
-/// bản sao đó sẽ không bao giờ được phát. Chúng vẫn học và bắn bình thường TỪ
-/// APP, đường đó không đi qua NVS của node.
+/// A DELIBERATE SUBSET of ir_action_service.KNOWN_ACTIONS -- see ac-actions.h. Only
+/// buttons present on the screen are worth keeping a copy of in NVS: each frame
+/// takes ~600 bytes, and SLEEP/ECO/SWING/TIMER... have no button on the panel to
+/// press, so that copy would never be transmitted. They are still learned and
+/// transmitted normally FROM THE APP, a path that does not go through the node's
+/// NVS.
 static bool isPanelAction(const char *s) {
   for (uint8_t i = 0; i < AcActions::FAN_COUNT; i++) {
     if (strcmp(s, AcActions::fanWire(i)) == 0) return true;
@@ -307,7 +341,7 @@ static void startLearn(const char *label) {
   learnTemp = space ? atoi(space + 1) : -1;
 
   IrIo::learnStart(LEARN_TIMEOUT_MS);
-  Serial.printf("[learn] \"%s\" — huong remote vao mat thu roi bam nut (toi da %lus)\n",
+  Serial.printf("[learn] \"%s\" - point the remote at the receiver and press the button (max %lus)\n",
                 label, (unsigned long)(LEARN_TIMEOUT_MS / 1000));
 }
 
@@ -316,54 +350,60 @@ static void publishLearned(const uint16_t *raw, uint16_t len) {
   JsonArray arr = doc["raw_timing"].to<JsonArray>();
   for (uint16_t i = 0; i < len; i++) arr.add(raw[i]);
 
-  // learn_handler.py đọc nhãn ở "action" HOẶC "mode", và định tuyến theo đó:
-  // nút rời (FAN_SPEED, SLEEP, SWING_V...) vào bảng ir_action_codes, còn
-  // COOL/DRY/FAN/OFF vào ma trận (mode, temp) của ir_codes. Gửi sai khoá là
-  // học xong nhưng mã nằm nhầm bảng, thuật toán comfort không bao giờ thấy.
+  // learn_handler.py reads the label from "action" OR "mode" and routes on that:
+  // discrete buttons (FAN_SPEED, SLEEP, SWING_V...) go into the ir_action_codes
+  // table, while COOL/DRY/FAN/OFF go into ir_codes' (mode, temp) matrix. Sending
+  // the wrong key means the code is learned but stored in the wrong table, and the
+  // comfort algorithm never sees it.
   //
-  // Phân biệt bằng danh sách 4 mode thay vì chép cả danh sách nút rời
-  // (ir_action_service.KNOWN_ACTIONS): backend thêm nút mới thì node không phải
-  // nạp lại firmware, còn 4 mode thì cố định theo AcMode.
+  // Distinguished by the list of 4 modes rather than by copying the whole discrete
+  // button list (ir_action_service.KNOWN_ACTIONS): the backend can add a new button
+  // without the node needing a reflash, while the 4 modes are fixed by AcMode.
   if (isAcMode(learnLabel)) {
     doc["mode"] = learnLabel;
-    // DRY/FAN/OFF không có nhiệt độ -> BỎ HẲN khoá "temp". Backend coi thiếu
-    // temp là mã cố định (upsert_learned_code); gửi -1 sẽ lưu thành nhiệt độ rác.
+    // DRY/FAN/OFF have no temperature -> OMIT the "temp" key entirely. The backend
+    // reads a missing temp as a fixed code (upsert_learned_code); sending -1 would
+    // store it as a garbage temperature.
     if (learnTemp >= 0) doc["temp"] = learnTemp;
 
-    // GIỮ LUÔN MỘT BẢN Ở NODE, đừng chỉ đẩy lên cloud. Không có dòng này thì
-    // người dùng vừa dạy mã ngay trên panel mà chính panel vẫn báo "CHƯA HỌC MÃ"
-    // và nút chế độ vẫn mờ — phải chờ vòng lặp comfort trên server tình cờ gửi
-    // xuống một lệnh cho đúng tổ hợp đó thì mới bấm được. Trên bảng điều khiển
-    // treo tường, khoảng chờ không giải thích được đó bị đọc là hỏng.
+    // ALSO KEEP A COPY ON THE NODE, do not only upload it to the cloud. Without
+    // this line, a user who has just taught a code on the panel sees that same
+    // panel still report "CHƯA HỌC MÃ" with the mode button dimmed -- they have to
+    // wait for the server's comfort loop to happen to send down a command for that
+    // exact combination before it becomes pressable. On a wall-mounted control
+    // panel, that unexplained wait reads as a fault.
     //
-    // Làm TRƯỚC khi publish, có chủ đích: mất mạng vẫn học và điều khiển tại chỗ
-    // được. Backend sẽ nhận mã ở lần học sau, còn máy lạnh thì chạy ngay.
+    // Done BEFORE publishing, deliberately: learning and local control keep working
+    // with no network. The backend will receive the code on a later learn, while
+    // the air conditioner works immediately.
     const int t = aliasTemp(learnLabel, learnTemp);
     if (IrStore::saveLearned(learnLabel, t, raw, len)) {
-      aliasDirty = true;      // bảng "đã có mã" đổi -> màn phải tính lại
-      Serial.printf("[learn] da luu vao NVS: %s%s%d — panel dung duoc ngay\n",
+      aliasDirty = true;      // the "has a code" table changed -> the screen must recompute
+      Serial.printf("[learn] saved to NVS: %s%s%d - the panel can use it right away\n",
                     learnLabel, t >= 0 ? " " : "", t >= 0 ? t : 0);
     } else {
-      Serial.println("[learn] KHONG luu duoc vao NVS — panel se van bao chua hoc ma");
+      Serial.println("[learn] COULD NOT save to NVS - the panel will still report no code learned");
     }
   } else {
     doc["action"] = learnLabel;
 
-    // GIỮ LUÔN MỘT BẢN Ở NODE cho những nút panel tự bắn được — cùng lý do và
-    // cùng khuôn với nhánh chế độ ở trên, và ở đây còn cấp thiết hơn: mã nút rời
-    // KHÔNG CÓ ir_code_id, nên đường "backend gửi lệnh kèm ir_raw rồi node lưu
-    // lại" không tồn tại cho chúng. Không lưu ở đây thì cách duy nhất còn lại để
-    // panel có mã là người dùng bấm XIN MÃ, mà họ không có lý do gì để nghĩ tới
-    // việc đó ngay sau khi vừa học xong.
+    // ALSO KEEP A COPY ON THE NODE for the buttons the panel can transmit itself --
+    // the same reason and the same pattern as the mode branch above, and here it
+    // matters even more: discrete button codes have NO ir_code_id, so the "backend
+    // sends a command with ir_raw and the node stores it" path does not exist for
+    // them. Without storing here, the only remaining way for the panel to get the
+    // code is the user pressing REQUEST CODES, and they have no reason to think of
+    // that right after having just learned it.
     //
-    // temp = -1: nút rời không có nhiệt độ, đúng quy ước của IrStore::saveAlias.
+    // temp = -1: discrete buttons have no temperature, per IrStore::saveAlias's
+    // convention.
     if (isPanelAction(learnLabel)) {
       if (IrStore::saveLearned(learnLabel, -1, raw, len)) {
         aliasDirty = true;
-        Serial.printf("[learn] da luu nut roi %s vao NVS — panel dung duoc ngay\n",
+        Serial.printf("[learn] saved discrete button %s to NVS - the panel can use it right away\n",
                       learnLabel);
       } else {
-        Serial.printf("[learn] KHONG luu duoc %s vao NVS — panel se van bao chua hoc ma\n",
+        Serial.printf("[learn] COULD NOT save %s to NVS - the panel will still report no code learned\n",
                       learnLabel);
       }
     }
@@ -372,26 +412,28 @@ static void publishLearned(const uint16_t *raw, uint16_t len) {
   String out;
   serializeJson(doc, out);
   bool ok = mqtt.publish(tLearn.c_str(), out.c_str(), false);
-  Serial.printf("[learn] \"%s\" %u moc (%u byte) -> %s\n",
+  Serial.printf("[learn] \"%s\" %u transitions (%u bytes) -> %s\n",
                 learnLabel, len, (unsigned)out.length(),
-                ok ? "da gui len cloud" : "GUI LOI (payload vuot bo dem MQTT?)");
+                ok ? "uploaded to cloud" : "SEND ERROR (payload larger than the MQTT buffer?)");
 }
 
 // ---------------------------------------------------------------------------
-//  Nhận lệnh
+//  Receiving commands
 // ---------------------------------------------------------------------------
 static char lastReqId[24] = "";
 
-/// Gói "chỉ lưu, không phát" — máy chủ đẩy lại kho mã sau khi người dùng bấm
-/// XIN MÃ trên panel (ir_service.push_all_codes).
+/// A "store only, do not transmit" packet -- the server pushing the whole code
+/// store back after the user pressed REQUEST CODES on the panel
+/// (ir_service.push_all_codes).
 ///
-/// PHẢI TÁCH KHỎI takeCommand(): một gói cmd bình thường mang `ir_raw` nghĩa là
-/// "bắn khung này ra máy lạnh ngay". Đi qua đường đó thì một lượt đồng bộ ~18 mã
-/// biến thành 18 lần bấm remote liên tiếp — chế độ và nhiệt độ nhảy loạn rồi
-/// dừng ở đúng hàng cuối cùng trong danh sách.
+/// IT MUST BE SEPARATE FROM takeCommand(): a normal cmd packet carrying `ir_raw`
+/// means "transmit this frame at the air conditioner now". Going through that path
+/// would turn one ~18-code sync into 18 consecutive remote presses -- mode and
+/// temperature jumping wildly and settling on whichever row happened to be last in
+/// the list.
 ///
-/// Cũng KHÔNG ack: không có req_id, và không có hàng `commands` nào bên server
-/// chờ được đánh dấu.
+/// It also does NOT ack: there is no req_id, and no `commands` row on the server
+/// waiting to be marked.
 static void storeCode(JsonDocument &doc) {
   const char *codeId = doc["ir_code_id"];
   const char *action = doc["action"];
@@ -400,11 +442,11 @@ static void storeCode(JsonDocument &doc) {
   JsonArray   irRaw  = doc["ir_raw"];
 
   if (irRaw.isNull()) {
-    Serial.println("[sync] goi store_only khong co ir_raw — bo qua");
+    Serial.println("[sync] store_only packet has no ir_raw - discarded");
     return;
   }
   if (irRaw.size() > IrIo::RAW_MAX) {
-    Serial.printf("[sync] ma dai %u moc > gioi han %u — bo qua\n",
+    Serial.printf("[sync] code is %u transitions > the %u limit - discarded\n",
                   (unsigned)irRaw.size(), IrIo::RAW_MAX);
     return;
   }
@@ -412,52 +454,55 @@ static void storeCode(JsonDocument &doc) {
   uint16_t n = 0;
   for (JsonVariant v : irRaw) irBuf[n++] = (uint16_t)v.as<uint32_t>();
 
-  // --- NÚT RỜI (mức quạt, máy tạo độ ẩm) ---
+  // --- DISCRETE BUTTONS (fan level, humidifier) ---
   //
-  // KHÁC MA TRẬN (chế độ, nhiệt độ) ở đúng một chỗ, và chỗ đó quyết định cả
-  // nhánh này: bảng `ir_action_codes` khoá theo (org, action) chứ không sinh
-  // UUID, nên gói không mang `ir_code_id`. Không có id thì không có gì để đối
-  // chiếu, và cũng không có đường `need_raw` để xin lại — đây là lần DUY NHẤT
-  // panel nhận được mã này ngoài lúc chính nó học.
+  // They differ from the (mode, temperature) matrix in exactly one place, and that
+  // place governs this whole branch: the `ir_action_codes` table is keyed by
+  // (org, action) rather than generating a UUID, so the packet carries no
+  // `ir_code_id`. With no id there is nothing to verify against, and there is no
+  // `need_raw` path to re-request it -- this is the ONLY time the panel receives
+  // this code apart from learning it itself.
   //
-  // Dùng saveLearned() (id tạm "local-FAN_60") thay vì save()+saveAlias(): id
-  // tạm chính là thứ IrStore sinh ra để phục vụ mã không có UUID của backend.
+  // Use saveLearned() (with the temporary id "local-FAN_60") rather than
+  // save()+saveAlias(): the temporary id is exactly what IrStore invented to serve
+  // codes that have no backend UUID.
   if (action != nullptr && action[0] != '\0') {
     if (!isPanelAction(action)) {
-      // Backend đẩy cả kho nút rời; panel chỉ giữ những nút nó có chỗ để bấm.
-      // Bỏ qua trong im lặng là ĐÚNG ở đây — không phải lỗi, và in một dòng cho
-      // mỗi nút bị bỏ sẽ làm log resync dài gấp đôi vì một chuyện bình thường.
+      // The backend pushes the whole discrete-button store; the panel only keeps
+      // the buttons it has somewhere to press. Skipping silently is CORRECT here --
+      // it is not an error, and printing a line per skipped button would double the
+      // length of the resync log over something entirely routine.
       return;
     }
     if (!IrStore::saveLearned(action, -1, irBuf, n)) {
-      Serial.printf("[sync] khong luu duoc nut roi %s — NVS day?\n", action);
+      Serial.printf("[sync] could not save discrete button %s - NVS full?\n", action);
       Ui::reply("NVS ĐẦY — KHÔNG LƯU ĐƯỢC MÃ");
       return;
     }
     aliasDirty = true;
-    Serial.printf("[sync] da nhan nut roi %s (%u moc)\n", action, n);
+    Serial.printf("[sync] received discrete button %s (%u transitions)\n", action, n);
     return;
   }
 
-  // --- ma trận (chế độ, nhiệt độ) ---
+  // --- the (mode, temperature) matrix ---
   if (codeId == nullptr || mode[0] == '\0') {
-    Serial.println("[sync] goi store_only thieu truong — bo qua");
+    Serial.println("[sync] store_only packet is missing fields - discarded");
     return;
   }
 
   if (!IrStore::save(codeId, irBuf, n)) {
-    Serial.printf("[sync] khong luu duoc %s — NVS day?\n", codeId);
+    Serial.printf("[sync] could not save %s - NVS full?\n", codeId);
     Ui::reply("NVS ĐẦY — KHÔNG LƯU ĐƯỢC MÃ");
     return;
   }
   IrStore::saveAlias(mode, aliasTemp(mode, setp), codeId);
   aliasDirty = true;
-  Serial.printf("[sync] da nhan %s %d (%u moc)\n", mode, setp, n);
+  Serial.printf("[sync] received %s %d (%u transitions)\n", mode, setp, n);
 }
 
 static void takeCommand(JsonDocument &doc) {
-  // Trước MỌI thứ khác: gói đồng bộ không phải là lệnh điều khiển, nó không đi
-  // qua pending/ack/chống-trùng và tuyệt đối không được bắn IR.
+  // Before ANYTHING else: a sync packet is not a control command, it does not go
+  // through pending/ack/deduplication and must never transmit IR.
   if (doc["store_only"] | false) {
     storeCode(doc);
     return;
@@ -473,21 +518,23 @@ static void takeCommand(JsonDocument &doc) {
 
   const char *reason = doc["reason"] | "";
 
-  // Dựng sẵn dòng nhật ký cho màn hình. `reason` tới trong MỌI lệnh nhưng trước
-  // đây chỉ được in ra serial rồi vứt — nghĩa là muốn biết máy chủ vừa ra lệnh
-  // gì phải cắm USB-TTL vào bo treo trên tường. Bốn nhánh dưới điền nốt `result`
-  // rồi gửi sang tác vụ UI (chỉ đẩy hàng đợi, an toàn trong callback này).
+  // Prepare the on-screen log entry. `reason` arrives with EVERY command but used
+  // to be printed to serial and thrown away -- meaning that finding out what the
+  // server had just commanded required plugging a USB-TTL into a board mounted on
+  // the wall. The four branches below fill in `result` and send it to the UI task
+  // (queue push only, which is safe inside this callback).
   Ui::CmdLog logEntry{};
   copyStr(logEntry.mode,   sizeof(logEntry.mode),   pending.mode);
   copyStr(logEntry.reason, sizeof(logEntry.reason), reason);
   logEntry.setpoint = pending.setpoint;
 
-  // MQTT QoS1 cho phép broker gửi LẠI cùng một lệnh nếu ack chưa kịp về. Phát
-  // lại khung IR = bấm remote hai lần; với các nút xoay vòng (tốc độ quạt, đảo
-  // gió) lần hai sẽ nhảy sang nấc khác, tức là lặp lại KHÔNG vô hại. Chặn theo
-  // req_id, nhưng vẫn ack lại vì rất có thể chính cái ack cũ đã rơi.
+  // MQTT QoS1 allows the broker to RESEND the same command if the ack did not
+  // arrive in time. Retransmitting an IR frame = pressing the remote twice; with
+  // cycle buttons (fan speed, swing) the second press steps to a different level,
+  // so a repeat is NOT harmless. Deduplicate by req_id, but still re-ack, since it
+  // may well be the old ack that was lost.
   if (pending.reqId[0] && strcmp(pending.reqId, lastReqId) == 0) {
-    Serial.printf("[cmd] %s da thi hanh roi — bo qua ban lap, ack lai\n", pending.reqId);
+    Serial.printf("[cmd] %s already executed - skipping the duplicate, re-acking\n", pending.reqId);
     pending.needAck = true;
     logEntry.result = Ui::CmdLog::DUPLICATE;
     Ui::logCommand(logEntry);
@@ -499,98 +546,107 @@ static void takeCommand(JsonDocument &doc) {
 
   if (!irRaw.isNull()) {
     if (irRaw.size() > IrIo::RAW_MAX) {
-      // Cắt bớt rồi phát thì máy lạnh nhận một lệnh KHÁC hẳn, không phải lệnh
-      // thiếu. Thà không làm gì và để log nói rõ.
-      Serial.printf("[cmd] ir_raw %u moc > gioi han %u — KHONG phat (khung cut la lenh sai)\n",
+      // Truncating and transmitting makes the air conditioner receive a COMPLETELY
+      // DIFFERENT command, not an incomplete one. Better to do nothing and let the
+      // log say so plainly.
+      Serial.printf("[cmd] ir_raw is %u transitions > the %u limit - NOT transmitting (a truncated frame is a wrong command)\n",
                     (unsigned)irRaw.size(), IrIo::RAW_MAX);
       return;
     }
     for (JsonVariant v : irRaw) irBuf[pending.frameLen++] = (uint16_t)v.as<uint32_t>();
 
-    // Chỉ mã theo (mode,temp) mới có ir_code_id để cache. Nút rời không có id,
-    // backend luôn gửi kèm ir_raw nên chúng không cần lưu.
+    // Only (mode,temp) codes have an ir_code_id to cache. Discrete buttons have no
+    // id and the backend always includes ir_raw, so they do not need storing.
     if (codeId != nullptr && pending.frameLen > 0) {
       if (IrStore::save(codeId, irBuf, pending.frameLen)) {
-        Serial.printf("[cmd] da luu ma %s vao NVS (%u moc)\n", codeId, pending.frameLen);
-        // Ghi thêm bí danh (mode, temp) -> id. Đây là thứ DUY NHẤT cho phép màn
-        // cảm ứng tự tra ra khung IR khi người dùng bấm tại chỗ: kho chính khoá
-        // theo UUID của server, node không có bảng tra ngược. Xem ir-store.h.
+        Serial.printf("[cmd] saved code %s to NVS (%u transitions)\n", codeId, pending.frameLen);
+        // Also write the alias (mode, temp) -> id. This is the ONLY thing that lets
+        // the touch screen look up an IR frame itself when the user presses locally:
+        // the main store is keyed by the server's UUID and the node has no reverse
+        // lookup. See ir-store.h.
         if (pending.mode[0]) {
           IrStore::saveAlias(pending.mode, aliasTemp(pending.mode, pending.setpoint), codeId);
-          aliasDirty = true;   // bảng "đã có mã" đổi -> màn phải tính lại (xem pushUiModel)
+          aliasDirty = true;   // the "has a code" table changed -> the screen must recompute (see pushUiModel)
         }
       }
     }
   } else if (codeId != nullptr) {
     pending.frameLen = IrStore::load(codeId, irBuf, IrIo::RAW_MAX);
     if (pending.frameLen == 0) {
-      // Backend tưởng node còn giữ mã này nên cố tình KHÔNG gửi kèm ir_raw
-      // (command_publisher._resolve_ir_raw + redis_ir_cache). Node vừa bị
-      // erase_flash / đổi bo thì hai bên lệch nhau, và không có kênh nào để xin
-      // lại. CỐ Ý không ack: lệnh chưa thi hành thì không được báo là xong, để
-      // commands.acked_at trên web phản ánh đúng sự thật.
-      Serial.printf("[cmd] ir_code_id=%s khong co trong NVS ma server khong gui kem ir_raw\n", codeId);
-      // Tự xin lại thay vì chờ người vào xoá Redis bằng tay. loop() mới publish
-      // (callback không được đụng mqtt.publish — xem đầu struct pending).
+      // The backend believed the node still held this code and deliberately did NOT
+      // include ir_raw (command_publisher._resolve_ir_raw + redis_ir_cache). If the
+      // node has just been erase_flash'ed or swapped, the two sides have diverged
+      // with no channel to re-request it. DELIBERATELY no ack: a command that was
+      // not executed must not be reported as done, so commands.acked_at on the web
+      // reflects the truth.
+      Serial.printf("[cmd] ir_code_id=%s is not in NVS and the server sent no ir_raw\n", codeId);
+      // Re-request it ourselves rather than waiting for somebody to clear Redis by
+      // hand. loop() does the publishing (the callback must not touch mqtt.publish
+      // -- see the top of the pending struct).
       copyStr(pending.needRawId, sizeof(pending.needRawId), codeId);
-      Serial.println("      -> dang xin server gui lai mang thoi gian");
+      Serial.println("      -> asking the server to resend the timing array");
       logEntry.result = Ui::CmdLog::NEED_RAW;
       Ui::logCommand(logEntry);
       return;
     }
   } else {
-    // Chưa học mã cho (mode, setpoint) này — command_publisher đã ghi warning
-    // "No learned IR code" ở phía server rồi.
-    Serial.printf("[cmd] %s %s %d: khong co ir_raw lan ir_code_id — chua hoc ma nay\n",
+    // No code learned for this (mode, setpoint) -- command_publisher has already
+    // logged a "No learned IR code" warning on the server side.
+    Serial.printf("[cmd] %s %s %d: neither ir_raw nor ir_code_id - this code has not been learned\n",
                   pending.reqId, pending.mode, pending.setpoint);
     logEntry.result = Ui::CmdLog::NO_CODE;
     Ui::logCommand(logEntry);
     return;
   }
 
-  Serial.printf("[cmd] %s -> %s %d (%s) · %u moc, cho phat\n",
+  Serial.printf("[cmd] %s -> %s %d (%s) - %u transitions, ready to transmit\n",
                 pending.reqId, pending.mode, pending.setpoint, reason, pending.frameLen);
   pending.hasFrame = true;
   pending.needAck  = true;
-  // Ghi SENT ngay ở đây dù việc bắn nằm ở loop(): hasFrame=true là cam kết chắc
-  // chắn — loop() không có nhánh nào bỏ qua nó. Chờ tới sau khi bắn mới ghi thì
-  // phải chuyền logEntry qua struct pending, thêm một trạng thái nữa chỉ để nói
-  // lại đúng điều đã biết.
+  // Record SENT right here even though the transmission happens in loop():
+  // hasFrame=true is a firm commitment -- loop() has no branch that skips it.
+  // Waiting until after transmission would mean threading logEntry through the
+  // pending struct, adding another piece of state just to restate something already
+  // known.
   logEntry.result = Ui::CmdLog::SENT;
   Ui::logCommand(logEntry);
-  // Máy chủ vừa ra lệnh -> nó đã giành lại quyền, huy hiệu trên màn trở về
-  // "TU DONG". Đây chính là điều giao diện đã cảnh báo lúc người dùng ghi đè.
+  // The server has just issued a command -> it has taken control back, and the
+  // on-screen badge returns to "TU DONG". This is exactly what the UI warned about
+  // when the user overrode.
   lastCmdMs = millis();
 
-  // Ai đang cầm lái, đọc từ `reason` chứ không mặc định là máy chủ.
+  // Who is in control, read from `reason` rather than assumed to be the server.
   //
-  //   "auto:COOL@25"    máy chủ tự quyết        -> máy chủ cầm lái
-  //   "manual override" người dùng ghi đè (app) -> NGƯỜI cầm lái
-  //   "action:FAN_SPEED" bấm nút rời trong app  -> KHÔNG ĐỔI (xem dưới)
+  //   "auto:COOL@25"     the server decided        -> the server is in control
+  //   "manual override"  the user overrode (app)   -> a PERSON is in control
+  //   "action:FAN_SPEED" a discrete button in the app -> UNCHANGED (see below)
   //
-  // Nút rời cố tình không đụng cờ này: nó không mang (mode, setpoint) và không
-  // đặt cổng ghi đè nào phía máy chủ, nên suy ra quyền điều khiển từ nó là bịa.
-  // Bấm "tốc độ quạt" trong lúc máy chủ đang tự chạy thì máy chủ VẪN đang tự
-  // chạy — cờ giữ nguyên là câu trả lời đúng, không phải là bỏ sót nhánh.
+  // Discrete buttons deliberately do not touch this flag: they carry no
+  // (mode, setpoint) and open no override window on the server, so inferring
+  // control authority from them would be fabrication. Pressing "fan speed" while
+  // the server is running automatically leaves the server STILL running
+  // automatically -- leaving the flag alone is the correct answer, not a missing
+  // branch.
   if (strncmp(reason, "auto:", 5) == 0)              overrideLocal = false;
   else if (strcmp(reason, "manual override") == 0)   overrideLocal = true;
 }
 
 static void onMessage(char *topic, byte *payload, unsigned int len) {
-  // Ghi TRƯỚC khi bóc JSON: gói hỏng khuôn cũng là gói đã tới, mà nhánh lỗi bên
-  // dưới chỉ in tên lỗi chứ không in nội dung — đúng lúc cần nhìn nội dung nhất.
+  // Record BEFORE parsing the JSON: a malformed packet is still a packet that
+  // arrived, and the error branch below only prints the error name rather than the
+  // content -- at exactly the moment the content is most worth seeing.
   SerialTrace::mqttIn(topic, payload, len);
 
   JsonDocument doc;
   DeserializationError err = deserializeJson(doc, payload, len);
   if (err) {
-    Serial.printf("[cmd] JSON hong (%s) — bo qua\n", err.c_str());
+    Serial.printf("[cmd] malformed JSON (%s) - discarded\n", err.c_str());
     return;
   }
 
-  // Cùng một topic cmd chở HAI khuôn payload khác hẳn nhau:
-  //   {"learn":"COOL 25"}                  -> vào chế độ học (ir_service.py)
-  //   {"req_id","mode","setpoint",...}     -> phát một khung (command_publisher.py)
+  // The single cmd topic carries TWO completely different payload shapes:
+  //   {"learn":"COOL 25"}                  -> enter learn mode (ir_service.py)
+  //   {"req_id","mode","setpoint",...}     -> transmit a frame (command_publisher.py)
   const char *learn = doc["learn"];
   if (learn != nullptr) {
     startLearn(learn);
@@ -599,144 +655,156 @@ static void onMessage(char *topic, byte *payload, unsigned int len) {
   takeCommand(doc);
 }
 
-/// Ack + đồng bộ trạng thái. retain=true: state_handler khớp ack với hàng
-/// commands, còn web/app mở lên là thấy ngay mode/setpoint cuối cùng mà không
-/// phải chờ tới lệnh kế tiếp.
+/// Ack + state sync. retain=true: state_handler matches the ack against the
+/// commands row, and the web/app show the latest mode/setpoint immediately on
+/// opening rather than waiting for the next command.
 static void publishState() {
   JsonDocument doc;
   if (pending.reqId[0]) doc["ack"] = pending.reqId;
   if (pending.mode[0])  doc["mode"] = pending.mode;
   if (pending.setpoint >= 0) doc["setpoint"] = pending.setpoint;
-  // MAC ĐI KÈM Ở ĐÂY VÌ KHÔNG CÒN CHỖ NÀO KHÁC. Mọi node khác khai MAC trong gói
-  // telemetry, nhưng gateway không còn cảm biến nên không publish telemetry nữa.
-  // Thiếu dòng này thì trang "Nạp firmware" hiện "—" ở đúng cái node mà người đi
-  // lắp đang đứng trước mặt. state_handler.py đọc trường này.
+  // THE MAC TRAVELS HERE BECAUSE THERE IS NOWHERE ELSE LEFT. Every other node
+  // declares its MAC in the telemetry packet, but the gateway no longer has a
+  // sensor so it no longer publishes telemetry. Without this line the "Nạp
+  // firmware" page shows "—" for the very node the installer is standing in front
+  // of. state_handler.py reads this field.
   doc["mac"] = WiFi.macAddress();
   char buf[160];
   size_t n = serializeJson(doc, buf);
   bool ok = mqtt.publish(tState.c_str(), (const uint8_t *)buf, n, true);
   SerialTrace::mqttOut(tState.c_str(), (const uint8_t *)buf, n, ok);
   Serial.printf("[state] ack=%s mode=%s setpoint=%d -> %s\n",
-                pending.reqId, pending.mode, pending.setpoint, ok ? "da gui" : "GUI LOI");
+                pending.reqId, pending.mode, pending.setpoint, ok ? "sent" : "SEND ERROR");
 }
 
-/// Xin server gửi lại mảng thời gian của một ir_code_id mà node không còn giữ.
+/// Ask the server to resend the timing array for an ir_code_id the node no longer
+/// holds.
 ///
-/// VÌ SAO CẦN: backend chỉ đính `ir_raw` cho LẦN ĐẦU mỗi mã, sau đó tin rằng node
-/// còn giữ trong NVS (`command_publisher._resolve_ir_raw` + `bl:ircache:{id}`).
-/// Hai bên lệch nhau bất cứ khi nào NVS mất mà DB thì không: `erase_flash`, thay
-/// bo dùng lại DEVICE_UUID, hoặc người dùng vừa bấm XOÁ trong màn Cài đặt. Trước
-/// đây nhánh đó chỉ in log rồi đứng im — máy lạnh câm mà log server sạch sẽ, kiểu
-/// hỏng tốn nhiều thời gian nhất để tìm.
+/// WHY IT IS NEEDED: the backend only attaches `ir_raw` on the FIRST use of each
+/// code, after which it trusts the node still holds it in NVS
+/// (`command_publisher._resolve_ir_raw` + `bl:ircache:{id}`). The two sides diverge
+/// whenever NVS is lost while the DB is not: `erase_flash`, a board swap reusing
+/// the DEVICE_UUID, or the user having just pressed DELETE in the Settings screen.
+/// This branch used to print a log line and then sit there -- the air conditioner
+/// mute while the server log looked clean, the kind of failure that takes longest
+/// to find.
 ///
-/// KHÔNG RETAIN. Đây là một yêu cầu xảy ra một lần, không phải trạng thái. Retain
-/// thì broker phát lại nó sau mỗi lần node nối lại, và backend sẽ dọn cache rồi
-/// gửi lại mảng vài KB một cách vô cớ, mãi mãi.
+/// NOT RETAINED. This is a one-off request, not a state. Retained, the broker would
+/// replay it after every reconnect and the backend would clear its cache and resend
+/// a several-KB array for no reason, forever.
 static void publishNeedRaw(const char *codeId) {
   JsonDocument doc;
   doc["need_raw"] = codeId;
-  // Kèm req_id để bên server đối chiếu được đúng lệnh nào đã trượt. Lệnh đó CỐ Ý
-  // không được ack (xem onCmdPacket) nên `commands.ack_ts` vẫn rỗng — đây là thứ
-  // giải thích vì sao.
+  // Include the req_id so the server can identify exactly which command failed.
+  // That command is DELIBERATELY not acked (see onCmdPacket) so `commands.ack_ts`
+  // stays empty -- this is what explains why.
   if (pending.reqId[0]) doc["req_id"] = pending.reqId;
   char buf[96];
   size_t n = serializeJson(doc, buf);
   bool ok = mqtt.publish(tState.c_str(), (const uint8_t *)buf, n, false);
-  Serial.printf("[cmd] xin lai ma %s -> %s\n", codeId, ok ? "da gui" : "GUI LOI");
+  Serial.printf("[cmd] re-requesting code %s -> %s\n", codeId, ok ? "sent" : "SEND ERROR");
 }
 
 // ---------------------------------------------------------------------------
-//  Kết nối
+//  Connectivity
 // ---------------------------------------------------------------------------
-// Quét và in ra những mạng NHÌN THẤY được khi không vào được mạng đã cấu hình.
+// Scan and print the networks that ARE VISIBLE when the configured one cannot be
+// joined.
 //
-// Vòng lặp cũ chỉ in dấu chấm mãi mãi. Dấu chấm không phân biệt được ba nguyên
-// nhân hoàn toàn khác nhau, mà cách xử lý thì khác hẳn nhau:
-//   - không thấy SSID  -> sai tên, hoặc router phát 5 GHz (ESP32 chỉ bắt
-//                         2.4 GHz — đây là ca hay gặp nhất khi lắp tại nhà dân)
-//   - thấy nhưng yếu   -> đặt node sai chỗ
-//   - thấy và mạnh     -> sai mật khẩu
-// Người đi lắp đứng trước tủ điện cần biết NGAY là nên đổi tên mạng, dời node,
-// hay gõ lại mật khẩu.
-// Không đưa vào config.h: đây là hằng số của firmware, không phải thứ đổi theo
-// từng nơi lắp. 20 s đủ cho router chậm bắt tay xong, mà vẫn không bắt người
-// đứng đợi quá lâu mới thấy được lý do.
+// The old loop just printed dots forever. A dot cannot distinguish three completely
+// different causes whose remedies are completely different:
+//   - SSID not found   -> wrong name, or the router is on 5 GHz (the ESP32 only
+//                         does 2.4 GHz -- the most common case in a home install)
+//   - found but weak   -> the node is in the wrong place
+//   - found and strong -> wrong password
+// An installer standing at the distribution board needs to know IMMEDIATELY whether
+// to change the network name, move the node, or retype the password.
+// Not put in config.h: this is a firmware constant, not something that changes per
+// installation. 20 s is enough for a slow router to finish handshaking while still
+// not making anyone wait too long to see the reason.
 constexpr uint32_t WIFI_ATTEMPT_MS = 20000UL;
 
 static void wifiDiagnose() {
-  Serial.printf("\n  Khong vao duoc \"%s\". Quet xem xung quanh co gi:\n", WIFI_SSID);
-  // Dừng hẳn lần kết nối đang dở: quét trong lúc đang bắt tay cho kết quả thiếu.
+  Serial.printf("\n  Could not join \"%s\". Scanning to see what is around:\n", WIFI_SSID);
+  // Fully abort the connection attempt in progress: scanning mid-handshake gives
+  // incomplete results.
   WiFi.disconnect(true);
   delay(100);
 
   const int n = WiFi.scanNetworks();
   if (n <= 0) {
-    Serial.println("  (khong thay mang 2.4 GHz nao — kiem tra anten hoac cho dat node)");
+    Serial.println("  (no 2.4 GHz network found at all - check the antenna or where the node is mounted)");
     return;
   }
   bool found = false;
   for (int i = 0; i < n; i++) {
     const bool me = (WiFi.SSID(i) == String(WIFI_SSID));
     found = found || me;
-    Serial.printf("  %-22s kenh %2d  %4d dBm  %-11s%s\n",
+    Serial.printf("  %-22s channel %2d  %4d dBm  %-11s%s\n",
                   WiFi.SSID(i).c_str(), WiFi.channel(i), (int)WiFi.RSSI(i),
-                  WiFi.encryptionType(i) == WIFI_AUTH_OPEN ? "mo" : "co mat khau",
-                  me ? "  <== DANG TIM MANG NAY" : "");
+                  WiFi.encryptionType(i) == WIFI_AUTH_OPEN ? "open" : "password",
+                  me ? "  <== LOOKING FOR THIS ONE" : "");
   }
   if (!found) {
-    Serial.printf("  => KHONG CO \"%s\" trong danh sach. ESP32 chi bat duoc 2.4 GHz;\n"
-                  "     neu router tach bang 5 GHz ra ten rieng thi phai dien ten\n"
-                  "     cua bang 2.4 GHz vao WIFI_SSID trong src/config.h.\n", WIFI_SSID);
+    Serial.printf("  => \"%s\" IS NOT in the list. The ESP32 can only see 2.4 GHz;\n"
+                  "     if the router gives its 5 GHz band a separate name, put the\n"
+                  "     2.4 GHz band's name into WIFI_SSID in src/config.h.\n", WIFI_SSID);
   } else {
-    Serial.println("  => Thay mang, van khong vao: gan nhu chac chan SAI MAT KHAU.");
+    Serial.println("  => The network is visible but cannot be joined: almost certainly the WRONG PASSWORD.");
   }
   WiFi.scanDelete();
 }
 
-/// Số lần thử WiFi lúc KHỞI ĐỘNG trước khi chạy tiếp mà không có mạng.
+/// How many WiFi attempts to make AT BOOT before carrying on without a network.
 ///
-/// CÓ GIỚI HẠN, KHÔNG CHỜ MÃI. Bản trước chờ vô hạn ở đây với lý do "không có
-/// mạng thì node chẳng làm được gì" — lý do đó SAI, và nó là lỗi nghiêm trọng
-/// nhất từng có trong file này (xem serviceNetwork bên dưới). Không có mạng thì
-/// node vẫn thu được ESP-NOW, vẫn nói chuyện được với UNO Q qua UART, và vẫn bắn
-/// được hồng ngoại — tức là vẫn điều khiển được máy lạnh. Đó chính xác là thứ
-/// lớp edge sinh ra để làm.
+/// IT IS BOUNDED, IT DOES NOT WAIT FOREVER. An earlier version waited indefinitely
+/// here, reasoning that "without a network the node cannot do anything" -- that
+/// reasoning is WRONG, and it was the most serious bug this file ever had (see
+/// serviceNetwork below). Without a network the node can still receive ESP-NOW,
+/// still talk to the UNO Q over UART, and still transmit infrared -- i.e. it can
+/// still control the air conditioner. That is precisely what the edge layer exists
+/// to do.
 static const uint8_t WIFI_BOOT_ATTEMPTS = 3;
 
-/// Ba việc PHẢI làm mỗi lần vào được WiFi — thiếu một cái là hỏng ngầm.
+/// Three things that MUST happen every time WiFi comes up -- missing any one of
+/// them fails silently.
 ///
-/// GỌI TỪ CẢ HAI ĐƯỜNG VÀO (khởi động và nối lại nền). Trước đây khối này nằm
-/// hẳn trong connectWifi(), tức là chỉ chạy khi bo vào được mạng NGAY LÚC BOOT.
-/// Panel bật lúc router chưa lên rồi có mạng sau thì `serviceNetwork()` nối lại
-/// bằng `WiFi.begin()` trần và không đụng tới nó — bo chạy suốt phiên với modem
-/// sleep BẬT, mất ~60% gói ESP-NOW, trong khi mọi đèn trạng thái đều xanh.
+/// CALLED FROM BOTH ENTRY POINTS (boot and background reconnect). This block used
+/// to live entirely inside connectWifi(), meaning it only ran if the board joined
+/// the network AT BOOT. A panel powered on before the router came up would then be
+/// reconnected by `serviceNetwork()` using a bare `WiFi.begin()` that never touched
+/// it -- so the board ran the whole session with modem sleep ON, losing ~60% of
+/// ESP-NOW packets, while every status light stayed green.
 static void onWifiUp() {
-  // 1. TẮT tiết kiệm điện WiFi. BẮT BUỘC cho node master.
+  // 1. DISABLE WiFi power saving. MANDATORY on the master node.
   //
-  // ESP32 mặc định bật modem sleep khi đã vào mạng: radio ngủ giữa các beacon.
-  // Lưu lượng WiFi thường không sao vì router ĐỆM HỘ trong lúc ngủ, nhưng gói
-  // ESP-NOW từ slave thì KHÔNG ai đệm — đến đúng lúc radio ngủ là mất luôn, mà
-  // broadcast không có ACK nên slave vẫn tưởng gửi thành công.
+  // By default the ESP32 enables modem sleep once joined: the radio sleeps between
+  // beacons. Ordinary WiFi traffic is fine because the router BUFFERS for us while
+  // we sleep, but an ESP-NOW packet from a slave has NOBODY buffering it -- arriving
+  // while the radio is asleep it is simply lost, and since broadcast has no ACK the
+  // slave still believes it sent successfully.
   //
-  // ĐÃ ĐO CÁI GIÁ ĐÓ, đừng bật lại vì bất kỳ lý do gì:
-  //     modem sleep BẬT (thời BLE):  0,31 gói/giây
-  //     modem sleep TẮT:             0,80 gói/giây  ← đúng 4 node × 5 giây
-  // Node ngoài trời khi đó rơi ~50% và nhấp nháy ONLINE/OFFLINE liên tục.
+  // THE COST HAS BEEN MEASURED; do not re-enable it for any reason:
+  //     modem sleep ON (the BLE era):  0.31 packets/second
+  //     modem sleep OFF:               0.80 packets/second  <- exactly 4 nodes x 5 seconds
+  // The outdoor node was dropping ~50% and flickering ONLINE/OFFLINE constantly.
   //
-  // Hệ quả: KHÔNG bao giờ bật lại Bluetooth trên bo này. Chip từ chối chạy WiFi +
-  // BT với modem sleep tắt — nó abort() chứ không chạy kém đi
-  // (`Should enable WiFi modem sleep when both WiFi and Bluetooth are enabled`),
-  // và bo sẽ lặp khởi động lại vô hạn mỗi ~6 giây.
+  // A consequence: NEVER re-enable Bluetooth on this board. The chip refuses to run
+  // WiFi + BT with modem sleep disabled -- it abort()s rather than merely degrading
+  // (`Should enable WiFi modem sleep when both WiFi and Bluetooth are enabled`), and
+  // the board goes into an endless boot loop every ~6 seconds.
   WiFi.setSleep(false);
 
-  // 2. Nhớ kênh router. Đây là con số panel sẽ quay về bám khi mất mạng, và là
-  //    thứ duy nhất cho phép nó gặp lại node lúc router đã tắt hẳn.
+  // 2. Remember the router's channel. This is the number the panel returns to when
+  //    the network goes down, and the only thing that lets it meet the nodes again
+  //    once the router is completely off.
   EspNowChannel::note((uint8_t)WiFi.channel());
 
-  // 3. Thôi tự ghim — từ giờ router giữ kênh hộ, và node cũng bám theo router.
+  // 3. Stop pinning -- from now on the router holds the channel for us, and the
+  //    nodes follow the router too.
   EspNowChannel::release();
 
-  Serial.printf(" OK  IP=%s  RSSI=%d dBm  kenh=%d\n",
+  Serial.printf(" OK  IP=%s  RSSI=%d dBm  channel=%d\n",
                 WiFi.localIP().toString().c_str(), (int)WiFi.RSSI(), WiFi.channel());
 }
 
@@ -744,24 +812,26 @@ static void connectWifi() {
   if (WiFi.status() == WL_CONNECTED) return;
   WiFi.mode(WIFI_STA);
 
-  // Đừng ghi cấu hình WiFi xuống NVS ở mỗi lần begin(): vòng thử lại có thể chạy
-  // hàng trăm lần trong một đêm mất mạng, và flash thì có hạn ghi.
+  // Do not write the WiFi configuration to NVS on every begin(): the retry loop can
+  // run hundreds of times during an overnight outage, and flash has finite write
+  // endurance.
   WiFi.persistent(false);
 
-  // TỰ NỐI LẠI: BẬT trong lúc khởi động, TẮT ngay sau vòng thử bên dưới.
+  // AUTO-RECONNECT: ON during boot, OFF immediately after the loop below.
   //
-  // ĐÃ ĐO ĐƯỢC CÁI GIÁ CỦA VIỆC TẮT SỚM: tắt trước vòng thử thì mỗi lượt 20 giây
-  // trở thành 20 giây NẰM IM — ngăn xếp không tự thử lại lần nào sau một cú bắt
-  // tay trượt, nên bo phải chờ hết lượt rồi mới begin() lại. Trên bo thật, ở
-  // RSSI -36 dBm (rất mạnh), khởi động mất tới "lan 3/3" ≈ 40 giây mới vào mạng.
+  // THE COST OF TURNING IT OFF TOO EARLY HAS BEEN MEASURED: disabled before the
+  // loop, each 20-second attempt becomes 20 seconds of DOING NOTHING -- the stack
+  // never retries after a failed handshake, so the board has to wait out the whole
+  // attempt before calling begin() again. On real hardware at RSSI -36 dBm (very
+  // strong), boot took until "attempt 3/3" ~= 40 seconds to join.
   //
-  // Ở đây để ngăn xếp tự lo là ĐÚNG: ESP-NOW chưa dựng (EspNowRelay::begin() nằm
-  // sau), nên nó có nhảy kênh cũng không cắt đường thu của ai cả — chính là điều
-  // KHÔNG còn đúng sau khi setup() xong.
+  // Letting the stack handle it here is CORRECT: ESP-NOW is not up yet
+  // (EspNowRelay::begin() comes later), so any channel hopping cuts off nobody's
+  // reception -- which is exactly what stops being true once setup() finishes.
   WiFi.setAutoReconnect(true);
 
   for (uint8_t attempt = 1; attempt <= WIFI_BOOT_ATTEMPTS; attempt++) {
-    Serial.printf("WiFi -> \"%s\" (lan %u/%u) ", WIFI_SSID, attempt, WIFI_BOOT_ATTEMPTS);
+    Serial.printf("WiFi -> \"%s\" (attempt %u/%u) ", WIFI_SSID, attempt, WIFI_BOOT_ATTEMPTS);
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     const uint32_t deadline = millis() + WIFI_ATTEMPT_MS;
     while (WiFi.status() != WL_CONNECTED && (int32_t)(millis() - deadline) < 0) {
@@ -769,34 +839,38 @@ static void connectWifi() {
       Serial.print(".");
     }
     if (WiFi.status() == WL_CONNECTED) break;
-    // Quét CHỈ ĐƯỢC PHÉP Ở ĐÂY, lúc ESP-NOW chưa dựng. scanNetworks() nhảy khắp
-    // các kênh và bỏ radio lại ở kênh cuối — gọi nó sau khi ESP-NOW đã chạy là
-    // kéo gateway ra khỏi kênh của các node, và không một dòng log nào báo.
+    // Scanning is ONLY PERMITTED HERE, while ESP-NOW is not up. scanNetworks() hops
+    // across every channel and leaves the radio on the last one -- calling it after
+    // ESP-NOW is running pulls the gateway off the nodes' channel, and not one log
+    // line reports it.
     if (attempt < WIFI_BOOT_ATTEMPTS) wifiDiagnose();
   }
 
-  // TỪ ĐÂY TRỞ ĐI, RADIO LÀ CỦA serviceNetwork(). Tắt tự-nối-lại.
+  // FROM HERE ON, THE RADIO BELONGS TO serviceNetwork(). Disable auto-reconnect.
   //
-  // Không phải để tiết kiệm gì — để GIÀNH QUYỀN ĐIỀU ĐỘ RADIO. Cú begin() mà
-  // ngăn xếp tự gọi sau mỗi lần rớt KHÔNG khai kênh, nên nó quét khắp các kênh:
-  // ngay sau khi serviceNetwork() vừa ghim radio về kênh của node, một lần
-  // tự-nối-lại chạy sau lưng sẽ kéo nó đi mất — và không có log nào của mình
-  // báo, vì không phải mình gọi. Tắt đi thì mọi lần radio rời kênh đều do đúng
-  // một chỗ quyết định.
+  // Not to save anything -- to TAKE OWNERSHIP OF RADIO SCHEDULING. The begin() the
+  // stack calls itself after every drop declares NO channel, so it scans across all
+  // of them: right after serviceNetwork() has pinned the radio to the nodes'
+  // channel, a background auto-reconnect drags it away -- with none of our own log
+  // lines reporting it, because we did not make the call. Disabled, every departure
+  // from the channel is decided in exactly one place.
   WiFi.setAutoReconnect(false);
 
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.printf("\nKHONG VAO DUOC WiFi sau %u lan — CHAY TIEP KHONG CO MANG.\n"
-                  "  ESP-NOW, UART toi UNO Q va hong ngoai van hoat dong; chi mat\n"
-                  "  duong len cloud. serviceNetwork() se thu lai nen trong loop().\n",
+    Serial.printf("\nCOULD NOT JOIN WiFi after %u attempts - CARRYING ON WITHOUT A NETWORK.\n"
+                  "  ESP-NOW, the UART to the UNO Q and infrared all still work; only the\n"
+                  "  path to the cloud is lost. serviceNetwork() will keep retrying in the\n"
+                  "  background from loop().\n",
                   WIFI_BOOT_ATTEMPTS);
-    // ĐẬU RADIO LẠI TRƯỚC KHI ĐI TIẾP. Vòng thử ở trên (và wifiDiagnose() xen
-    // giữa) bỏ radio lại ở kênh cuối cùng nó dò tới — hoàn toàn ngẫu nhiên. Không
-    // có dòng này thì EspNowRelay::begin() ngay sau đây dựng bộ thu trên một kênh
-    // vô nghĩa, và panel câm với cả 5 node dù ESP-NOW khởi tạo "thành công".
+    // PARK THE RADIO BEFORE MOVING ON. The loop above (and wifiDiagnose() in
+    // between) leaves the radio on whichever channel it last probed -- entirely at
+    // random. Without this line, the EspNowRelay::begin() immediately below builds a
+    // receiver on a meaningless channel, and the panel is deaf to all 5 nodes even
+    // though ESP-NOW initialised "successfully".
     //
-    // disconnect(false) TRƯỚC: lần begin() cuối vẫn đang dò dở, mà còn dò thì lệnh
-    // đặt kênh bị ngăn xếp WiFi ghi đè trong im lặng. `false` giữ station BẬT.
+    // disconnect(false) FIRST: the last begin() is still probing, and while probing
+    // the WiFi stack silently overwrites any channel we set. `false` keeps the
+    // station interface UP.
     WiFi.disconnect(false);
     EspNowChannel::park();
     return;
@@ -805,157 +879,175 @@ static void connectWifi() {
   onWifiUp();
 }
 
-/// MỘT lần thử nối MQTT. Trả true nếu vào được.
+/// ONE MQTT connection attempt. Returns true if it succeeded.
 static bool mqttTryConnect() {
   String cid = String("breezelink_") + DEVICE_UUID;  // = mqtt_naming.client_id()
   // LWT (will): topic=status, qos=1, retain=true, payload="offline".
   if (mqtt.connect(cid.c_str(), MQTT_USERNAME, MQTT_PASSWORD,
                    tStatus.c_str(), 1, true, "offline")) {
     Serial.println("MQTT ... connected");
-    mqtt.publish(tStatus.c_str(), "online", true);  // retained -> web thấy "Trực tuyến"
-    // QoS1: lệnh điều khiển máy lạnh không được phép rơi âm thầm.
+    mqtt.publish(tStatus.c_str(), "online", true);  // retained -> the web shows "Trực tuyến"
+    // QoS1: an air conditioner control command must never be dropped silently.
     mqtt.subscribe(tCmd.c_str(), 1);
     return true;
   }
-  // rc=-2 mạng lỗi; rc=4 sai user/pass; rc=5 chưa được cấp quyền trên broker.
-  Serial.printf("MQTT ... that bai rc=%d\n", mqtt.state());
+  // rc=-2 network error; rc=4 wrong user/pass; rc=5 not authorised on the broker.
+  Serial.printf("MQTT ... failed rc=%d\n", mqtt.state());
   return false;
 }
 
-/// WiFi phải mất LIÊN TỤC bao lâu mới được coi là mất thật (ms).
+/// How long WiFi has to be down CONTINUOUSLY before it counts as really down (ms).
 ///
-/// THIẾU CÁI NÀY LÀ PANEL TỰ NGẮT MẠNG CỦA CHÍNH NÓ — lỗi đã đo được trên bo:
-/// RSSI -39 dBm (rất mạnh) mà log vẫn rớt/nối lại liên tục.
+/// WITHOUT THIS, THE PANEL DISCONNECTS ITS OWN NETWORK -- a bug measured on real
+/// hardware: RSSI -39 dBm (very strong) and the log still dropping/reconnecting
+/// constantly.
 ///
-/// Vì sao: loop() chạy hàng trăm lần mỗi giây, còn `WiFi.status()` có lúc trả về
-/// một trị KHÔNG-CONNECTED chớp nhoáng (gia hạn DHCP, một sự kiện nội bộ) trong
-/// khi liên kết vẫn hoàn toàn khoẻ. Phản ứng ngay với MỘT lần đọc như vậy nghĩa
-/// là gọi `WiFi.begin()`, mà begin() thì THẬT SỰ phá liên kết đang tốt để dựng
-/// lại từ đầu. Một cái chớp mắt biến thành một lần mất mạng có thật, rồi lặp.
+/// Why: loop() runs hundreds of times a second, and `WiFi.status()` occasionally
+/// returns a momentary NOT-CONNECTED value (a DHCP renewal, an internal event)
+/// while the link is perfectly healthy. Reacting to ONE such reading means calling
+/// `WiFi.begin()`, and begin() GENUINELY tears down a healthy link to rebuild it
+/// from scratch. A blink turns into a real outage, and then repeats.
 ///
-/// 5 giây: dài hơn mọi cái chớp, ngắn hơn nhiều so với thời gian người dùng kịp
-/// nhận ra mạng đã mất.
+/// 5 seconds: longer than any blink, far shorter than the time it takes a user to
+/// notice the network is gone.
 static const uint32_t WIFI_DOWN_DEBOUNCE_MS = 5000UL;
 
-/// Nhịp thử nối lại khi đã mất thật (ms). CỐ ĐỊNH, không giãn dần nữa.
+/// Retry interval once it is really down (ms). FIXED, no longer backing off.
 ///
-/// Bản trước giãn 30s -> 60s -> 300s để "đỡ quấy radio". Sai chỗ này: thứ thật
-/// sự kéo radio khỏi kênh của node là QUÉT, mà lần thử trên kênh đã nhớ thì
-/// không quét — nó đi thẳng tới đúng kênh node đang phát, gần như không tốn gì.
-/// Giãn cả những lần thử rẻ tiền đó lên 5 phút chỉ đổi lấy một điều: router có
-/// điện lại rồi mà panel im thêm 5 phút nữa, và người dùng đọc ra là "không tự
-/// nối lại được".
+/// An earlier version backed off 30s -> 60s -> 300s to "disturb the radio less".
+/// That was wrong here: what genuinely pulls the radio off the nodes' channel is
+/// SCANNING, and an attempt on the remembered channel does not scan -- it goes
+/// straight to the channel the nodes are transmitting on, at almost no cost.
+/// Backing those cheap attempts off to 5 minutes buys exactly one thing: the router
+/// comes back and the panel stays silent for another 5 minutes, and the user reads
+/// that as "it cannot reconnect by itself".
 ///
-/// Nay: thử đều 30 giây, còn phần ĐẮT (quét) mới là phần được làm cho thưa.
+/// Now: retry steadily every 30 seconds, and make the EXPENSIVE part (scanning) the
+/// part that is made rare.
 static const uint32_t WIFI_RETRY_MS = 30000UL;
 
-/// Cứ bao nhiêu lần thử thì cho phép MỘT lần quét đầy đủ (router đổi kênh thật).
-/// 6 × 30s = một lần quét mỗi ~3 phút.
+/// How many attempts before allowing ONE full scan (in case the router really has
+/// changed channel). 6 x 30s = one scan every ~3 minutes.
 static const uint8_t WIFI_SCAN_EVERY = 6;
 
-/// Cùng ý đó cho MQTT. Tách riêng vì hai thứ hỏng độc lập nhau: WiFi tốt mà
-/// broker chết là chuyện thường, và khi đó không có lý do gì để đụng vào radio.
+/// The same idea for MQTT. Kept separate because the two fail independently: good
+/// WiFi with a dead broker is routine, and in that case there is no reason to touch
+/// the radio at all.
 static uint32_t mqttRetryDelayMs(uint8_t misses) {
   if (misses < 3) return 15000UL;
   if (misses < 8) return 60000UL;
   return 300000UL;
 }
 
-/// Cho MỘT lần thử nối WiFi bao lâu trước khi bỏ cuộc và quay về đậu kênh (ms).
+/// How long ONE WiFi attempt gets before giving up and returning to the parked
+/// channel (ms).
 static const uint32_t WIFI_ATTEMPT_WINDOW_MS = 12000UL;
 
 
-/// Giữ WiFi/MQTT sống mà KHÔNG CHẶN loop(). Gọi mỗi vòng.
+/// Keep WiFi/MQTT alive WITHOUT BLOCKING loop(). Call every iteration.
 ///
-/// ĐÂY LÀ CHỖ SỬA LỖI NGHIÊM TRỌNG NHẤT CỦA FILE NÀY.
+/// THIS IS WHERE THIS FILE'S MOST SERIOUS BUG WAS FIXED.
 ///
-/// Bản trước gọi thẳng connectWifi() + connectMqtt() trong loop(), mà cả hai đều
-/// là vòng lặp CHỜ VÔ HẠN. Hệ quả: mất WiFi là loop() không bao giờ quay lại —
+/// An earlier version called connectWifi() + connectMqtt() directly from loop(),
+/// and both are INFINITE WAIT loops. The consequence: losing WiFi meant loop()
+/// never came back --
 ///
-///   ESP-NOW ngừng thu   -> 4 góc phòng và node ngoài trời biến mất
-///   UART ngừng đẩy      -> UNO Q không còn ảnh chụp nào để tính
-///   lệnh UNO Q không ai đọc -> edge không lái được máy lạnh
-///   IR ngừng thi hành   -> kể cả lệnh đã nằm trong hàng đợi
+///   ESP-NOW stops receiving  -> the 4 room corners and the outdoor node vanish
+///   UART stops pushing       -> the UNO Q has no snapshots left to compute from
+///   nobody reads UNO Q commands -> the edge cannot drive the air conditioner
+///   IR stops executing       -> including commands already in the queue
 ///
-/// Tức là mất mạng làm CHẾT luôn lớp dự phòng sinh ra để chịu đựng đúng sự cố
-/// đó. Cả kiến trúc edge-ai dựa trên giả định "gateway vẫn chạy khi mất cloud",
-/// và giả định đó sai ngay trong vòng lặp chính.
+/// In other words, losing the network KILLED the very fallback layer built to
+/// survive that failure. The whole edge-ai architecture rests on the assumption
+/// "the gateway keeps running when the cloud is gone", and that assumption was
+/// false right inside the main loop.
 ///
-/// Nay: thử lại theo nhịp và không chờ.
+/// Now: retry on a schedule and never wait.
 ///
-/// LUẬT VỀ QUÉT ĐÃ ĐỔI — đọc kỹ, bản trước nói ngược lại.
+/// THE SCANNING RULE HAS CHANGED -- read carefully, the previous version said the
+/// opposite.
 ///
-/// Cũ: "TUYỆT ĐỐI KHÔNG QUÉT", vì scanNetworks() nhảy khắp các kênh và bỏ radio
-/// lại ở kênh cuối, tức là tự cắt đường thu ESP-NOW của chính mình. Chẩn đoán
-/// đúng, kết luận thiếu: nó cấm lời gọi quét TƯỜNG MINH, trong khi `WiFi.begin()`
-/// KHÔNG KHAI KÊNH cũng quét y hệt — và vòng thử lại gọi nó 4 lần mỗi phút. Lệnh
-/// cấm đó không hề bảo vệ được gì, radio vẫn lang thang suốt thời gian mất mạng.
+/// Old: "NEVER SCAN", because scanNetworks() hops across every channel and leaves
+/// the radio on the last one, i.e. cutting off our own ESP-NOW reception. The
+/// diagnosis was right, the conclusion incomplete: it banned EXPLICIT scan calls,
+/// while a `WiFi.begin()` WITH NO CHANNEL scans exactly the same way -- and the
+/// retry loop called it 4 times a minute. That ban protected nothing at all; the
+/// radio still wandered for the whole outage.
 ///
-/// Nay, ba luật thay cho một lệnh cấm không có hiệu lực:
-///   1. Thử nối bằng `WiFi.begin(ssid, pass, KÊNH ĐÃ NHỚ)` — có kênh thì station
-///      đi thẳng, không quét, nên lần thử nằm ĐÚNG trên kênh của node.
-///   2. Giữa các lần thử, đậu radio về kênh đã nhớ (EspNowChannel::park()).
-///   3. Được quét, nhưng thưa và CÓ CHỦ ĐÍCH — và mọi lần quét đều phải bám lại
-///      kênh ngay sau đó (EspNowChannel::rescan lo việc này).
+/// Now, three rules replace one ineffective ban:
+///   1. Attempt with `WiFi.begin(ssid, pass, THE REMEMBERED CHANNEL)` -- given a
+///      channel the station goes straight there without scanning, so the attempt
+///      itself sits ON the nodes' channel.
+///   2. Between attempts, park the radio on the remembered channel
+///      (EspNowChannel::park()).
+///   3. Scanning is allowed, but rarely and DELIBERATELY -- and every scan must
+///      re-lock the channel immediately afterwards (EspNowChannel::rescan handles
+///      this).
 static void serviceNetwork() {
   static uint32_t lastWifiTry = 0, attemptStartMs = 0, lastRescanMs = 0, lastMqttTry = 0;
-  static uint32_t downSinceMs = 0;   // 0 = đang có mạng
+  static uint32_t downSinceMs = 0;   // 0 = the network is up
   static uint8_t  wifiMisses = 0, mqttMisses = 0;
   static bool     attempting = false;
   const uint32_t  now = millis();
 
   // ==========================================================================
-  //  MẤT WiFi — ưu tiên số một là GIỮ RADIO ĐÚNG KÊNH, không phải nối lại nhanh
+  //  WiFi IS DOWN -- priority one is KEEPING THE RADIO ON THE RIGHT CHANNEL, not
+  //  reconnecting quickly
   // ==========================================================================
   if (WiFi.status() != WL_CONNECTED) {
     if (downSinceMs == 0) downSinceMs = now;
 
-    // CHỜ XEM CÓ PHẢI MẤT THẬT KHÔNG trước khi động vào bất cứ thứ gì. Xem
-    // WIFI_DOWN_DEBOUNCE_MS: phản ứng với một lần đọc chớp nhoáng là tự tay phá
-    // một liên kết đang khoẻ. Bỏ qua chống dội khi ĐANG thử nối — lúc đó
-    // "không connected" là trạng thái đương nhiên, không phải tin tức.
+    // WAIT AND SEE WHETHER IT IS REALLY DOWN before touching anything. See
+    // WIFI_DOWN_DEBOUNCE_MS: reacting to one momentary reading means tearing down a
+    // healthy link with our own hands. Skip the debounce WHILE attempting -- at that
+    // point "not connected" is the expected state, not news.
     if (!attempting && now - downSinceMs < WIFI_DOWN_DEBOUNCE_MS) return;
 
-    // --- đang trong một lần thử ---
+    // --- inside an attempt ---
     if (attempting) {
-      // CHỜ HẾT CỬA SỔ, KHÔNG BỎ CUỘC SỚM THEO WiFi.status().
+      // WAIT OUT THE WHOLE WINDOW; DO NOT GIVE UP EARLY BASED ON WiFi.status().
       //
-      // Bản trước có một nhánh "hopeless" bỏ cuộc ngay khi status là
-      // WL_NO_SSID_AVAIL / WL_CONNECT_FAILED. Nó đọc TRẠNG THÁI CŨ: ngay sau
-      // WiFi.begin(), tác vụ WiFi chưa kịp bắt đầu lần thử mới nên status vẫn
-      // còn kết quả của lần TRƯỚC. Vòng loop kế tiếp (~1ms sau) đọc phải trị cũ
-      // đó, kết luận "vô vọng", và huỷ lần thử vừa đặt ra trước khi nó kịp chạy.
+      // An earlier version had a "hopeless" branch that gave up as soon as the
+      // status was WL_NO_SSID_AVAIL / WL_CONNECT_FAILED. It was reading STALE
+      // STATE: right after WiFi.begin(), the WiFi task has not yet started the new
+      // attempt so the status still holds the PREVIOUS result. The next loop
+      // iteration (~1ms later) read that stale value, concluded "hopeless", and
+      // cancelled the attempt it had just started before it could run.
       //
-      // Hậu quả: mọi lần thử sau lần trượt đầu tiên đều chết trong 1ms, bộ đếm
-      // trượt tăng vọt, và panel không bao giờ nối lại được — đúng lỗi đã báo.
+      // The consequence: every attempt after the first failure died within 1ms, the
+      // miss counter shot up, and the panel could never reconnect -- exactly the
+      // reported bug.
       if (now - attemptStartMs < WIFI_ATTEMPT_WINDOW_MS) return;
 
       attempting = false;
       if (wifiMisses < 255) wifiMisses++;
       lastWifiTry = now;
 
-      // DỪNG HẲN việc dò RỒI MỚI đậu lại kênh — đúng thứ tự này, không đảo được.
-      // Còn đang dò thì ngăn xếp WiFi tự lái kênh và lệnh đặt kênh bị ghi đè
-      // trong im lặng. `false` = giữ giao diện station BẬT, nên ESP-NOW vẫn thu.
+      // FULLY STOP probing BEFORE re-parking the channel -- this order exactly, it
+      // cannot be swapped. While probing, the WiFi stack drives the channel itself
+      // and any channel we set is silently overwritten. `false` = keep the station
+      // interface UP, so ESP-NOW keeps receiving.
       WiFi.disconnect(false);
       EspNowChannel::park();
       return;
     }
 
-    // --- đang đậu kênh, chờ tới lượt thử tiếp ---
+    // --- parked on the channel, waiting for the next attempt ---
     //
-    // Canh kênh mỗi vòng. Đặt Ở ĐÂY chứ không ở nhánh trên: trong lúc `attempting`
-    // thì ngăn xếp WiFi đang cố tình nhảy kênh để dò SSID, kéo về là hai bên
-    // giằng nhau và không lần nối nào xong.
+    // Guard the channel every iteration. Placed HERE rather than in the branch
+    // above: while `attempting`, the WiFi stack is deliberately hopping channels to
+    // find the SSID, and pulling it back makes the two fight so no connection ever
+    // completes.
     EspNowChannel::hold();
 
-    // Dò lại kênh router định kỳ, cùng nhịp với node. Chỉ cần cho ca "thấy router
-    // mà không vào được" (đổi mật khẩu, lọc MAC): khi đó vòng thử ở dưới không
-    // bao giờ thành công nên không có đường nào khác học được kênh mới.
+    // Re-scan for the router's channel periodically, at the same cadence as the
+    // nodes. Only needed for the "router visible but cannot join" case (password
+    // changed, MAC filtering): there the attempt loop below never succeeds, so there
+    // is no other way to learn a new channel.
     if (now - lastRescanMs >= EspNowChannel::RESCAN_INTERVAL_MS) {
       lastRescanMs = now;
       EspNowChannel::rescan(WIFI_SSID);
-      return;   // quét vừa ăn ~1 giây; để vòng sau hãy thử nối
+      return;   // the scan just ate ~1 second; leave the connection attempt to the next round
     }
 
     if (now - lastWifiTry < WIFI_RETRY_MS) return;
@@ -963,51 +1055,57 @@ static void serviceNetwork() {
     attemptStartMs = now;
     attempting     = true;
 
-    // Quét là phần ĐẮT (kéo radio khỏi kênh node), nên nó thưa; thử trên kênh đã
-    // nhớ là phần RẺ, nên nó là mặc định.
+    // Scanning is the EXPENSIVE part (it drags the radio off the nodes' channel) so
+    // it is rare; attempting on the remembered channel is the CHEAP part, so it is
+    // the default.
     if (wifiMisses == 0 || (wifiMisses % WIFI_SCAN_EVERY) != 0) {
-      // KHAI KÊNH TRONG begin() — đây là mẹo làm cả bài toán này gần như biến mất.
-      // Có kênh thì station đi THẲNG tới đó, KHÔNG quét, nên lần thử nối lại tự
-      // nó đã nằm đúng kênh của node: panel vừa dò mạng vừa thu ESP-NOW bình
-      // thường, không còn phải đánh đổi giữa hai việc.
+      // DECLARE THE CHANNEL IN begin() -- this is the trick that makes almost this
+      // whole problem disappear. Given a channel the station goes STRAIGHT there
+      // with NO scan, so the reconnection attempt is itself sitting on the nodes'
+      // channel: the panel probes for the network and receives ESP-NOW normally at
+      // the same time, with no trade-off between the two.
       const uint8_t ch = EspNowChannel::last();
-      Serial.printf("[net] mat WiFi — thu lai tren kenh %u, khong quet (lan %u)\n",
+      Serial.printf("[net] WiFi down - retrying on channel %u without scanning (attempt %u)\n",
                     ch, (unsigned)(wifiMisses + 1));
       WiFi.begin(WIFI_SSID, WIFI_PASSWORD, ch);
     } else {
-      // Trượt nhiều lần trên kênh cũ -> router có thể đã đổi kênh thật. Đành
-      // quét, và chấp nhận mất vài gói ESP-NOW trong cửa sổ này.
-      Serial.printf("[net] %u lan truot tren kenh %u — thu lai CO QUET\n",
+      // Repeated failures on the old channel -> the router may really have changed
+      // channel. Scan after all, and accept losing a few ESP-NOW packets in this
+      // window.
+      Serial.printf("[net] %u failures on channel %u - retrying WITH A SCAN\n",
                     (unsigned)wifiMisses, EspNowChannel::last());
       WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     }
-    return;   // chưa có WiFi thì cũng chưa thể có MQTT
+    return;   // without WiFi there cannot be MQTT either
   }
 
   // ==========================================================================
-  //  CÓ WiFi
+  //  WiFi IS UP
   // ==========================================================================
-  // Xoá mốc chống dội NGAY, trước mọi nhánh: một cái chớp đã qua thì không được
-  // để lại dấu vết nào cộng dồn vào lần chớp sau.
+  // Clear the debounce timestamp IMMEDIATELY, before any branch: a blink that has
+  // passed must leave no trace to accumulate into the next one.
   downSinceMs = 0;
 
-  // Vừa vào lại sau một đợt mất mạng: nhớ kênh, tắt modem sleep, thôi ghim.
+  // Just came back after an outage: remember the channel, disable modem sleep, stop
+  // pinning.
   if (attempting || EspNowChannel::pinned()) {
     attempting   = false;
     wifiMisses   = 0;
-    lastRescanMs = now;   // đếm lại từ đây, đừng để lần rớt sau quét ngay tức thì
+    lastRescanMs = now;   // restart the count here, so the next drop does not scan instantly
     onWifiUp();
   }
 
   if (!mqtt.connected()) {
     if (now - lastMqttTry >= mqttRetryDelayMs(mqttMisses)) {
-      const bool ok = mqttTryConnect();   // MỘT lần; hỏng thì vòng sau thử tiếp
-      // ĐẶT MỐC SAU KHI HÀM TRẢ VỀ, không phải trước — và đây là một lỗi thật đã
-      // sửa, không phải chuyện phong cách. mqtt.connect() CHẶN cho tới khi hết
-      // socket timeout; đặt mốc trước lời gọi thì thời gian chặn ăn trọn khoảng
-      // chờ, vòng sau `now - lastMqttTry` đã vượt ngưỡng và nó thử lại NGAY. Nhịp
-      // giãn cách biến thành chặn liên tục, và loop() không bao giờ tới được chỗ
-      // rút lệnh người dùng — panel treo tường bấm không ăn.
+      const bool ok = mqttTryConnect();   // ONE attempt; on failure the next round retries
+      // TIMESTAMP AFTER THE FUNCTION RETURNS, not before -- and this is a real bug
+      // that was fixed, not a matter of style. mqtt.connect() BLOCKS until the
+      // socket timeout expires; timestamping before the call lets the blocking time
+      // consume the whole interval, so on the next round `now - lastMqttTry` has
+      // already passed the threshold and it retries IMMEDIATELY. The spaced-out
+      // cadence turns into continuous blocking, and loop() never reaches the point
+      // where it collects user commands -- the wall panel stops responding to
+      // presses.
       lastMqttTry = millis();
       if (ok) mqttMisses = 0;
       else if (mqttMisses < 255) mqttMisses++;
@@ -1015,23 +1113,27 @@ static void serviceNetwork() {
     return;
   }
 
-  // --- Nhịp "gateway còn sống" ---------------------------------------------
-  //  TRƯỚC ĐÂY `status` CHỈ GỬI MỘT LẦN, trong mqttTryConnect(). Backend nay coi
-  //  một node là trực tuyến khi `last_seen_at` còn tươi (services/device_presence.py),
-  //  mà cột đó CHỈ được ghi khi có bản tin trên topic `status`. Nên một gateway
-  //  chạy hoàn hảo vẫn bị báo ngoại tuyến sau PRESENCE_TTL — đã dính thật: bo
-  //  chạy 9 phút, WiFi và MQTT đều nối, mà web hiện "Ngoại tuyến".
+  // --- The "gateway is alive" heartbeat -------------------------------------
+  //  `status` USED TO BE SENT ONLY ONCE, in mqttTryConnect(). The backend now
+  //  considers a node online while `last_seen_at` is fresh
+  //  (services/device_presence.py), and that column is ONLY written when a message
+  //  arrives on the `status` topic. So a perfectly healthy gateway was still
+  //  reported offline after PRESENCE_TTL -- and this really happened: the board ran
+  //  for 9 minutes with both WiFi and MQTT connected while the web showed
+  //  "Ngoại tuyến".
   //
-  //  Gateway PHẢI TỰ NÓI VỀ MÌNH chứ không suy ra từ telemetry của slave: suy
-  //  gián tiếp sẽ biến quan hệ hiện diện thành vòng tròn (slave sống nhờ gateway
-  //  publish hộ, gateway lại sống nhờ slave gửi về), và khi ESP-NOW chết hẳn thì
-  //  gateway khoẻ mạnh vẫn bị báo offline.
+  //  The gateway MUST SPEAK FOR ITSELF rather than being inferred from a slave's
+  //  telemetry: inferring it indirectly makes the presence relationship circular (a
+  //  slave is alive because the gateway publishes for it, the gateway is alive
+  //  because the slave sends to it), and once ESP-NOW dies completely a healthy
+  //  gateway is still reported offline.
   //
-  //  DÙNG CHUNG STATUS_REFRESH_MS với slave để MỘT hằng số chi phối ngưỡng bên
-  //  backend — đổi nhịp ở đây thì phải đổi PRESENCE_TTL, và chú thích ở cả hai
-  //  đầu đều trỏ về nhau.
+  //  SHARES STATUS_REFRESH_MS with the slaves so that ONE constant governs the
+  //  backend threshold -- change the cadence here and you must change PRESENCE_TTL,
+  //  and the comments at both ends point at each other.
   //
-  //  Phép trừ không dấu nên millis() tràn vẫn đúng — cùng khuôn với slave-watch.cpp.
+  //  Unsigned subtraction, so a millis() wrap is still correct -- the same pattern
+  //  as slave-watch.cpp.
   static uint32_t lastOwnStatusMs = 0;
   if (now - lastOwnStatusMs >= SlaveWatch::STATUS_REFRESH_MS) {
     lastOwnStatusMs = now;
@@ -1042,22 +1144,26 @@ static void serviceNetwork() {
 }
 
 // ---------------------------------------------------------------------------
-//  Máy tạo độ ẩm
+//  Humidifier
 // ---------------------------------------------------------------------------
-/// Bắn khung IR cho hướng [on]. Trả false khi CHƯA HỌC MÃ cho hướng đó —
-/// HumidifierControl dựa vào giá trị trả về để không tin nhầm là máy đã đổi.
+/// Transmit the IR frame for direction [on]. Returns false when NO CODE HAS BEEN
+/// LEARNED for that direction -- HumidifierControl relies on the return value so it
+/// does not wrongly believe the unit has changed.
 ///
-/// REMOTE BẬP BÊNH ĐƯỢC XỬ LÝ Ở ĐÂY, và chỉ ở đây. Rất nhiều máy tạo ẩm chỉ có
-/// MỘT nút nguồn: bấm lúc đang tắt thì bật, bấm lúc đang chạy thì tắt. Hộ như vậy
-/// chỉ học được ô BẬT, nên chiều TẮT rơi về đúng khung đó.
+/// TOGGLE REMOTES ARE HANDLED HERE, and only here. Many humidifiers have only ONE
+/// power button: pressed while off it turns on, pressed while running it turns off.
+/// Such a household can only learn the ON slot, so the OFF direction falls back to
+/// that same frame.
 ///
-/// BO THỬ TRƯỚC ĐÂY DÙNG MỘT CỜ BIÊN DỊCH (`DIFFUSER_IR_TOGGLE`) cho việc
-/// này, và cờ đó là thứ chỉ sai được ngoài hiện trường: khai 0 trong khi cả hai ô
-/// đều học nút bập bênh thì mã "TẮT" thật ra cũng đảo trạng thái, và bo BẬT máy
-/// đúng lúc nó tưởng mình đang tắt. Ở đây không có gì để khai — "ô TẮT có mã hay
-/// không" là một sự kiện đọc được từ NVS, và màn MÁY TẠO ẨM nói thẳng ra nó.
+/// THE TEST BOARD USED A COMPILE FLAG (`DIFFUSER_IR_TOGGLE`) for this, and that
+/// flag was the kind of thing that could only be wrong out in the field: declared 0
+/// while both slots had learned the toggle button, the "OFF" code also inverted the
+/// state, and the board turned the unit ON at the exact moment it believed it was
+/// turning it off. Here there is nothing to declare -- "does the OFF slot have a
+/// code" is a fact readable from NVS, and the humidifier screen states it plainly.
 ///
-/// Định nghĩa TRƯỚC setup() vì setup() truyền nó cho HumidifierControl::begin().
+/// Defined BEFORE setup() because setup() passes it to
+/// HumidifierControl::begin().
 static bool humidifierEmit(bool on) {
   uint16_t n = IrStore::loadAlias(AcActions::humidWire(on), -1, irBuf, IrIo::RAW_MAX);
   bool viaToggle = false;
@@ -1068,131 +1174,146 @@ static bool humidifierEmit(bool on) {
   if (n == 0) return false;
 
   IrIo::blast(irBuf, n);
-  Serial.printf("[am] da phat %u moc -> %s%s\n", n, on ? "BAT" : "TAT",
-                viaToggle ? " (dung lai o BAT: remote bap benh)" : "");
+  Serial.printf("[humid] transmitted %u transitions -> %s%s\n", n, on ? "ON" : "OFF",
+                viaToggle ? " (reused the ON slot: toggle remote)" : "");
   return true;
 }
 
 void setup() {
   Serial.begin(115200);
   delay(300);
-  Serial.println("\n== BreezeLink · QR Box Advance Touch · GATEWAY TRONG NHA (BLE + ESP-NOW + IR) ==");
+  Serial.println("\n== BreezeLink - QR Box Advance Touch - INDOOR GATEWAY (BLE + ESP-NOW + IR) ==");
 
-  // Dựng màn TRƯỚC WiFi, có chủ đích: tác vụ giao diện chạy ở lõi 0 nên nó vẫn
-  // vẽ bình thường suốt lúc connectWifi()/connectMqtt() đang chặn lõi 1 hàng
-  // chục giây. Người đi lắp nhìn thấy "MAT KET NOI" nhấp nháy — tức là node
-  // sống và đang dò mạng — thay vì một màn đen không nói gì.
+  // Bring the display up BEFORE WiFi, deliberately: the UI task runs on core 0 so
+  // it keeps drawing normally throughout the tens of seconds that
+  // connectWifi()/connectMqtt() block core 1. The installer sees "MAT KET NOI"
+  // blinking -- i.e. the node is alive and probing for the network -- rather than a
+  // black screen saying nothing.
   //
-  // Ui::begin() cũng là nơi kéo EN_LEVEL_SHIFT lên HIGH, nên nó phải chạy TRƯỚC
-  // IrIo::begin() nếu chân IR đi qua bộ dịch mức.
+  // Ui::begin() is also where EN_LEVEL_SHIFT is driven HIGH, so it has to run
+  // BEFORE IrIo::begin() if the IR pins go through the level shifter.
   Ui::begin();
   IrIo::begin(IR_TX_PIN, IR_RX_PIN);
   if (!IrStore::begin()) {
-    // Không chặn khởi động: node vẫn chạy được, chỉ là mọi lệnh phải kèm ir_raw.
-    Serial.println("NVS loi — se khong cache duoc ma IR, moi lenh deu phai co ir_raw");
+    // Do not block startup: the node still works, it just means every command has
+    // to include ir_raw.
+    Serial.println("NVS error - IR codes cannot be cached, every command will need ir_raw");
   }
-  // SAU IrStore::begin(): bộ điều khiển máy tạo ẩm nạp lại niềm tin trạng thái từ
-  // NVS, và emitter của nó tra kho mã. Trước đó thì cả hai đều rỗng.
+  // AFTER IrStore::begin(): the humidifier controller reloads its state belief from
+  // NVS, and its emitter looks up the code store. Before that, both are empty.
   HumidifierControl::begin(humidifierEmit);
   buildTopics();
 
-  // TRƯỚC connectWifi(): nhánh thất bại của nó gọi EspNowChannel::park(), mà park
-  // cần biết kênh đã nhớ từ lần chạy trước.
+  // BEFORE connectWifi(): its failure branch calls EspNowChannel::park(), and park
+  // needs to know the channel remembered from the previous run.
   EspNowChannel::begin();
 
   connectWifi();
   mqtt.setServer(MQTT_HOST, MQTT_PORT);
   mqtt.setCallback(onMessage);
 
-  // --- GHÌ HAI TIMEOUT MẠNG. Đây là thứ quyết định panel có bấm được hay không.
+  // --- CLAMP THE TWO NETWORK TIMEOUTS. This is what decides whether the panel
+  // responds to presses at all.
   //
-  // Mọi lời gọi mqtt.* đều CHẶN loop(), mà loop() là nơi DUY NHẤT thi hành lệnh
-  // người dùng bấm trên màn (xem runPanelCommand). Để mặc định thì:
-  //   - PubSubClient chờ CONNACK tới 15 giây
-  //   - WiFiClient chờ bắt tay TCP tới 3 giây, và ghi vào socket chết tới ~10 giây
-  // Cộng lại, một máy chủ chết làm panel treo tường "bấm không ăn" hàng chục giây
-  // một lượt, trong khi màn vẫn vẽ và vẫn kêu bíp vì tác vụ giao diện ở lõi 0
-  // không hề bị ảnh hưởng — nhìn y hệt hỏng phần cứng.
+  // Every mqtt.* call BLOCKS loop(), and loop() is the ONLY place that executes the
+  // commands a user presses on screen (see runPanelCommand). At the defaults:
+  //   - PubSubClient waits up to 15 seconds for CONNACK
+  //   - WiFiClient waits up to 3 seconds for the TCP handshake, and up to ~10
+  //     seconds writing into a dead socket
+  // Together, a dead server makes the wall panel "not respond to presses" for tens
+  // of seconds at a time, while the screen keeps drawing and beeping because the
+  // core-0 UI task is unaffected -- looking exactly like a hardware fault.
   //
-  // 3 giây / 5 giây là ngưỡng "thất bại nhanh". Vẫn dư cho một broker khoẻ trong
-  // LAN lẫn qua Internet; chỉ cắt đúng phần chờ vô ích khi bên kia đã chết.
-  net.setTimeout(3);            // giây — bắt tay TCP
-  mqtt.setSocketTimeout(5);     // giây — chờ CONNACK và chờ phần còn lại của gói
+  // 3 seconds / 5 seconds is the "fail fast" threshold. Still ample for a healthy
+  // broker on the LAN or across the Internet; it only cuts the pointless waiting
+  // when the other end is dead.
+  net.setTimeout(3);            // seconds -- TCP handshake
+  mqtt.setSocketTimeout(5);     // seconds -- waiting for CONNACK and the rest of a packet
   if (!mqtt.setBufferSize(MQTT_BUFFER_BYTES)) {
-    Serial.println("Khong cap phat duoc bo dem MQTT — lenh co ir_raw se bi bo am tham!");
+    Serial.println("Could not allocate the MQTT buffer - commands with ir_raw will be dropped silently!");
   }
-  // Giữ keepalive mặc định 15s của PubSubClient -> broker kết luận node chết
-  // sau ~22s. Ưu tiên ỔN ĐỊNH: hạ xuống 3-5s thì chỉ cần mạng chớp một nhịp là
-  // broker cắt phiên rồi client nối lại, trạng thái lật online/offline liên tục.
+  // Keep PubSubClient's default 15s keepalive -> the broker declares the node dead
+  // after ~22s. STABILITY comes first: dropping to 3-5s means one network blink is
+  // enough for the broker to cut the session and the client to reconnect, flipping
+  // the state online/offline constantly.
   mqtt.setKeepAlive(15);
-  // MỘT lần lúc khởi động. Hỏng thì KHÔNG chặn — serviceNetwork() trong loop()
-  // sẽ thử lại nền, và mọi thứ không cần mạng (ESP-NOW, UART, IR) chạy ngay.
+  // ONE attempt at startup. On failure DO NOT block -- serviceNetwork() in loop()
+  // retries in the background, and everything that does not need a network
+  // (ESP-NOW, UART, IR) works immediately.
   if (WiFi.status() == WL_CONNECTED) mqttTryConnect();
 
-  // ESP-NOW khởi tạo SAU khi WiFi đã kết nối: nó dùng đúng kênh WiFi đang bám,
-  // nên phải để WiFi chốt kênh trước thì slave (đang dò kênh router) mới gặp.
+  // ESP-NOW is initialised AFTER WiFi has connected: it uses whatever channel WiFi
+  // is on, so WiFi has to settle the channel first for the slaves (which are
+  // probing for the router's channel) to meet it.
   if (EspNowRelay::begin()) {
-    Serial.printf("ESP-NOW san sang · MAC master = %s · kenh %d\n",
+    Serial.printf("ESP-NOW ready - master MAC = %s - channel %d\n",
                   WiFi.macAddress().c_str(), WiFi.channel());
   } else {
-    Serial.println("ESP-NOW KHOI TAO LOI — se khong nhan duoc so lieu tu node ngoai troi");
+    Serial.println("ESP-NOW INIT ERROR - no data will be received from the outdoor node");
   }
 
-  // UART tới UNO Q. Thứ tự không còn quan trọng như thời BLE (nó không đụng
-  // radio), nhưng giữ ở đây để log khởi động đọc theo đúng chiều dữ liệu chảy.
+  // UART to the UNO Q. The ordering no longer matters as it did in the BLE era (it
+  // does not touch the radio), but it is kept here so the boot log reads in the
+  // direction the data flows.
   //
-  // ĐƯỜNG NÀY CHỈ ĐỂ NÓI CHUYỆN VỚI ARDUINO UNO Q, không liên quan gì tới cảm
-  // biến — số đo phòng đi ESP-NOW. Nên hỏng nó thì mất lớp edge AI, KHÔNG mất
-  // nhiệt độ trong nhà; đó là lý do dòng dưới không chặn khởi động.
+  // THIS LINK EXISTS ONLY TO TALK TO THE ARDUINO UNO Q, and has nothing to do with
+  // sensors -- room readings come over ESP-NOW. So breaking it loses the edge AI
+  // layer but does NOT lose the indoor temperature; that is why the line below does
+  // not block startup.
   UnoQLink::begin(ORG_ID);
-  // Tự suy ra đường đi thay vì ghi cứng: cặp UART_1 (GPIO2/15) ra P3 qua TXS0104
-  // nên phụ thuộc EN_LEVEL_SHIFT, còn lại nối 3.3V thẳng. Bản trước ghi cứng
-  // "qua TXS0104" từ hồi IR phát còn ở GPIO15, và dòng log đó tiếp tục khẳng
-  // định sai sau khi chân đã dời — đúng kiểu log tự tin mà dối, tốn thời gian
-  // của người đọc hơn là không in gì.
+  // Derive the path rather than hard-coding it: the UART_1 pair (GPIO2/15) reaches
+  // P3 through the TXS0104 and therefore depends on EN_LEVEL_SHIFT, while the rest
+  // are 3.3V direct. An earlier version hard-coded "through the TXS0104" from when
+  // the IR transmitter was still on GPIO15, and that log line kept asserting
+  // something false after the pin had moved -- exactly the kind of confident lie
+  // that costs the reader more time than printing nothing.
   auto irPath = [](int pin) {
-    return (pin == 2 || pin == 15) ? "P3 qua TXS0104, can EN_LEVEL_SHIFT" : "3.3V thang";
+    return (pin == 2 || pin == 15) ? "P3 via the TXS0104, needs EN_LEVEL_SHIFT" : "3.3V direct";
   };
-  Serial.printf("IR: phat GPIO%d (%s) · thu GPIO%d (%s)\n",
+  Serial.printf("IR: tx GPIO%d (%s) - rx GPIO%d (%s)\n",
                 IR_TX_PIN, irPath(IR_TX_PIN), IR_RX_PIN, irPath(IR_RX_PIN));
-  Serial.println("Bo nay KHONG co cam bien nhiet/am — so \"trong nha\" la trung vi "
-                 "cua cac node goc phong (xem room-registry.h)");
+  Serial.println("This board has NO temperature/humidity sensor - the \"indoor\" number is the "
+                 "median of the room-corner nodes (see room-registry.h)");
 }
 
 static unsigned long lastPub = 0;
 
-// --- Cầu nối sang tác vụ giao diện ------------------------------------------
-// Hai chiều, cả hai đều không chặn:
-//   UI -> loop(): Ui::pollCommand()  (người dùng vừa bấm GUI / TU DONG)
-//   loop() -> UI: Ui::publish()      (ảnh chụp trạng thái để vẽ)
-// Việc THI HÀNH lệnh nằm ở đây chứ không ở tác vụ UI, vì đúng hai lý do đã ghi
-// trong ui.h: PubSubClient không an toàn đa luồng, và IR bit-bang 38kHz phải
-// chạy ở lõi 1 để không bị bộ lập lịch xen giữa.
+// --- The bridge to the UI task -----------------------------------------------
+// Bidirectional, and neither direction blocks:
+//   UI -> loop(): Ui::pollCommand()  (the user has just pressed SEND / AUTO)
+//   loop() -> UI: Ui::publish()      (a state snapshot to draw)
+// EXECUTING a command happens here rather than in the UI task, for exactly the two
+// reasons recorded in ui.h: PubSubClient is not thread-safe, and 38kHz IR
+// bit-banging has to run on core 1 so the scheduler cannot interrupt it.
 
-/// Người dùng bấm GUI trên màn: tra mã theo bí danh rồi bắn ngay tại chỗ.
+/// The user pressed SEND on screen: look the code up by alias and transmit it right
+/// here.
 static void runPanelCommand(const Ui::Command &c) {
   if (c.kind == Ui::Command::FAN_SET) {
-    // KHÔNG đụng overrideLocal, và KHÔNG publish `override`: mức quạt không mang
-    // (chế độ, nhiệt độ) nên nó không tranh quyền với vòng lặp comfort. Cùng luật
-    // đã áp cho gói `action:` đến từ app — xem cuối takeCommand().
+    // Do NOT touch overrideLocal, and do NOT publish `override`: a fan level does
+    // not carry (mode, temperature) so it does not compete with the comfort loop.
+    // The same rule already applied to `action:` packets coming from the app -- see
+    // the end of takeCommand().
     //
-    // Cũng KHÔNG đi qua máy chủ: mã đã nằm trong NVS, nên bấm ở đây vẫn chạy khi
-    // mất mạng. Đó là cả lý do panel giữ một bản.
+    // It also does NOT go through the server: the code is already in NVS, so
+    // pressing here still works with no network. That is the entire reason the
+    // panel keeps a copy.
     if (c.arg >= AcActions::FAN_COUNT) return;
     const char *wire = AcActions::fanWire(c.arg);
     const uint16_t n = IrStore::loadAlias(wire, -1, irBuf, IrIo::RAW_MAX);
     if (n == 0) {
-      Serial.printf("[panel] quat %s: chua co ma trong NVS\n", wire);
+      Serial.printf("[panel] fan %s: no code in NVS\n", wire);
       Ui::reply("CHƯA HỌC MÃ — vào app để học");
       return;
     }
     IrIo::blast(irBuf, n);
     lastFanIdx = c.arg;
-    Serial.printf("[panel] da phat %u moc -> quat %s\n", n, wire);
+    Serial.printf("[panel] transmitted %u transitions -> fan %s\n", n, wire);
 
-    // Ghi vào nhật ký lệnh như mọi lệnh khác. `mode` giữ nguyên chế độ máy lạnh
-    // đang chạy: mức quạt KHÔNG đổi chế độ, nên ghi "FAN_60" vào ô chế độ sẽ
-    // dựng lên một trạng thái máy lạnh chưa từng có.
+    // Record it in the command log like any other command. `mode` keeps the air
+    // conditioner's current mode: a fan level does NOT change the mode, so writing
+    // "FAN_60" into the mode field would construct an air conditioner state that
+    // never existed.
     Ui::CmdLog e{};
     copyStr(e.mode, sizeof(e.mode), actMode[0] ? actMode : "--");
     snprintf(e.reason, sizeof(e.reason), "panel:%s", wire);
@@ -1211,10 +1332,11 @@ static void runPanelCommand(const Ui::Command &c) {
     }
     const bool want = (c.arg == Ui::HUMID_ON_ARG);
     HumidifierControl::manualSet(want, now);
-    // Nói ra KẾT CỤC THẬT, không nói lại cái nút vừa bấm: manualSet() có thể
-    // không bắn được vì chưa học mã, và khi đó máy không đổi gì cả. Báo "ĐÃ BẬT"
-    // trong ca đó là màn khẳng định sai — đúng thứ luật NAN-chứ-không-0 của ui.h
-    // ngăn cấm, chỉ ở tầng khác.
+    // State the REAL OUTCOME rather than echoing the button just pressed:
+    // manualSet() may not have been able to transmit because no code is learned,
+    // in which case the unit changed nothing. Reporting "ĐÃ BẬT" in that case is
+    // the screen asserting something false -- exactly what ui.h's
+    // NaN-rather-than-zero rule forbids, just at a different layer.
     const HumidifierControl::Status st = HumidifierControl::status(now);
     if (st.on == want) Ui::reply(want ? "MÁY TẠO ẨM: ĐÃ BẬT" : "MÁY TẠO ẨM: ĐÃ TẮT");
     else               Ui::reply("CHƯA HỌC MÃ — vào app để học");
@@ -1223,22 +1345,25 @@ static void runPanelCommand(const Ui::Command &c) {
 
   if (c.kind == Ui::Command::AUTO) {
     overrideLocal = false;
-    // Gỡ cổng ghi đè trên máy chủ, không chỉ đổi huy hiệu trên màn. Thiếu dòng
-    // này thì THỦ CÔNG là đường một chiều: bấm một lần là hộ đó nằm ngoài vòng
-    // comfort suốt `override_hours` (mặc định 2h) và panel không có cách nào gỡ.
+    // Clear the override window on the server, not just the badge on screen.
+    // Without this line, MANUAL is a one-way street: one press and the household
+    // sits outside the comfort loop for the whole `override_hours` (2h by default)
+    // with no way for the panel to undo it.
     //
-    // Gỡ ghi đè là việc CỦA CẢ HỘ chứ không riêng màn này, nên vẫn gửi dù cờ cục
-    // bộ đang false — ghi đè có thể do app đặt, và người đứng ở tường bấm TỰ ĐỘNG
-    // là đang nói "thôi, để máy chủ lo". Trả về sớm vì cờ false sẽ bỏ rơi đúng
-    // trường hợp đó.
+    // Clearing an override is a HOUSEHOLD-WIDE action rather than one belonging to
+    // this screen, so it is sent even when the local flag is already false -- the
+    // override may have been set from the app, and someone at the wall pressing
+    // AUTO is saying "never mind, let the server handle it". Returning early on a
+    // false flag would abandon exactly that case.
     const bool ok = mqtt.connected() &&
                     mqtt.publish(tOverride.c_str(), "{\"clear\":true}", false);
-    Serial.printf("[panel] tra quyen ve cho may chu -> %s\n",
-                  ok ? "da gui" : "GUI LOI (may chu se tu het han)");
-    // KHÔNG gọi Ui::reply() ở đây: onAuto() đã hiện đúng toast đó ngay lúc bấm.
-    // Gọi lại là vẽ lại cùng một câu -> nháy một cái vô nghĩa. Và không báo lỗi
-    // ra màn khi gửi trượt: huy hiệu ĐÃ về TU DONG, đúng ở phía node, còn cổng
-    // ghi đè phía máy chủ thì tự hết hạn — chậm, nhưng không sai.
+    Serial.printf("[panel] handing control back to the server -> %s\n",
+                  ok ? "sent" : "SEND ERROR (the server's window will expire by itself)");
+    // Do NOT call Ui::reply() here: onAuto() already showed that exact toast at the
+    // moment of the press. Calling again redraws the same sentence -> a pointless
+    // flicker. And do not report a send failure on screen either: the badge HAS
+    // returned to TU DONG, which is correct on the node side, while the server's
+    // override window expires by itself -- slow, but not wrong.
     return;
   }
 
@@ -1247,27 +1372,29 @@ static void runPanelCommand(const Ui::Command &c) {
       Ui::reply("MẤT KẾT NỐI MÁY CHỦ");
       return;
     }
-    // Cùng topic `state` với need_raw: đây vẫn là node nói về kho mã của chính
-    // nó, chỉ khác ở chỗ xin CẢ KHO thay vì một mã. Không retain — yêu cầu xảy
-    // ra một lần, retain thì mỗi lần node nối lại broker sẽ phát lại và máy chủ
-    // đẩy nguyên kho mã xuống một cách vô cớ.
+    // The same `state` topic as need_raw: this is still the node talking about its
+    // own code store, differing only in asking for THE WHOLE STORE rather than one
+    // code. Not retained -- it is a one-off request, and retained the broker would
+    // replay it on every reconnect and the server would push the entire store down
+    // for no reason.
     const bool ok = mqtt.publish(tState.c_str(), "{\"resync\":true}", false);
-    Serial.printf("[panel] xin lai toan bo kho ma -> %s\n", ok ? "da gui" : "GUI LOI");
+    Serial.printf("[panel] requesting the whole code store -> %s\n", ok ? "sent" : "SEND ERROR");
     Ui::reply(ok ? "ĐANG XIN MÃ TỪ MÁY CHỦ..." : "GỬI YÊU CẦU THẤT BẠI");
     return;
   }
 
   if (c.kind == Ui::Command::DEL_CODE) {
-    // KHÔNG đụng overrideLocal: xoá một mã không phải là ra lệnh cho máy lạnh,
-    // nên nó không được đổi chuyện ai đang cầm lái.
+    // Do NOT touch overrideLocal: deleting a code is not commanding the air
+    // conditioner, so it must not change who is in control.
     const bool gone = IrStore::removeAlias(c.mode, c.setpoint);
     if (gone) {
-      aliasDirty = true;   // bảng "đã có mã" đổi -> màn phải tính lại
-      Serial.printf("[panel] da xoa ma %s %d khoi NVS\n", c.mode, c.setpoint);
-      // Nói rõ đây là việc LÙI ĐƯỢC. Mã vẫn nằm trong Postgres; lệnh kế tiếp cho
-      // tổ hợp này rơi vào nhánh "có id, NVS rỗng" ở onCmdPacket() và nhánh đó
-      // xin server gửi lại mảng. Không nói thì người dùng tưởng vừa xoá vĩnh
-      // viễn và đi học lại bằng tay — thừa công.
+      aliasDirty = true;   // the "has a code" table changed -> the screen must recompute
+      Serial.printf("[panel] deleted code %s %d from NVS\n", c.mode, c.setpoint);
+      // Say clearly that this is REVERSIBLE. The code is still in Postgres; the next
+      // command for this combination lands in onCmdPacket()'s "has an id, NVS is
+      // empty" branch, and that branch asks the server to resend the array. Without
+      // saying so, the user assumes they have just deleted it permanently and goes
+      // off to relearn it by hand -- wasted effort.
       Ui::reply("ĐÃ XOÁ — sẽ tự nạp lại từ máy chủ");
     } else {
       Ui::reply("TỔ HỢP NÀY CHƯA CÓ MÃ");
@@ -1275,29 +1402,32 @@ static void runPanelCommand(const Ui::Command &c) {
     return;
   }
 
-  // Ghi nhận quyền điều khiển TRƯỚC khi thử bắn mã, không phải sau.
+  // Record control authority BEFORE attempting to transmit the code, not after.
   //
-  // Trước đây dòng này nằm ở cuối hàm, sau nhánh thoát sớm "chưa có mã". Hậu
-  // quả: node chưa học mã nào thì bấm THỦ CÔNG không bao giờ đổi được trạng
-  // thái — nút TỰ ĐỘNG sáng vĩnh viễn và người dùng kết luận là hỏng.
+  // This line used to sit at the end of the function, after the "no code learned"
+  // early return. The consequence: on a node that had learned nothing, pressing
+  // MANUAL could never change the state -- the AUTO button stayed lit forever and
+  // the user concluded it was broken.
   //
-  // Tách hai chuyện vốn khác nhau ra:
-  //   AI ĐANG CẦM LÁI   -> đổi ngay khi người dùng bấm; đây là Ý ĐỊNH của họ và
-  //                        nó có thật bất kể mã IR có hay không.
-  //   CÓ BẮN ĐƯỢC KHÔNG -> báo riêng bằng toast ở dưới.
-  // Gộp hai thứ này làm một là lý do một nút vừa-là-hành-động vừa-là-đèn-báo trở
-  // nên không bấm được.
+  // Separate two genuinely different things:
+  //   WHO IS IN CONTROL     -> changes the moment the user presses; this is their
+  //                            INTENT and it is real whether or not an IR code
+  //                            exists.
+  //   COULD IT TRANSMIT     -> reported separately by the toast below.
+  // Conflating the two is why a control that is both an action and an indicator
+  // became unpressable.
   //
-  // Vẫn TRUNG THỰC: huy hiệu "GHI ĐÈ" nói về Ý ĐỊNH, và ý định đó có thật ngay cả
-  // khi mã IR chưa học. Còn ghi đè có SỐNG SÓT hay không thì hai câu toast ở cuối
-  // hàm phân biệt rõ — chưa có mã thì không xin cổng ghi đè, nên máy chủ vẫn
-  // giành lại, và màn nói đúng câu đó.
+  // Still HONEST: the "GHI ĐÈ" badge speaks about INTENT, and that intent is real
+  // even with no learned IR code. Whether the override SURVIVES is what the two
+  // toasts at the end of the function distinguish -- with no code we do not request
+  // an override window, so the server does take control back, and the screen says
+  // exactly that.
   overrideLocal = true;
 
   const uint16_t n = IrStore::loadAlias(c.mode, aliasTemp(c.mode, c.setpoint),
                                         irBuf, IrIo::RAW_MAX);
   if (n == 0) {
-    Serial.printf("[panel] %s %d: chua co ma trong NVS\n", c.mode, c.setpoint);
+    Serial.printf("[panel] %s %d: no code in NVS\n", c.mode, c.setpoint);
     Ui::reply("CHƯA HỌC MÃ — vào app để học");
     return;
   }
@@ -1305,28 +1435,31 @@ static void runPanelCommand(const Ui::Command &c) {
   IrIo::blast(irBuf, n);
   copyStr(actMode, sizeof(actMode), c.mode);
   actSetpoint = c.setpoint;
-  Serial.printf("[panel] da phat %u moc -> %s %d\n", n, c.mode, c.setpoint);
+  Serial.printf("[panel] transmitted %u transitions -> %s %d\n", n, c.mode, c.setpoint);
 
-  // Publish state KHÔNG kèm ack: không có req_id nào để khớp, nhưng
-  // state_handler vẫn soi mode/setpoint vào redis_state_service nên app và web
-  // thấy ngay trạng thái mới (giờ kèm cả một nhịp realtime — state_handler đã
-  // gọi live_events.publish_change, app không phải chờ tick telemetry nữa).
+  // Publish state WITHOUT an ack: there is no req_id to match, but state_handler
+  // still mirrors mode/setpoint into redis_state_service so the app and web see the
+  // new state immediately (now with a realtime tick too -- state_handler calls
+  // live_events.publish_change, so the app no longer waits for a telemetry tick).
   pending.reqId[0] = '\0';
   copyStr(pending.mode, sizeof(pending.mode), c.mode);
   pending.setpoint = c.setpoint;
   publishState();
 
-  // Rồi XIN ĐẶT CỔNG GHI ĐÈ — nửa còn lại, và là nửa làm cho ghi đè sống sót.
+  // Then REQUEST THE OVERRIDE WINDOW -- the other half, and the half that makes the
+  // override survive.
   //
-  // ĐẶT SAU nhánh "chưa có mã" ở trên, CỐ Ý: chặn vòng lặp comfort trong lúc
-  // node không bắn nổi khung nào là để máy lạnh nằm im ở trạng thái cũ suốt
-  // `override_hours`. Chưa phát được thì thà để máy chủ tiếp tục thử — nó có thể
-  // chọn một nhiệt độ khác mà node CÓ mã. "Giành quyền" chỉ có nghĩa khi kèm
-  // được năng lực thi hành.
+  // Placed AFTER the "no code learned" branch above, DELIBERATELY: blocking the
+  // comfort loop while the node cannot transmit a single frame would leave the air
+  // conditioner stuck in its old state for the whole `override_hours`. If we cannot
+  // transmit, better to let the server keep trying -- it may pick a different
+  // temperature that the node DOES have a code for. "Taking control" only means
+  // something when it comes with the ability to act.
   //
-  // Không retain (tham số cuối = false): đây là một Ý ĐỊNH xảy ra một lần, không
-  // phải trạng thái. Retain thì mỗi lần node nối lại broker phát lại và ghi đè tự
-  // bật lại vĩnh viễn — cùng lý do đã ghi ở buildTopics() và ở nhánh resync.
+  // Not retained (final argument = false): this is a one-off INTENT, not a state.
+  // Retained, the broker would replay it on every reconnect and the override would
+  // switch itself back on forever -- the same reason recorded at buildTopics() and
+  // in the resync branch.
   JsonDocument ov;
   ov["mode"]     = c.mode;
   ov["setpoint"] = c.setpoint;
@@ -1334,12 +1467,13 @@ static void runPanelCommand(const Ui::Command &c) {
   const size_t ovLen = serializeJson(ov, ovBuf);
   const bool ovOk = mqtt.connected() &&
                     mqtt.publish(tOverride.c_str(), (const uint8_t *)ovBuf, ovLen, false);
-  Serial.printf("[panel] xin dat ghi de %s %d -> %s\n",
-                c.mode, c.setpoint, ovOk ? "da gui" : "GUI LOI");
+  Serial.printf("[panel] requesting override %s %d -> %s\n",
+                c.mode, c.setpoint, ovOk ? "sent" : "SEND ERROR");
 
-  // Nói đúng chuyện vừa xảy ra, hai câu khác nhau cho hai kết cục khác nhau.
-  // Câu cũ ("máy chủ sẽ giành lại quyền") giờ SAI khi gửi được — cổng ghi đè đã
-  // đặt xong thì máy chủ không giành lại nữa cho tới khi hết hạn hoặc bấm TỰ ĐỘNG.
+  // Say what actually happened, with two different sentences for two different
+  // outcomes. The old sentence ("the server will take control back") is now WRONG
+  // when the send succeeds -- once the override window is open the server does not
+  // take control back until it expires or AUTO is pressed.
   Ui::reply(ovOk ? "ĐÃ GỬI"
                  : "ĐÃ PHÁT");  
 }
@@ -1347,9 +1481,10 @@ static void runPanelCommand(const Ui::Command &c) {
 // ---------------------------------------------------------------------------
 //  Arduino UNO Q (edge AI)
 // ---------------------------------------------------------------------------
-/// Đổi chuỗi chế độ của dự án ("COOL"...) sang mã 1 byte trên dây, và ngược lại.
-/// Hai hàm nhỏ này là RANH GIỚI DUY NHẤT giữa hai cách biểu diễn — để rải
-/// strcmp("COOL") khắp nơi là kiểu chỗ mà một lỗi gõ trở thành một chế độ sai.
+/// Convert the project's mode strings ("COOL"...) to the 1-byte wire code, and
+/// back. These two small functions are the ONLY BOUNDARY between the two
+/// representations -- scattering strcmp("COOL") everywhere is the kind of place
+/// where one typo becomes a wrong mode.
 static uint8_t modeToWire(const char *mode) {
   if (mode == nullptr || mode[0] == '\0') return AC_UNOQ_MODE_UNKNOWN;
   if (strcmp(mode, "OFF")  == 0) return AC_UNOQ_MODE_OFF;
@@ -1365,21 +1500,23 @@ static const char *modeFromWire(uint8_t wire) {
     case AC_UNOQ_MODE_COOL: return "COOL";
     case AC_UNOQ_MODE_DRY:  return "DRY";
     case AC_UNOQ_MODE_FAN:  return "FAN";
-    default:                return nullptr;   // nullptr = KHÔNG thi hành
+    default:                return nullptr;   // nullptr = DO NOT execute
   }
 }
 
-/// Nhịp đẩy ảnh chụp sang UNO Q (ms). Thưa hơn nhịp vẽ màn (200ms) rất nhiều:
-/// UNO Q tính lại mỗi 30 giây, đẩy dày hơn chỉ tốn sóng BLE đang chia với WiFi.
+/// How often to push a snapshot to the UNO Q (ms). Far less often than the screen
+/// draw interval (200ms): the UNO Q recomputes every 30 seconds, and pushing more
+/// often only burns BLE airtime shared with WiFi.
 static const uint32_t UNOQ_PUSH_MS = 5000;
 
-/// Đóng gói mọi thứ UNO Q cần để tự quyết định, rồi notify.
+/// Package everything the UNO Q needs to decide for itself, then notify.
 ///
-/// `cloud_silence_sec` là trường quan trọng nhất: nó là thứ DUY NHẤT cho UNO Q
-/// biết máy chủ còn sống hay không, và gateway biết chắc chắn hơn UNO Q vì chính
-/// nó giữ phiên MQTT. Không có nó thì lớp dự phòng phải tự đoán, và đoán sai
-/// theo chiều nào cũng tệ: giành lái sớm là hai bên tranh máy nén, giành muộn là
-/// nhà nóng suốt thời gian mất mạng.
+/// `cloud_silence_sec` is the most important field: it is the ONLY thing telling
+/// the UNO Q whether the server is alive, and the gateway knows this more reliably
+/// than the UNO Q could because it is the one holding the MQTT session. Without it
+/// the fallback layer has to guess, and guessing wrong in either direction is bad:
+/// taking control too early means both sides fight over the compressor, too late
+/// means the house stays hot for the whole outage.
 static void pushUnoQSnapshot() {
   static uint32_t lastPush = 0;
   if (millis() - lastPush < UNOQ_PUSH_MS) return;
@@ -1391,7 +1528,7 @@ static void pushUnoQSnapshot() {
 
   float tin = NAN, hin = NAN;
   uint8_t voting = 0;
-  RoomRegistry::median(tin, hin, &voting);   // thất bại -> giữ NaN, mã hoá thành INVALID
+  RoomRegistry::median(tin, hin, &voting);   // on failure -> stays NaN, encoded as INVALID
   snap.room_count = voting;
   snap.t_in_c100  = acUnoQEncodeTemp(tin);
   snap.h_in_x100  = acUnoQEncodeRh(hin);
@@ -1413,9 +1550,10 @@ static void pushUnoQSnapshot() {
                          (overrideLocal ? AC_UNOQ_FLAG_OVERRIDE : 0) |
                          (outOnline ? AC_UNOQ_FLAG_OUT_ONLINE : 0));
 
-  // lastCmdMs = 0 nghĩa là CHƯA TỪNG nghe máy chủ ra lệnh — khác hẳn "vừa nghe
-  // xong". Gửi 0 cho cả hai ca sẽ khiến UNO Q tưởng cloud vừa nói và không bao
-  // giờ giành lái ở một hộ mà cloud chưa từng hoạt động.
+  // lastCmdMs = 0 means the server has NEVER been heard issuing a command -- quite
+  // different from "it just spoke". Sending 0 for both cases would make the UNO Q
+  // believe the cloud had just spoken and never take control in a household where
+  // the cloud has never worked at all.
   const uint32_t silence = lastCmdMs ? (millis() - lastCmdMs) / 1000UL : 0xFFFFFFFFUL;
   snap.cloud_silence_sec =
       silence >= AC_UNOQ_SILENCE_NEVER ? AC_UNOQ_SILENCE_NEVER : (uint16_t)silence;
@@ -1429,58 +1567,63 @@ static void pushUnoQSnapshot() {
   SerialTrace::snapshotOut(snap, UnoQLink::connected());
 }
 
-// --- Đề xuất gần nhất của UNO Q, giữ lại ĐỂ HIỂN THỊ ------------------------
-//  Tab EDGE AI đọc bốn biến này. Giữ riêng chứ không đọc ké `pending` hay
-//  `actMode`: hai cái đó nói về máy lạnh ĐANG chạy, còn đây là thứ UNO Q ĐỀ
-//  NGHỊ — và giá trị của cả cái tab nằm ở chỗ hai bên có thể KHÁC nhau. Trộn
-//  chung là mất đúng thông tin duy nhất mà màn này mang lại.
+// --- The UNO Q's latest advice, kept FOR DISPLAY -----------------------------
+//  The EDGE AI tab reads these four variables. Kept separately rather than
+//  borrowing `pending` or `actMode`: those describe the air conditioner as it is
+//  RUNNING, while these are what the UNO Q PROPOSED -- and the entire value of that
+//  tab lies in the two being able to DIFFER. Merging them loses the one piece of
+//  information the screen exists to convey.
 static char     unoqMode[8] = "";
 static int      unoqSetpoint = -1;
 static bool     unoqWasCommand = false;
 static uint32_t unoqLastMs = 0;
 
-/// Thi hành (hoặc chỉ ghi nhận) thứ UNO Q vừa gửi sang.
+/// Execute (or merely record) what the UNO Q has just sent over.
 static void runUnoQIncoming() {
   UnoQLink::Incoming in;
   if (!UnoQLink::poll(in)) return;
 
   const char *mode = modeFromWire(in.mode);
   if (mode == nullptr) {
-    Serial.printf("[unoq] che do la (%u) — bo qua\n", in.mode);
+    Serial.printf("[unoq] unknown mode (%u) - discarded\n", in.mode);
     return;
   }
 
-  // GHI NHẬN TRƯỚC MỌI NHÁNH THOÁT SỚM. Dưới đây có đường "chưa học mã — không
-  // phát", và nếu ghi ở cuối thì đúng những lần edge muốn làm gì đó mà panel
-  // không làm nổi lại KHÔNG hiện trên màn — tức là mất hẳn ca đáng xem nhất.
-  // UNO Q đã đề nghị, và điều đó có thật bất kể panel có bắn được hay không.
+  // RECORD IT BEFORE ANY EARLY RETURN. There is a "no code learned - not
+  // transmitting" path below, and recording at the end would mean the times the
+  // edge wanted to do something the panel could not do are exactly the ones that do
+  // NOT appear on screen -- losing precisely the most interesting case. The UNO Q
+  // did make a proposal, and that is true whether or not the panel could transmit
+  // it.
   copyStr(unoqMode, sizeof(unoqMode), mode);
   unoqSetpoint   = in.setpoint;
   unoqWasCommand = in.isCommand;
   unoqLastMs     = millis();
 
   if (!in.isCommand) {
-    // ĐỀ XUẤT: ghi lại, KHÔNG bắn IR. Đây là ranh giới giữ cho mọi phép thử trên
-    // UNO Q khỏi chạy thẳng vào máy nén — xem unoq-link.h §2.
-    Serial.printf("[unoq] de xuat %s %d (chi ghi nhan, khong phat)\n", mode, in.setpoint);
+    // ADVICE: record it, do NOT transmit IR. This is the boundary that keeps every
+    // experiment on the UNO Q from going straight to the compressor -- see
+    // unoq-link.h §2.
+    Serial.printf("[unoq] advice %s %d (recorded only, not transmitted)\n", mode, in.setpoint);
     Ui::CmdLog entry{};
     copyStr(entry.mode,   sizeof(entry.mode),   mode);
     copyStr(entry.reason, sizeof(entry.reason), "edge advice");
     entry.setpoint = in.setpoint;
-    entry.result   = Ui::CmdLog::NO_CODE;   // "không phát" — đúng chuyện đã xảy ra
+    entry.result   = Ui::CmdLog::NO_CODE;   // "not transmitted" -- exactly what happened
     Ui::logCommand(entry);
     return;
   }
 
-  // LỆNH THẬT — UNO Q đang cầm lái vì máy chủ im lặng.
+  // A REAL COMMAND -- the UNO Q is in control because the server has gone silent.
   //
-  // CỐ Ý KHÔNG ĐI QUA runPanelCommand(), dù đường đó đã sẵn và làm gần đúng
-  // việc cần: nó đặt `overrideLocal` và xin máy chủ mở cổng GHI ĐÈ. Ghi đè là
-  // để người dùng giành quyền KHỎI máy chủ; còn UNO Q thì đang ĐỨNG THAY máy
-  // chủ. Đi nhầm đường đó thì lúc mạng về, máy chủ bị khoá ngoài suốt
-  // `override_hours` (mặc định 2 giờ) bởi chính lớp dự phòng vừa cứu nó — và
-  // trên màn hiện "GHI ĐÈ" trong khi không một ai bấm gì.
-  Serial.printf("[unoq] LENH %s %d (edge dang cam lai)\n", mode, in.setpoint);
+  // DELIBERATELY NOT ROUTED THROUGH runPanelCommand(), even though that path exists
+  // and does almost the right thing: it sets `overrideLocal` and asks the server to
+  // open an OVERRIDE window. Override exists so a user can take control AWAY FROM
+  // the server; the UNO Q is STANDING IN FOR the server. Taking that path means
+  // that when the network returns, the server is locked out for the whole
+  // `override_hours` (2 hours by default) by the very fallback layer that just
+  // rescued it -- and the screen shows "GHI ĐÈ" with nobody having pressed anything.
+  Serial.printf("[unoq] COMMAND %s %d (the edge is in control)\n", mode, in.setpoint);
 
   const uint16_t n = IrStore::loadAlias(mode, aliasTemp(mode, in.setpoint),
                                         irBuf, IrIo::RAW_MAX);
@@ -1490,48 +1633,52 @@ static void runUnoQIncoming() {
   entry.setpoint = in.setpoint;
 
   if (n == 0) {
-    Serial.printf("[unoq] %s %d: chua hoc ma nay — khong phat\n", mode, in.setpoint);
+    Serial.printf("[unoq] %s %d: this code has not been learned - not transmitting\n", mode, in.setpoint);
     entry.result = Ui::CmdLog::NO_CODE;
     Ui::logCommand(entry);
     return;
   }
 
   IrIo::blast(irBuf, n);
-  copyStr(actMode, sizeof(actMode), mode);   // trạng thái THẬT đã bắn ra máy lạnh
+  copyStr(actMode, sizeof(actMode), mode);   // the REAL state transmitted to the unit
   actSetpoint = in.setpoint;
   entry.result = Ui::CmdLog::SENT;
   Ui::logCommand(entry);
 
-  // Báo trạng thái mới lên cloud nếu còn đường — mất mạng thì thôi, chính vì
-  // mất mạng nên UNO Q mới đang cầm lái. Không kèm `ack`: không có req_id nào
-  // của máy chủ để khớp.
+  // Report the new state to the cloud if there is still a path -- if the network is
+  // down, never mind, the network being down is precisely why the UNO Q is in
+  // control. No `ack` included: there is no server req_id to match.
   pending.reqId[0] = '\0';
   copyStr(pending.mode, sizeof(pending.mode), mode);
   pending.setpoint = in.setpoint;
   if (mqtt.connected()) publishState();
 }
 
-/// Dựng ảnh chụp cho màn. Bitmask mã IR tính ở đây vì NVS thuộc quyền lõi 1.
+/// Build the snapshot for the screen. The IR code bitmask is computed here because
+/// NVS belongs to core 1.
 static void pushUiModel() {
   Ui::Model m;
   m.wifiUp = (WiFi.status() == WL_CONNECTED);
   m.mqttUp = mqtt.connected();
   m.rssi   = m.wifiUp ? (int)WiFi.RSSI() : 0;
   m.channel = (uint8_t)WiFi.channel();
-  // "Kênh này do router quyết" hay "do panel tự nhớ" là hai chuyện khác nhau, và
-  // khi đi tìm lỗi mất số đo thì chúng dẫn tới hai chỗ khác nhau. Màn THÔNG TIN
-  // nói thẳng ra thay vì để người lắp đoán.
+  // "The router decides this channel" and "the panel remembered this channel" are
+  // two different things, and when chasing missing readings they lead to two
+  // different places. The INFO screen states it plainly rather than leaving the
+  // installer to guess.
   m.channelPinned = EspNowChannel::pinned();
   strncpy(m.ip,   m.wifiUp ? WiFi.localIP().toString().c_str() : "", sizeof(m.ip) - 1);
   strncpy(m.ssid, WIFI_SSID, sizeof(m.ssid) - 1);
   strncpy(m.mac,  WiFi.macAddress().c_str(), sizeof(m.mac) - 1);
 
-  // Từng góc phòng, để màn nói được góc nào đang lệch — chứ không chỉ một con số
-  // trung vị đã che mất chuyện đó. Đây chính là thứ biện minh cho bốn cảm biến.
+  // Each room corner individually, so the screen can say which corner is drifting --
+  // rather than only a median number that hides exactly that. This is what justifies
+  // having four sensors in the first place.
   //
-  // Số ô lấy từ SỐ GÓC ĐÃ NGHE THẤY, không từ một hằng số khai trước: gateway
-  // không giữ danh sách node phòng nào cả (gói ESP-NOW tự mang uuid), nên lắp
-  // thêm một góc là nó tự hiện lên màn mà không phải nạp lại firmware.
+  // The slot count comes from HOW MANY CORNERS HAVE BEEN HEARD, not from a constant
+  // declared in advance: the gateway keeps no list of room nodes at all (an ESP-NOW
+  // packet carries its own uuid), so installing another corner makes it appear on
+  // screen by itself with no reflash.
   m.roomSlots = RoomRegistry::knownCount() < Ui::Model::MAX_ROOMS
                     ? RoomRegistry::knownCount() : Ui::Model::MAX_ROOMS;
   for (uint8_t i = 0; i < m.roomSlots; i++) {
@@ -1543,9 +1690,10 @@ static void pushUiModel() {
     m.roomAgeSec[i] = RoomRegistry::ageSec(i);
   }
   m.roomOnlineCount = RoomRegistry::onlineCount();
-  // Không góc nào có số -> median() để nguyên m.tIn/m.hIn ở NAN mặc định của
-  // Model, và màn hiện skeleton. KHÔNG được thay bằng 0.0 hay số cũ (ui.h §Model).
-  RoomRegistry::median(m.tIn, m.hIn, &m.roomVoting);   // roomVoting = số góc CÓ SỐ ĐO
+  // If no corner has a reading, median() leaves m.tIn/m.hIn at Model's default NaN
+  // and the screen shows a skeleton. They must NOT be replaced with 0.0 or a stale
+  // value (ui.h §Model).
+  RoomRegistry::median(m.tIn, m.hIn, &m.roomVoting);   // roomVoting = corners WITH a reading
   m.unoqUp  = UnoQLink::connected();
   m.unoqRx  = UnoQLink::rxCount();
   m.unoqRejected = UnoQLink::rejectedCount();
@@ -1556,8 +1704,8 @@ static void pushUiModel() {
   m.unoqAgeSec      = unoqLastMs ? (millis() - unoqLastMs) / 1000 : 0;
 
   m.tOut = lastSlaveT; m.hOut = lastSlaveH;
-  // Cùng ngưỡng với SlaveWatch để màn hình và topic status không bao giờ nói
-  // hai chuyện khác nhau về cùng một node.
+  // The same threshold as SlaveWatch, so the screen and the status topic can never
+  // say two different things about the same node.
   m.outOnline = lastSlaveMs && (millis() - lastSlaveMs < SlaveWatch::SLAVE_TIMEOUT_MS);
   m.outAgeSec = lastSlaveMs ? (millis() - lastSlaveMs) / 1000 : 0;
   m.espnowRx   = EspNowRelay::receivedCount();
@@ -1569,7 +1717,7 @@ static void pushUiModel() {
   m.lastCmdSec    = lastCmdMs ? (millis() - lastCmdMs) / 1000 : 0;
   m.cloudEverCommanded = (lastCmdMs != 0);
 
-  // Quét NVS đúng một lần rồi giữ lại — xem ghi chú ở `aliasDirty`.
+  // Scan NVS exactly once and keep the result -- see the note at `aliasDirty`.
   static uint16_t coolMask = 0;
   static bool     hasDry = false, hasFan = false, hasOff = false;
   static uint8_t  fanMask = 0;
@@ -1583,9 +1731,10 @@ static void pushUiModel() {
     hasFan = IrStore::hasAlias("FAN", -1);
     hasOff = IrStore::hasAlias("OFF", -1);
 
-    // Nút rời. CÙNG bộ đếm `aliasDirty` với ma trận trên, không thêm cờ thứ hai:
-    // mọi đường ghi mã (học tại chỗ, backend gửi lệnh, resync) đều đã bật cờ đó,
-    // nên tách ra chỉ tạo thêm một chỗ để quên bật.
+    // Discrete buttons. THE SAME `aliasDirty` flag as the matrix above, not a
+    // second one: every code-writing path (learning locally, a backend command, a
+    // resync) already sets that flag, so a separate one would only create another
+    // place to forget to set.
     fanMask = 0;
     for (uint8_t i = 0; i < AcActions::FAN_COUNT; i++) {
       if (IrStore::hasAlias(AcActions::fanWire(i), -1)) fanMask |= (uint8_t)(1u << i);
@@ -1624,27 +1773,30 @@ static void pushUiModel() {
 }
 
 void loop() {
-  // LỆNH NGƯỜI DÙNG ĐI TRƯỚC MẠNG. Thứ tự này là một quyết định, không phải tình
-  // cờ: runPanelCommand() bắn IR mà không cần mạng, còn serviceNetwork() thì có
-  // thể chặn vài giây (bắt tay TCP, chờ CONNACK). Đặt mạng lên trước nghĩa là
-  // mỗi cú chạm phải xếp hàng sau một lần thử nối máy chủ — đúng triệu chứng
-  // "bấm nút không ăn khi mất kết nối" mà cả kiến trúc edge sinh ra để tránh.
+  // USER COMMANDS COME BEFORE THE NETWORK. This ordering is a decision, not an
+  // accident: runPanelCommand() transmits IR without needing a network, while
+  // serviceNetwork() can block for several seconds (TCP handshake, waiting for
+  // CONNACK). Putting the network first means every touch queues behind a
+  // connection attempt -- exactly the "buttons stop working when the connection is
+  // down" symptom the whole edge architecture exists to avoid.
   //
-  // Rút MỖI VÒNG (nút phải phản hồi ngay), khác với ảnh chụp trạng thái chỉ đẩy
-  // sang giao diện theo nhịp 200ms — đúng nhịp vẽ lại của màn (Interface/README.md
-  // §7.4), mắt không phân biệt nhanh hơn. Đẩy mỗi vòng chỉ tốn công vô ích: mỗi
-  // lần đẩy kéo theo cả loạt WiFi.RSSI()/millis()/memcpy.
+  // Collected EVERY iteration (buttons must respond instantly), unlike the state
+  // snapshot which is only pushed to the UI every 200ms -- matching the screen's
+  // redraw interval (Interface/README.md §7.4), which the eye cannot beat. Pushing
+  // every iteration would be pure waste: each push pulls in a whole run of
+  // WiFi.RSSI()/millis()/memcpy.
   Ui::Command panelCmd;
   while (Ui::pollCommand(panelCmd)) runPanelCommand(panelCmd);
 
-  // KHÔNG BAO GIỜ gọi connectWifi()/mqttTryConnect() thẳng ở đây — cả hai đều
-  // chờ. serviceNetwork() thử lại theo nhịp rồi trả về ngay, để phần dưới luôn
-  // chạy được kể cả khi mất mạng hoàn toàn. Xem chú thích của nó cho lý do.
+  // NEVER call connectWifi()/mqttTryConnect() directly here -- both of them wait.
+  // serviceNetwork() retries on a schedule and returns immediately, so everything
+  // below always runs even with the network completely down. See its comment for
+  // why.
   serviceNetwork();
 
-  // Rút LẦN NỮA. serviceNetwork() vẫn có thể vừa chặn vài giây (timeout đã ghì
-  // nhưng không thể về 0), và người bấm trong quãng đó xứng đáng được phục vụ
-  // ngay bây giờ chứ không phải sau cả phần còn lại của vòng lặp.
+  // Collect AGAIN. serviceNetwork() may still have just blocked for several seconds
+  // (the timeouts are clamped but cannot be zero), and anyone who pressed during
+  // that window deserves to be served now rather than after the rest of the loop.
   while (Ui::pollCommand(panelCmd)) runPanelCommand(panelCmd);
 
   static unsigned long lastUiPush = 0;
@@ -1653,15 +1805,16 @@ void loop() {
     pushUiModel();
   }
 
-  // Thi hành lệnh Ở ĐÂY chứ không trong callback: xem ghi chú ở struct pending.
+  // Execute commands HERE rather than in the callback: see the note at the pending
+  // struct.
   if (pending.hasFrame) {
     pending.hasFrame = false;
     IrIo::blast(irBuf, pending.frameLen);
     strncpy(lastReqId, pending.reqId, sizeof(lastReqId) - 1);
     lastReqId[sizeof(lastReqId) - 1] = '\0';
-    copyStr(actMode, sizeof(actMode), pending.mode);   // trạng thái THẬT đã bắn ra máy lạnh
+    copyStr(actMode, sizeof(actMode), pending.mode);   // the REAL state transmitted to the unit
     actSetpoint = pending.setpoint;
-    Serial.printf("[ir] da phat %u moc ra may lanh\n", pending.frameLen);
+    Serial.printf("[ir] transmitted %u transitions to the air conditioner\n", pending.frameLen);
   }
   if (pending.needAck) {
     pending.needAck = false;
@@ -1669,43 +1822,48 @@ void loop() {
   }
   if (pending.needRawId[0]) {
     publishNeedRaw(pending.needRawId);
-    // Xoá SAU khi gửi, và xoá dù gửi lỗi: mất mạng thì lệnh kế tiếp cho cùng tổ
-    // hợp lại rơi vào đúng nhánh đó và đặt hàng lại. Giữ lại để thử gửi mãi thì
-    // biến một yêu cầu một lần thành vòng lặp gửi mỗi vòng loop().
+    // Clear it AFTER sending, and clear it even if the send failed: with the network
+    // down, the next command for the same combination lands in that same branch and
+    // queues the request again. Keeping it to retry forever would turn a one-off
+    // request into a send loop running every loop() iteration.
     pending.needRawId[0] = '\0';
   }
 
-  // Đang học thì chờ người dùng bấm remote.
+  // While learning, wait for the user to press the remote.
   if (IrIo::learning()) {
     uint16_t n = IrIo::learnPoll(irBuf, IrIo::RAW_MAX);
     if (n > 0) publishLearned(irBuf, n);
   }
   if (IrIo::learnTimedOut()) {
-    Serial.printf("[learn] het gio cho \"%s\" — khong bat duoc tin hieu nao. "
-                  "Kiem tra: remote co pin? co huong dung mat thu? cach < 1m?\n", learnLabel);
+    Serial.printf("[learn] timed out waiting for \"%s\" - no signal captured. "
+                  "Check: does the remote have batteries? is it aimed at the receiver? "
+                  "closer than 1m?\n", learnLabel);
   }
 
-  // Rút hàng đợi ESP-NOW: cả 4 góc phòng lẫn node ngoài trời đi chung đường này.
-  // Callback chỉ chép gói, việc publish nằm ở đây — xem espnow-relay.h.
+  // Drain the ESP-NOW queue: the 4 room corners and the outdoor node all come
+  // through here. The callback only copies the packet; publishing happens here --
+  // see espnow-relay.h.
   EspNowRelay::poll(onSlavePacket);
-  // Một hàm dọn hạn cho CẢ node ngoài trời lẫn các góc phòng: SlaveWatch khoá
-  // theo device_uuid nên nó không cần biết node nào là loại gì.
+  // One timeout sweeper for BOTH the outdoor node and the room corners: SlaveWatch
+  // is keyed by device_uuid so it does not need to know which node is which kind.
   SlaveWatch::checkTimeouts(publishSlaveStatus);
 
-  // Đề xuất/lệnh từ Arduino UNO Q. Rút ở đây chứ không thi hành trong callback
-  // BLE — cùng luật đã áp cho callback MQTT và ESP-NOW (xem unoq-link.h §1).
+  // Advice/commands from the Arduino UNO Q. Collected here rather than executed in
+  // the BLE callback -- the same rule already applied to the MQTT and ESP-NOW
+  // callbacks (see unoq-link.h §1).
   runUnoQIncoming();
   pushUnoQSnapshot();
 
-  // --- Máy tạo độ ẩm: một lượt đo + quyết định ------------------------------
-  //  NHỊP GIỮ Ở ĐÂY, không giấu trong module: EMA_ALPHA của nó gắn chặt với nhịp
-  //  gọi (0.2 ở 5 giây = hằng số thời gian ~25 giây), nên cái nhịp đó phải nằm ở
-  //  chỗ đọc được. Xem HumidifierControl::tick().
+  // --- Humidifier: one measure-and-decide round -----------------------------
+  //  THE INTERVAL LIVES HERE rather than being hidden inside the module: its
+  //  EMA_ALPHA is tightly coupled to the call interval (0.2 at 5 seconds = a time
+  //  constant of ~25 seconds), so that interval has to sit somewhere visible. See
+  //  HumidifierControl::tick().
   //
-  //  ĐỘ ẨM LÀ TRUNG VỊ CÁC GÓC, cùng con số mà màn hình và cloud dùng — không
-  //  phải một phép đo riêng. Trung vị thất bại (chưa góc nào có số) thì `h` giữ
-  //  nguyên NAN, và tick() hiểu đó là "chưa có số đo" rồi cắt máy sau
-  //  SENSOR_STALE_SEC. Đúng nguyên tắc "nghi ngờ thì TẮT".
+  //  THE HUMIDITY IS THE CORNERS' MEDIAN, the same number the screen and the cloud
+  //  use -- not a separate measurement. If the median fails (no corner has a reading
+  //  yet) `h` stays NaN, and tick() reads that as "no reading" and cuts the unit off
+  //  after SENSOR_STALE_SEC. Exactly the "when in doubt, turn it OFF" principle.
   {
     static uint32_t lastHumidMs = 0;
     const uint32_t nowMs = millis();
@@ -1718,45 +1876,49 @@ void loop() {
     }
   }
 
-  // KHÔNG CÒN KHỐI PUBLISH TELEMETRY CỦA CHÍNH BO NÀY.
+  // THIS BOARD NO LONGER HAS A TELEMETRY PUBLISH BLOCK OF ITS OWN.
   //
-  // Bo không có cảm biến nữa, và gửi số mượn của node góc phòng dưới tên gateway
-  // là bịa ra một phép đo chưa từng xảy ra — đúng thứ luật "NAN chứ không 0" của
-  // ui.h ngăn cấm, chỉ ở tầng khác. Trạng thái sống/chết của gateway đã có topic
-  // `status` (retained + Last Will) lo, còn MAC đi kèm gói `state`.
+  // The board has no sensor any more, and sending a room-corner node's borrowed
+  // numbers under the gateway's name fabricates a measurement that never happened --
+  // exactly what ui.h's "NaN rather than zero" rule forbids, just at a different
+  // layer. The gateway's alive/dead state is handled by the `status` topic (retained
+  // + Last Will), and its MAC ships with the `state` packet.
   //
-  // Số đo trong nhà lên cloud qua topic CỦA TỪNG GÓC, do publishRoomTelemetry()
-  // gửi hộ; backend tự lấy trung vị (services/redis_room_state_service.py).
+  // Indoor readings reach the cloud on EACH CORNER'S OWN topic, sent on their behalf
+  // by publishRoomTelemetry(); the backend computes the median itself
+  // (services/redis_room_state_service.py).
 
   unsigned long now = millis();
-  if (lastPub != 0 && now - lastPub < TELEMETRY_MS) return;  // chưa tới nhịp tổng kết
+  if (lastPub != 0 && now - lastPub < TELEMETRY_MS) return;  // not yet time for the summary
   lastPub = now;
 
   float tin = NAN, hin = NAN;
   uint8_t voting = 0;
   const bool haveIndoor = RoomRegistry::median(tin, hin, &voting);
   if (haveIndoor) {
-    Serial.printf("[trong nha] trung vi %.1f°C %.0f%% tu %u/%u goc · espnow nhan=%lu bo=%lu"
-                  " · unoq=%s\n",
+    Serial.printf("[indoor] median %.1f°C %.0f%% from %u/%u corners - espnow rx=%lu dropped=%lu"
+                  " - unoq=%s\n",
                   tin, hin, voting, RoomRegistry::knownCount(),
                   (unsigned long)EspNowRelay::receivedCount(),
                   (unsigned long)EspNowRelay::droppedCount(),
-                  UnoQLink::connected() ? "da noi" : "chua noi");
+                  UnoQLink::connected() ? "connected" : "not connected");
   } else {
-    // Ba ca hỏng khác hẳn nhau, và hai bộ đếm là thứ phân biệt được chúng:
-    //   nhan=0            -> không nghe thấy ESP-NOW nào: sai WIFI_SSID ở node
-    //                        phòng (nó bám nhầm kênh), hoặc node chưa bật
-    //   nhan>0, 0 goc     -> nghe thấy nhưng toàn gói của node ngoài trời
-    //   co goc, voting=0  -> các góc còn sống nhưng cảm biến đều hỏng (NaN)
-    Serial.printf("[trong nha] CHUA CO SO DO — espnow nhan=%lu bo=%lu · "
-                  "%u goc da biet, %u con song. Xem 3 ca trong main.cpp.\n",
+    // Three completely different failure cases, and the two counters are what
+    // distinguishes them:
+    //   rx=0                -> no ESP-NOW heard at all: a wrong WIFI_SSID on the room
+    //                          nodes (so they locked onto the wrong channel), or the
+    //                          nodes are not powered
+    //   rx>0, 0 corners     -> packets heard but all of them from the outdoor node
+    //   corners, voting=0   -> the corners are alive but every sensor is faulty (NaN)
+    Serial.printf("[indoor] NO READING YET - espnow rx=%lu dropped=%lu - "
+                  "%u corners known, %u alive. See the 3 cases in main.cpp.\n",
                   (unsigned long)EspNowRelay::receivedCount(),
                   (unsigned long)EspNowRelay::droppedCount(),
                   RoomRegistry::knownCount(), RoomRegistry::onlineCount());
   }
 
-  // Bảng Δ trung bình theo từng node. Bộ đếm tổng ở trên nói "có mất gói không";
-  // bảng này nói "node NÀO đang mất" — hai câu hỏi khác nhau, và câu thứ hai mới
-  // dẫn tới chỗ cần sửa.
+  // The per-node average-delta table. The totals above answer "are packets being
+  // lost"; this table answers "WHICH node is losing them" -- two different questions,
+  // and only the second leads to the place that needs fixing.
   SerialTrace::summary();
 }
