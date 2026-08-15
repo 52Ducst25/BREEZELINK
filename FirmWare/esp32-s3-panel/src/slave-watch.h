@@ -15,16 +15,37 @@
 // ============================================================================
 namespace SlaveWatch {
 
-/// Slave bắn nhịp tim mỗi 3s; ngưỡng 20s -> chịu được ~6.6 nhịp rơi LIÊN TIẾP
-/// mới báo mất kết nối. Đây là cấu hình ưu tiên ỔN ĐỊNH, chống nhấp nháy.
+/// Bao lâu không nghe thấy thì coi là node đã mất kết nối.
 ///
-/// Cách đạt an toàn cao nhất là giữ nhịp tim DÀY nhưng ngưỡng RỘNG, chứ không
-/// phải kéo dài cả hai: nhịp dày cho nhiều cơ hội "điểm danh" trong cùng một
-/// cửa sổ, nên một chuỗi nhiễu sóng cũng không đủ làm node bị coi là chết.
-/// Đổi lại: mất điện thật thì mất ~20 giây mới hiện offline — đã cân nhắc và
-/// chấp nhận, vì báo nhầm liên tục làm người dùng mất tin vào đèn trạng thái,
-/// tệ hơn nhiều so với biết chậm vài giây.
-static const uint32_t SLAVE_TIMEOUT_MS = 20000UL;
+/// PHẢI TÍNH TỪ NHỊP TIM THẬT CỦA NODE. Nhịp đó là 5 GIÂY, ở cả hai loại node:
+///     esp32-room/src/main.cpp      ROOM_PUBLISH_MS = 5000
+///     esp32-outdoor/src/config.h   TELEMETRY_MS    = 5000
+///
+///     35s / 5s  =  chịu được 7 nhịp rơi LIÊN TIẾP mới báo mất kết nối.
+///
+/// 20 GIÂY LÀ CON SỐ CŨ, VÀ NÓ SAI VÌ MỘT GIẢ ĐỊNH SAI. Chú thích cũ ghi "slave
+/// bắn nhịp tim mỗi 3s; ngưỡng 20s -> chịu được ~6.6 nhịp rơi". Ý định đúng,
+/// nhưng KHÔNG NODE NÀO phát mỗi 3 giây — cả hai đều 5 giây. Ở nhịp thật thì 20
+/// giây chỉ chịu được 3 nhịp rơi, tức chưa tới một nửa mức mà chính chú thích đó
+/// tuyên bố là đã cân nhắc và chấp nhận.
+///
+/// TRIỆU CHỨNG NGOÀI HIỆN TRƯỜNG: một chuỗi mất sóng ngắn — chuyện thường với
+/// node đặt ngoài trời, xuyên tường, và công suất phát bị ghì ở 8 dBm vì lý do
+/// nguồn (xem espnow-slave-radio.h) — là đủ để panel báo "MẤT KẾT NỐI" rồi tự
+/// khỏi sau vài chục giây. Người dùng đọc ra là bo lỗi chập chờn, đúng cái mà
+/// việc chọn "ngưỡng RỘNG" sinh ra để tránh.
+///
+/// SỬA Ở PANEL CHỨ KHÔNG SỬA Ở NODE, vì hai lý do độc lập nhau đều dẫn tới đây:
+/// nguyên tắc thiết kế là giữ nhịp tim DÀY và ngưỡng RỘNG (nhịp dày cho nhiều cơ
+/// hội điểm danh trong cùng một cửa sổ), nên bên phải nới là ngưỡng; và node thì
+/// KHÔNG CÓ OTA — sửa chúng nghĩa là leo lên tường tháo từng bo.
+///
+/// Cái giá vẫn là cái giá cũ, chỉ dài hơn: mất điện thật thì ~35 giây mới hiện
+/// offline. Chấp nhận được, vì báo nhầm liên tục làm người dùng mất tin vào đèn
+/// trạng thái — tệ hơn nhiều so với biết chậm mười lăm giây.
+///
+/// ĐỔI NHỊP PHÁT CỦA NODE THÌ PHẢI ĐỔI SỐ NÀY THEO. Quy tắc: ngưỡng ≈ 7 × nhịp.
+static const uint32_t SLAVE_TIMEOUT_MS = 35000UL;
 
 /// Nhịp tim 5s là để biết SỐNG/CHẾT nhanh, không phải để lưu số đo dày đặc:
 /// nhiệt độ phòng không đổi trong 5 giây, lưu hết chỉ làm phồng DB và bắt thuật
