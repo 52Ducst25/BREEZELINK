@@ -2,61 +2,68 @@
 #include <Arduino.h>
 
 // ============================================================================
-//  Ngoại vi rời của bo QR Box Advance: đèn nền, còi, đồng hồ DS1307.
+//  The QR Box Advance's discrete peripherals: backlight, buzzer, DS1307 clock.
 // ----------------------------------------------------------------------------
-//  Gom vào một chỗ vì cả ba đều là ngoại vi rời của bo, không liên quan gì tới
-//  logic điều hoà — tách ra thì ui.cpp chỉ còn phần vẽ và chạm.
+//  Grouped in one place because all three are board peripherals with nothing to do
+//  with air conditioning logic -- splitting them out leaves ui.cpp holding only
+//  drawing and touch.
 //
-//  DS1307 nằm chung bus I2C với cảm ứng, nên Touch::begin() phải chạy TRƯỚC
-//  (nó là nơi gọi Wire.begin + ghim 100kHz).
+//  The DS1307 shares the I2C bus with the touch controller, so Touch::begin() has
+//  to run FIRST (it is what calls Wire.begin and pins the bus at 100kHz).
 // ============================================================================
 namespace BoardIo {
 
-// --- Đèn nền: Q5 BSS138 hạ áp phía mát, mức CAO = sáng ---
+// --- Backlight: a low-side Q5 BSS138, HIGH = lit ---
 void backlightBegin(uint8_t pin);
-/// 0..100. Sàn thực tế 10%: 0% làm màn nhìn y như hỏng, người dùng sẽ tưởng
-/// node chết rồi đi rút điện.
+/// 0..100. The practical floor is 10%: 0% makes the screen look exactly like a
+/// fault, and the user will assume the node is dead and go unplug it.
 void backlightSet(uint8_t percent);
 uint8_t backlightGet();
 
-// --- Còi MLT-8530 qua Q7 ---
+// --- MLT-8530 buzzer via Q7 ---
 void buzzerBegin(uint8_t pin);
 void buzzerEnable(bool on);
 bool buzzerEnabled();
-/// Bíp KHÔNG CHẶN: đặt hẹn giờ rồi trả về ngay. buzzerTick() tắt hộ.
+/// A NON-BLOCKING beep: it sets a timer and returns immediately. buzzerTick()
+/// switches it off.
 void beep(uint16_t ms = 40, uint16_t freq = 2700);
 void buzzerTick();
 
 // --- DS1307 (I2C 0x68) ---
 struct Clock { uint8_t hh, mm, ss; };
 
-/// Đọc giờ. Trả false nếu chip không trả lời HOẶC đang ở trạng thái dừng dao
-/// động (bit CH) — tức là chưa từng được đặt giờ. Không đoán bừa: giao diện
-/// hiện "--:--" còn hơn hiện 00:00 như thể đó là giờ thật.
+/// Read the time. Returns false if the chip does not answer OR if the oscillator is
+/// halted (the CH bit) -- i.e. the time has never been set. Do not guess: the UI
+/// showing "--:--" is better than showing 00:00 as though it were the real time.
 ///
 bool clockRead(Clock &out);
 
-/// Đặt giờ cho DS1307 (chế độ 24h, xoá bit CH để dao động chạy).
+/// Set the DS1307's time (24-hour mode, clearing the CH bit so the oscillator
+/// runs).
 ///
-/// PHẢI gọi từ tác vụ UI — DS1307 nằm trên bus I2C mà tác vụ đó sở hữu.
+/// It MUST be called from the UI task -- the DS1307 sits on the I2C bus that task
+/// owns.
 bool clockWrite(uint8_t hh, uint8_t mm, uint8_t ss);
 
-// --- Đồng bộ giờ qua NTP ---
+// --- Time sync over NTP ---
 //
-//  ĐÃ QUAY LẠI, NHƯNG TỰ ĐỘNG. Bản trước có nút "ĐỒNG BỘ GIỜ" trong Cài đặt và
-//  nó bị gỡ ở 42332bc vì bắt người ta bấm tay là một việc vặt ai cũng quên. Gỡ
-//  cả đường đặt giờ thì lộ ra hệ quả tệ hơn: DS1307 có pin nuôi riêng nên một
-//  giá trị SAI cũng được giữ nguyên vĩnh viễn, mà bit CH đã xoá nên clockRead()
-//  vẫn báo hợp lệ — màn hình hiện một giờ sai một cách tự tin, và không có bất
-//  kỳ đường nào trong firmware sửa được nó.
+//  IT IS BACK, BUT AUTOMATIC. An earlier version had a "SYNC TIME" button in
+//  Settings, removed in 42332bc because making people press it by hand is a chore
+//  everyone forgets. Removing the time-setting path entirely exposed a worse
+//  consequence: the DS1307 has its own backup battery, so a WRONG value is
+//  preserved forever, and with the CH bit already cleared clockRead() still reports
+//  it as valid -- the screen displays a wrong time with complete confidence and no
+//  path anywhere in the firmware can correct it.
 //
-//  Nên lần này không có nút: node tự đồng bộ khi có mạng, DS1307 lùi về đúng vai
-//  trò của nó là giữ giờ lúc mất mạng/mất điện.
+//  So this time there is no button: the node syncs itself whenever it has a
+//  network, and the DS1307 falls back to its proper role of holding the time
+//  through a network or power outage.
 void ntpBegin();
 
-/// Hỏi đồng hồ hệ thống; nếu SNTP đã về thì ghi xuống DS1307.
-/// Trả false khi SNTP chưa có kết quả — KHÔNG chờ, gọi lại ở nhịp sau.
-/// Cũng phải gọi từ tác vụ UI (nó ghi I2C).
+/// Query the system clock; if SNTP has answered, write it down to the DS1307.
+/// Returns false while SNTP has no result yet -- it does NOT wait, just call it
+/// again on the next tick.
+/// Also must be called from the UI task (it writes I2C).
 bool ntpPoll();
 
 } // namespace BoardIo

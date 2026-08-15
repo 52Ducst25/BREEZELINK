@@ -3,68 +3,74 @@
 #include "ui.h"
 
 // ============================================================================
-//  Dựng và cập nhật cây widget LVGL của 4 màn + lớp phủ học remote.
+//  Building and updating the LVGL widget tree for the 4 screens + the learn
+//  overlay.
 // ----------------------------------------------------------------------------
-//  TÁCH KHỎI ui.cpp để mỗi file một việc: ui.cpp lo cổng nối LVGL với phần cứng
-//  (màn, cảm ứng, tác vụ, hàng đợi lệnh), file này lo NỘI DUNG hiển thị.
+//  SPLIT OUT OF ui.cpp so each file does one job: ui.cpp handles the bridge between
+//  LVGL and the hardware (display, touch, task, command queue), while this file
+//  handles the CONTENT being displayed.
 //
-//  CHỈ ĐƯỢC GỌI TỪ TÁC VỤ UI. LVGL không an toàn đa luồng — loop() chạm vào là
-//  hỏng cây widget theo kiểu ngẫu nhiên, rất khó tìm.
+//  IT MAY ONLY BE CALLED FROM THE UI TASK. LVGL is not thread-safe -- loop()
+//  touching it corrupts the widget tree at random, which is very hard to track
+//  down.
 //
-//  Dựng MỘT LẦN rồi chỉ đổi nội dung: LVGL tự biết vùng nào bẩn và chỉ vẽ lại
-//  đúng vùng đó. Đây là thứ bản TFT_eSPI phải làm tay bằng cách giữ bản sao
-//  "đã vẽ lần trước" cho từng trường.
+//  Build ONCE and then only change the content: LVGL knows which regions are dirty
+//  and redraws only those. This is what the TFT_eSPI version had to do by hand, by
+//  keeping a "what was drawn last time" copy of every field.
 // ============================================================================
 namespace Screens {
 
-/// Người dùng bấm GUI / TU DONG. ui.cpp đẩy tiếp vào hàng đợi cho loop().
+/// The user pressed SEND / AUTO. ui.cpp forwards it into the queue for loop().
 using CommandFn = void (*)(const Ui::Command &cmd);
 
-/// Người dùng bấm trong màn CAI DAT. ui.cpp thi hành (đèn nền, NTP, reset) vì đó
-/// là phần cứng thuộc quyền tác vụ UI.
+/// The user pressed something in the SETTINGS screen. ui.cpp executes it
+/// (backlight, NTP, reset) because that is hardware owned by the UI task.
 ///
-/// KHÔNG CÒN BUZZER_ON / BUZZER_OFF. Hàng "ÂM THANH" đã bị gỡ khỏi màn Cài đặt:
-/// bo panel ESP32-S3 KHÔNG CÓ CÒI (board-pins.h: `BUZZER_PIN = PIN_NONE` — bốn
-/// chân tự do đã đi hết cho IR và UART sang UNO Q). Một công tắc bật/tắt cho phần
-/// cứng không tồn tại là kiểu điều khiển tệ nhất: nó bấm được, nó đổi màu, và nó
-/// không làm gì cả — người dùng sẽ đi tìm lỗi ở loa.
+/// BUZZER_ON / BUZZER_OFF ARE GONE. The "ÂM THANH" row has been removed from the
+/// Settings screen: the ESP32-S3 panel board HAS NO BUZZER (board-pins.h:
+/// `BUZZER_PIN = PIN_NONE` -- its four free pins all went to IR and the UART to the
+/// UNO Q). A toggle for hardware that does not exist is the worst kind of control:
+/// it presses, it changes colour, and it does nothing -- the user will go looking
+/// for a fault in the speaker.
 ///
-/// Tiếng bấm thì GIỮ NGUYÊN đường dây (Theme::setPressSound -> BoardIo::beep):
-/// beep() tự im khi chân = 255, còn bo QR Box cũ dùng chung mã nguồn này thì vẫn
-/// có còi thật.
+/// The click sound KEEPS its wiring (Theme::setPressSound -> BoardIo::beep):
+/// beep() stays silent when the pin is 255, and the old QR Box board, which shares
+/// this source, still has a real buzzer.
 enum Setting : uint8_t { BRIGHT_DOWN, BRIGHT_UP, REBOOT };
 using SettingFn = void (*)(Setting s);
 
-/// Dựng toàn bộ. Gọi một lần trong Ui::begin(), sau Theme::init().
+/// Build everything. Called once from Ui::begin(), after Theme::init().
 void build(CommandFn onCmd, SettingFn onSetting);
 
-/// Đổ số liệu mới vào. Gọi theo nhịp vẽ (200 ms) từ tác vụ UI.
+/// Feed new data in. Called at the draw interval (200 ms) from the UI task.
 void update(const Ui::Model &m);
 
-/// Dòng thông báo ngắn ở đáy vùng nội dung. [isError] tô đỏ.
+/// A short notification line at the bottom of the content area. [isError] colours
+/// it red.
 void toast(const char *msg, bool isError = false);
 
-/// Gọi mỗi vòng tác vụ UI để tự tắt toast sau vài giây.
+/// Call every UI task iteration so the toast dismisses itself after a few seconds.
 void tickToast(uint32_t nowMs);
 
-/// Đồng hồ trên thanh trạng thái, có GIÂY. [valid]=false hiện "--:--:--" —
-/// DS1307 chưa từng được đặt giờ thì nói thẳng, không hiện 00:00:00 như thể đó
-/// là giờ thật.
+/// The status bar clock, WITH SECONDS. [valid]=false shows "--:--:--" -- if the
+/// DS1307 has never been set, say so plainly rather than showing 00:00:00 as though
+/// it were the real time.
 ///
-/// Giây có ích hơn vẻ ngoài của nó: nó là dấu hiệu SỐNG duy nhất trên màn khi
-/// mọi số đo đứng yên — nhìn giây nhảy là biết tác vụ giao diện còn chạy, không
-/// phải màn đã treo với một khung hình cũ.
+/// The seconds are more useful than they look: they are the only sign of LIFE on
+/// screen when every reading is static -- watching the seconds tick tells you the UI
+/// task is still running rather than the screen having frozen on an old frame.
 void setClock(bool valid, uint8_t hh, uint8_t mm, uint8_t ss);
 
-/// Phản ánh trạng thái phần cứng lên màn CAI DAT.
+/// Reflect the hardware state onto the SETTINGS screen.
 void setBrightness(uint8_t percent);
 
-/// Thêm một dòng vào nhật ký lệnh (mới nhất lên đầu, giữ 8 dòng gần nhất).
+/// Add a line to the command log (newest first, keeping the last 8).
 ///
-/// [clockValid]/[hh]/[mm] là giờ DS1307 đọc được lúc nhận. Chưa từng đặt giờ thì
-/// clockValid=false và dòng đó hiện mốc TƯƠNG ĐỐI tính từ [nowSec] (uptime giây)
-/// — "3 phút trước". Không bịa 00:00: cùng luật với đồng hồ trên thanh trạng
-/// thái, thà nói "không biết mấy giờ" còn hơn đưa ra một con số sai.
+/// [clockValid]/[hh]/[mm] are the DS1307 time read at arrival. If the time has
+/// never been set, clockValid=false and the line shows a RELATIVE timestamp counted
+/// from [nowSec] (uptime in seconds) -- "3 minutes ago". It does not fabricate
+/// 00:00: the same rule as the status bar clock, better to say "I do not know the
+/// time" than to give a wrong number.
 void addLog(const Ui::CmdLog &e, bool clockValid, uint8_t hh, uint8_t mm, uint32_t nowSec);
 
 } // namespace Screens
