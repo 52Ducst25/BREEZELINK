@@ -1,13 +1,13 @@
-; Danh tính của từng bo cảm biến góc phòng — MỘT ENV MỖI BO.
+; Identity of each room-corner sensor board -- ONE ENV PER BOARD.
 ;
-; BẢN MẪU: chép thành `nodes.ini` rồi điền. (nodes.ini bị gitignore vì nó chứa
-; DEVICE_UUID của một khách hàng thật.)
+; TEMPLATE: copy to `nodes.ini` and fill it in. (nodes.ini is gitignored because
+; it contains a real customer's DEVICE_UUIDs.)
 ;
-; Nạp:
+; Flashing:
 ;     pio run -e ss1 -t upload --upload-port COM30
 ;     pio run -e ss4 -t upload --upload-port COM33
 ;
-; Xem log đúng bo đó:
+; Watching that specific board's log:
         & "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" device monitor -e ss1 --port COM30
         & "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" device monitor -e ss2 --port COM31
         & "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" device monitor -e ss3 --port COM32
@@ -18,44 +18,46 @@
       pio device monitor -e ss3 --port COM32
       pio device monitor -e ss4 --port COM33
 ; ---------------------------------------------------------------------------
-;  VÌ SAO LÀ 4 ENV CHỨ KHÔNG PHẢI 4 THƯ MỤC
+;  WHY 4 ENVS AND NOT 4 DIRECTORIES
 ;
-;  Bốn bo chạy CÙNG MỘT firmware, khác nhau đúng hai giá trị. Tách thành bốn thư
-;  mục là bốn bản sao của main.cpp + room-sensor.cpp: sửa một lỗi phải sửa bốn
-;  lần, và lần thứ tư sẽ có người quên — rồi một góc phòng chạy bản cũ mà không
-;  ai nhận ra, vì nó vẫn gửi số đo bình thường.
+;  The four boards run THE SAME firmware and differ in exactly two values.
+;  Splitting them into four directories means four copies of main.cpp +
+;  room-sensor.cpp: one bug fix has to be applied four times, and on the fourth
+;  someone will forget -- then one corner of the room runs an old build and nobody
+;  notices, because it still reports perfectly normal readings.
 ;
-;  Env cho đúng thứ cần: mỗi bo một lệnh nạp, mỗi bo một thư mục build riêng
-;  (.pio/build/ss1…), mà vẫn một bản mã nguồn.
+;  Envs give exactly what is needed: one flash command per board, one build
+;  directory per board (.pio/build/ss1...), and still a single copy of the source.
 ; ---------------------------------------------------------------------------
-;  LẤY DEVICE_UUID Ở ĐÂU: web admin -> Khách hàng -> mở node (Cảm biến phòng)
-;  -> mục "Nạp firmware". MỖI BO MỘT UUID KHÁC NHAU — trùng uuid là hai bo cùng
-;  ghi đè số đo của nhau lên một hàng device, và biểu đồ nhảy loạn không lý do.
+;  WHERE TO GET DEVICE_UUID: admin web -> Khách hàng -> open the node
+;  (Cảm biến phòng) -> the "Nạp firmware" section. EVERY BOARD NEEDS A DIFFERENT
+;  UUID -- duplicate uuids mean two boards overwrite each other's readings on one
+;  device row, and the charts jump around for no visible reason.
 ;
-;  ROOM_CORNER 0..3 CHỈ LÀ NHÃN hiển thị. Trùng nhau thì vô hại (định danh thật
-;  là uuid), chỉ là màn gateway ghi "góc 1" hai lần.
+;  ROOM_CORNER 0..3 IS ONLY A DISPLAY LABEL. Duplicates are harmless (the real
+;  identity is the uuid), the gateway screen just prints "corner 1" twice.
 ; ---------------------------------------------------------------------------
 
 [env:ss1]
 extends = room_base
 build_flags = ${room_base.build_flags}
-    -D DEVICE_UUID='"DAN_DEVICE_UUID_GOC_1"'
+    -D DEVICE_UUID='"PASTE_DEVICE_UUID_CORNER_1"'
     -D ROOM_CORNER=0
 
 [env:ss2]
 extends = room_base
 build_flags = ${room_base.build_flags}
-    -D DEVICE_UUID='"DAN_DEVICE_UUID_GOC_2"'
+    -D DEVICE_UUID='"PASTE_DEVICE_UUID_CORNER_2"'
     -D ROOM_CORNER=1
 
 [env:ss3]
 extends = room_base
 build_flags = ${room_base.build_flags}
-    -D DEVICE_UUID='"DAN_DEVICE_UUID_GOC_3"'
+    -D DEVICE_UUID='"PASTE_DEVICE_UUID_CORNER_3"'
     -D ROOM_CORNER=2
 
 [env:ss4]
 extends = room_base
 build_flags = ${room_base.build_flags}
-    -D DEVICE_UUID='"DAN_DEVICE_UUID_GOC_4"'
+    -D DEVICE_UUID='"PASTE_DEVICE_UUID_CORNER_4"'
     -D ROOM_CORNER=3

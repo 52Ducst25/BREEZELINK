@@ -1,25 +1,30 @@
 // ============================================================================
-//  BreezeLink — ESP32-C3-DevKitM-1 · node CẢM BIẾN GÓC PHÒNG
+//  BreezeLink - ESP32-C3-DevKitM-1 - ROOM-CORNER SENSOR node
 // ----------------------------------------------------------------------------
-//  Bốn bo như thế này đặt ở bốn góc một phòng. Mỗi bo làm đúng một việc: đọc
-//  DHT22 rồi bắn gói ESP-NOW về gateway đặt gần máy lạnh.
+//  Four boards like this one sit in the four corners of a room. Each board does
+//  exactly one thing: read a DHT22 and broadcast an ESP-NOW packet to the gateway
+//  mounted near the air conditioner.
 //
-//  KHÔNG có WiFi, KHÔNG có MQTT, KHÔNG có credential nào ở đây. Gateway đứng tên
-//  publish hộ, đúng khuôn đã dùng cho node ngoài trời — và toàn bộ phần radio
-//  dùng chung một file với nó (../../shared/espnow-slave-radio.h).
+//  NO WiFi, NO MQTT, NO credentials here at all. The gateway publishes on its
+//  behalf, exactly the pattern already used for the outdoor node -- and the whole
+//  radio layer is shared with it in one file
+//  (../../shared/espnow-slave-radio.h).
 //
-//  VÌ SAO ESP-NOW CHỨ KHÔNG PHẢI BLE:
-//    gói ESP-NOW chở được 250 byte nên nó mang thẳng device_uuid 32 ký tự của
-//    chính node — gateway cứ thế publish vào topic của node đó mà không cần bảng
-//    tra nào. Gói BLE advertising cổ điển chỉ có 31 byte, chở không nổi uuid, nên
-//    sẽ buộc gateway phải giữ một bảng id->uuid và NẠP LẠI mỗi lần thêm/bớt node
-//    phòng. Bluetooth trong hệ này dành cho đường gateway <-> Arduino UNO Q, nơi
-//    hai bên có kết nối GATT thật và không bị trần 31 byte.
+//  WHY ESP-NOW AND NOT BLE:
+//    an ESP-NOW frame carries 250 bytes, so it can carry the node's own
+//    32-character device_uuid directly -- the gateway simply publishes to that
+//    node's topic with no lookup table at all. A classic BLE advertising packet
+//    is only 31 bytes and cannot carry the uuid, which would force the gateway to
+//    keep an id->uuid table and BE REFLASHED every time a room node is added or
+//    removed. Bluetooth in this system is reserved for the gateway <-> Arduino
+//    UNO Q link, where both sides have a real GATT connection and no 31-byte
+//    ceiling.
 //
-//  BỐN BO CÓ CÙNG SỐ GÓC LÀ VÔ HẠI: `corner` chỉ là nhãn hiển thị trên màn tại
-//  chỗ, còn định danh thật là DEVICE_UUID — vốn đã khác nhau vì mỗi bo lấy một
-//  hàng devices riêng trên web. Trùng nhãn thì màn ghi "góc 1" hai lần, không
-//  mất số đo của ai cả.
+//  FOUR BOARDS SHARING A CORNER NUMBER IS HARMLESS: `corner` is only a display
+//  label on the local screen, while the real identity is DEVICE_UUID -- which
+//  already differs because each board gets its own devices row on the web UI. A
+//  duplicate label just means the screen prints "corner 1" twice; nobody's
+//  readings are lost.
 // ============================================================================
 #include <Arduino.h>
 
@@ -28,37 +33,43 @@
 #include "espnow-slave-radio.h"
 #include "room-sensor.h"
 
-/// Chu kỳ gửi (ms). KHÁC với nhịp đọc cảm biến (2.5s): đọc dày để lọc nhiễu,
-/// gửi thưa hơn vì nhiệt độ phòng không đổi trong vài giây và mỗi gói gửi đi là
-/// một hàng telemetry trong Postgres.
+/// Send interval (ms). DIFFERENT from the sensor read interval (2.5s): read often
+/// to filter noise, send less often because room temperature does not change over
+/// a few seconds and every packet sent is one telemetry row in Postgres.
 ///
-/// 15s khớp TELEMETRY_MS của gateway.
+/// 15s matched the gateway's TELEMETRY_MS.
 ///
-/// Cho phép ép nhanh hơn lúc truy lỗi bằng `-D ROOM_PUBLISH_MS=3000`: đo mất gói
-/// ở nhịp 15s cần hàng phút mới đủ mẫu, mà lúc đang dò sóng thì chờ lâu là mất
-/// hẳn khả năng thử-sai. KHÔNG dùng nhịp nhanh khi chạy thật — mỗi gói là một
-/// hàng telemetry trong Postgres.
+/// Can be forced faster while debugging with `-D ROOM_PUBLISH_MS=3000`: measuring
+/// packet loss at a 15s cadence takes minutes to gather enough samples, and while
+/// chasing a radio problem a long wait destroys any ability to try things.
+/// Do NOT use the fast cadence in production -- every packet is a telemetry row in
+/// Postgres.
 ///
-/// 5 GIÂY, KHÔNG PHẢI 15. Đây là NHỊP TIM, không phải nhịp ghi dữ liệu:
-/// gateway đã tự chặn việc đẩy lên cloud ở 15s (SlaveWatch::RELAY_INTERVAL_MS),
-/// nên phát dày hơn KHÔNG sinh thêm một hàng telemetry nào trong Postgres.
+/// 5 SECONDS, NOT 15. This is a HEARTBEAT, not a data-logging cadence: the gateway
+/// already throttles the push to the cloud at 15s
+/// (SlaveWatch::RELAY_INTERVAL_MS), so broadcasting more often adds NO extra
+/// telemetry rows in Postgres.
 ///
-/// Vì sao phải dày: broadcast ESP-NOW không có ACK nên gói rơi là mất hẳn, và
-/// gateway phải chia sóng 2.4GHz với WiFi + Bluetooth nên tỉ lệ rơi là đáng kể
-/// (đo được: mất khoảng hai phần ba số gói khi BLE bật). Với nhịp 15s và ngưỡng
-/// mất kết nối 20s của SlaveWatch, chỉ cần RƠI MỘT GÓI là node bị báo mất kết
-/// nối — đo trên bàn thì bốn góc nhấp nháy online/offline liên tục. 5s cho phép
-/// rơi ba nhịp liên tiếp mà vẫn được coi là còn sống.
+/// Why it has to be frequent: ESP-NOW broadcast has no ACK, so a dropped packet
+/// is gone for good, and the gateway has to share the 2.4GHz band with WiFi +
+/// Bluetooth so the loss rate is significant (measured: about two thirds of
+/// packets lost with BLE enabled). At a 15s cadence with SlaveWatch's 20s
+/// disconnection threshold, LOSING A SINGLE PACKET marks the node as
+/// disconnected -- on the bench all four corners flickered online/offline
+/// constantly. 5s tolerates three consecutive misses while still counting as
+/// alive.
 ///
-/// Con số này khớp với giả định đã ghi sẵn trong slave-watch.h ("nhịp tim dày,
-/// ngưỡng rộng"); bản 15s trước đây là chỗ lệch khỏi thiết kế đó.
+/// This number matches the assumption already recorded in slave-watch.h ("a fast
+/// heartbeat with a wide threshold"); the earlier 15s value was the point where
+/// the code diverged from that design.
 #ifndef ROOM_PUBLISH_MS
 #define ROOM_PUBLISH_MS 5000UL
 #endif
 static const unsigned long PUBLISH_PERIOD_MS = ROOM_PUBLISH_MS;
 
-/// Nhịp in dòng tổng kết ra serial. Thưa hơn nhịp gửi nhiều: bo này chạy hàng
-/// tháng không ai cắm cáp, log dày chỉ tổ trôi mất dòng đáng đọc lúc truy lỗi.
+/// How often to print a summary line to serial. Much less often than the send
+/// cadence: this board runs for months with nobody plugged in, and a dense log
+/// only scrolls away the lines worth reading when you do come to debug it.
 static const unsigned long LOG_PERIOD_MS = 60000UL;
 
 static unsigned long lastSend = 0;
@@ -68,14 +79,14 @@ static uint32_t      sentCount = 0;
 void setup() {
   Serial.begin(115200);
   delay(300);
-  Serial.println("\n== BreezeLink · ESP32-C3 · CAM BIEN GOC PHONG (ESP-NOW) ==");
-  Serial.printf("goc=%d · DHT22 @GPIO%d · fw=%s\n", ROOM_CORNER, DHT_PIN, FW_VERSION);
+  Serial.println("\n== BreezeLink - ESP32-C3 - ROOM CORNER SENSOR (ESP-NOW) ==");
+  Serial.printf("corner=%d - DHT22 @GPIO%d - fw=%s\n", ROOM_CORNER, DHT_PIN, FW_VERSION);
   Serial.printf("uuid=%s\n", DEVICE_UUID);
 
   RoomSensor::begin(DHT_PIN);
 
   if (!EspNowSlaveRadio::begin(WIFI_SSID)) {
-    Serial.println("esp_now_init THAT BAI — khoi dong lai");
+    Serial.println("esp_now_init FAILED - restarting");
     delay(2000);
     ESP.restart();
   }
@@ -91,10 +102,12 @@ void loop() {
     lastSend = now;
 
     float t = NAN, h = NAN;
-    // read() trả false khi cảm biến đã trượt đủ nhiều lần LIÊN TIẾP. Vẫn gửi gói
-    // (t/h giữ NaN) chứ không bỏ qua: gói không có số đo VẪN là một nhịp tim, và
-    // gateway phân biệt được "góc này chết" với "góc này còn sống nhưng cảm biến
-    // hỏng". Gộp hai chuyện đó lại là gửi người đi kiểm tra sai thứ.
+    // read() returns false once the sensor has failed enough CONSECUTIVE times.
+    // We still send the packet (with t/h left as NaN) rather than skipping it: a
+    // packet with no reading is STILL a heartbeat, and it lets the gateway
+    // distinguish "this corner is dead" from "this corner is alive but its sensor
+    // is broken". Conflating those two sends the technician to check the wrong
+    // thing.
     const bool ok = RoomSensor::read(t, h);
 
     AcEspNowPacket pkt;
@@ -103,22 +116,23 @@ void loop() {
     if (sent) sentCount++;
 
     if (!ok) {
-      Serial.printf("[room] chua co so do (%u lan truot lien tiep) — kiem tra day DHT22 "
-                    "tren GPIO%d va tro keo 4.7k len 3.3V\n",
+      Serial.printf("[room] no reading yet (%u consecutive failures) - check the DHT22 wiring "
+                    "on GPIO%d and the 4.7k pull-up to 3.3V\n",
                     RoomSensor::consecutiveFailures(), DHT_PIN);
     }
   }
 
 #if defined(ESPNOW_SNIFF) && ESPNOW_SNIFF
-  // Báo cáo NGHE NGÓNG mỗi 5s, tách khỏi nhịp log 60s: lúc đang dò sóng thì chờ
-  // một phút cho mỗi lần thử là hết kiên nhẫn trước khi hết giả thuyết.
+  // Report SNIFF results every 5s, decoupled from the 60s log cadence: while
+  // chasing a radio problem, waiting a minute per attempt exhausts your patience
+  // before it exhausts your hypotheses.
   {
     static unsigned long lastSniffLog = 0;
     static uint32_t      lastSniffCount = 0;
     if (now - lastSniffLog >= 5000UL) {
       lastSniffLog = now;
       const uint32_t c = EspNowSlaveRadio::sniffed();
-      Serial.printf("  <nghe> tong %lu goi (+%lu tu 5s truoc) · gan nhat [%s] · kenh that=%d\n",
+      Serial.printf("  <sniff> %lu packets total (+%lu since 5s ago) - latest [%s] - real channel=%d\n",
                     (unsigned long)c, (unsigned long)(c - lastSniffCount),
                     EspNowSlaveRadio::sniffedLast(), EspNowSlaveRadio::channel());
       lastSniffCount = c;
@@ -130,19 +144,20 @@ void loop() {
     lastLog = now;
     float t = NAN, h = NAN;
     RoomSensor::read(t, h);
-    // "da phat" KHÔNG có nghĩa là gateway đã nhận: broadcast không có ACK. Muốn
-    // biết chắc thì xem log gateway hoặc xem web có số của node này không.
-    Serial.printf("[room goc %d] t=%.1f h=%.0f · da phat %lu goi · kenh=%d · up=%lus",
+    // "sent" does NOT mean the gateway received it: broadcast has no ACK. To be
+    // sure, check the gateway log or check whether the web UI shows this node's
+    // numbers.
+    Serial.printf("[room corner %d] t=%.1f h=%.0f - sent %lu packets - channel=%d - up=%lus",
                   ROOM_CORNER, t, h, (unsigned long)sentCount,
                   EspNowSlaveRadio::channel(), now / 1000UL);
 #if defined(ESPNOW_SNIFF) && ESPNOW_SNIFF
-    // Chỉ có khi build kèm -D ESPNOW_SNIFF=1 (xem espnow-slave-radio.h).
-    Serial.printf(" · NGHE duoc %lu goi tu node khac [%s]",
+    // Only present when built with -D ESPNOW_SNIFF=1 (see espnow-slave-radio.h).
+    Serial.printf(" - HEARD %lu packets from other nodes [%s]",
                   (unsigned long)EspNowSlaveRadio::sniffed(),
                   EspNowSlaveRadio::sniffedLast());
 #endif
     Serial.println();
   }
 
-  delay(10);   // nhường CPU — ESP32-C3 chỉ có MỘT lõi
+  delay(10);   // yield the CPU -- the ESP32-C3 has only ONE core
 }

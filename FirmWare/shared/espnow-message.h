@@ -3,72 +3,78 @@
 #include <string.h>
 
 // ============================================================================
-//  Gói tin ESP-NOW: node SLAVE -> node MASTER (gateway)
+//  ESP-NOW packet: SLAVE node -> MASTER node (gateway)
 // ----------------------------------------------------------------------------
-//  Dùng chung cho MỌI node cảm biến của một hộ: 4 node góc phòng (ESP32-C3) và
-//  node ngoài trời (ESP32 DevKit). Cả ba dòng chip đều là little-endian nên
-//  float tương thích byte-với-byte.
+//  Shared by EVERY sensor node in a household: the 4 room-corner nodes
+//  (ESP32-C3) and the outdoor node (ESP32 DevKit). All three chip families are
+//  little-endian, so floats are byte-for-byte compatible.
 //
-//  Bố cục CỐ ĐỊNH (packed) vì hai bên khác nhau phải đọc ra cùng một byte.
+//  The layout is FIXED (packed) because two different sides have to read back
+//  the same bytes.
 //
-//  Gói TỰ MÔ TẢ: slave gửi kèm device_uuid của chính nó, nhờ vậy master chỉ việc
-//  publish vào bl/{org}/{uuid}/telemetry mà KHÔNG cần bảng ánh xạ MAC->uuid.
-//  Thêm node slave mới thì chỉ nạp firmware cho nó, master không phải sửa gì.
+//  The packet is SELF-DESCRIBING: the slave includes its own device_uuid, so the
+//  master can simply publish to bl/{org}/{uuid}/telemetry WITHOUT any MAC->uuid
+//  mapping table. Adding a new slave node only means flashing that node; the
+//  master needs no change at all.
 //
-//  ĐÂY LÀ TÍNH CHẤT ĐÁNG GIÁ NHẤT CỦA KHUÔN NÀY, và nó là lý do 4 node góc phòng
-//  đi ESP-NOW chứ không đi BLE: gói BLE advertising cổ điển chỉ có 31 byte, chở
-//  không nổi một uuid 32 ký tự, nên bên nhận buộc phải giữ một bảng tra id->uuid
-//  và nạp lại mỗi khi thêm/bớt node. Ở đây thì không.
+//  THIS IS THE MOST VALUABLE PROPERTY OF THIS LAYOUT, and it is why the 4
+//  room-corner nodes use ESP-NOW rather than BLE: a classic BLE advertising
+//  packet is only 31 bytes and cannot carry a 32-character uuid, so the receiver
+//  would be forced to keep an id->uuid lookup table and be reflashed every time a
+//  node is added or removed. Not so here.
 //
-//  Đánh đổi đã biết: bất kỳ thiết bị nào trong tầm sóng cũng có thể tự xưng một
-//  uuid. Chấp nhận được cho mạng nội bộ một hộ; muốn chặt hơn thì bật mã hoá
-//  ESP-NOW (PMK/LMK) hoặc cho master lọc theo danh sách MAC.
+//  Known trade-off: any device in radio range can declare whatever uuid it likes.
+//  Acceptable for one household's local network; to tighten it, enable ESP-NOW
+//  encryption (PMK/LMK) or have the master filter by a MAC whitelist.
 // ============================================================================
 
-#define AC_ESPNOW_MAGIC   0xAC  // lọc nhanh gói rác/khác hệ trên cùng kênh
+#define AC_ESPNOW_MAGIC   0xAC  // quick filter for junk/foreign frames on the same channel
 
-// Phiên bản 2 thêm `node_kind` + `corner` ở CUỐI struct.
+// Version 2 appends `node_kind` + `corner` at the END of the struct.
 //
-// TƯƠNG THÍCH NGƯỢC LÀ CÓ CHỦ ĐÍCH, KHÔNG PHẢI TIỆN TAY: node ngoài trời đã lắp
-// ngoài thực địa đang chạy bản v1 và firmware nó KHÔNG CÓ OTA (audit §3) — muốn
-// nâng nó lên v2 là phải tới tận nơi cắm USB-TTL. Nên master chấp nhận cả hai:
-// gói 43 byte (v1) được hiểu là node ngoài trời, vì mọi node v1 từng tồn tại
-// đều là node ngoài trời. Xem acEspNowParse().
+// BACKWARD COMPATIBILITY IS DELIBERATE HERE, NOT INCIDENTAL: the outdoor node
+// already installed in the field runs v1 and its firmware HAS NO OTA (audit §3) --
+// upgrading it to v2 means physically going there with a USB-TTL. So the master
+// accepts both: a 43-byte packet (v1) is understood as an outdoor node, because
+// every v1 node that ever existed was an outdoor node. See acEspNowParse().
 #define AC_ESPNOW_VERSION 2
 #define AC_ESPNOW_V1_SIZE 43
 
-/// Loại node — quyết định master xếp số đo này vào đâu để hiển thị, và (gián
-/// tiếp) backend đưa nó vào trung vị trong nhà hay vào trung bình trượt ngoài
-/// trời. Master KHÔNG cần biết loại để trung chuyển; nó chỉ cần để vẽ màn hình.
+/// Node kind -- determines where the master files this reading for display, and
+/// (indirectly) whether the backend feeds it into the indoor median or the
+/// outdoor running mean. The master does NOT need the kind in order to relay; it
+/// only needs it to draw the screen.
 enum AcNodeKind : uint8_t {
   AC_NODE_OUTDOOR = 0,
   AC_NODE_ROOM    = 1,
 };
 
-/// `corner` chỉ là NHÃN HIỂN THỊ ("góc 1".."góc 4") cho màn hình tại chỗ —
-/// device_uuid mới là định danh thật.
+/// `corner` is only a DISPLAY LABEL ("corner 1".."corner 4") for the local
+/// screen -- device_uuid is the real identity.
 ///
-/// Nên HAI BO TRÙNG SỐ GÓC LÀ VÔ HẠI: cả hai vẫn có topic riêng, vẫn vào trung
-/// vị, chỉ là màn hình ghi nhãn trùng nhau. Khác hẳn phương án BLE từng cân
-/// nhắc, nơi id trùng nghĩa là bên nhận coi hai bo là MỘT và vứt hẳn số của bo
-/// thứ hai — hệ chạy trên ba cảm biến trong khi bốn đèn vẫn sáng trên tường.
+/// So TWO BOARDS SHARING A CORNER NUMBER IS HARMLESS: both still have their own
+/// topic, both still feed the median, the screen just shows duplicate labels.
+/// Quite unlike the BLE approach once considered, where a duplicate id meant the
+/// receiver treated two boards as ONE and discarded the second board's readings
+/// entirely -- the system running on three sensors while four lights still glow
+/// on the wall.
 #define AC_CORNER_NONE 0xFF
 
 typedef struct __attribute__((packed)) {
   uint8_t  magic;             // = AC_ESPNOW_MAGIC
   uint8_t  version;           // = AC_ESPNOW_VERSION
-  char     device_uuid[33];   // uuid của SLAVE (32 ký tự + '\0')
-  float    temp;              // °C — NAN = node còn sống nhưng cảm biến hỏng
-  float    humidity;          // %  — NAN, như trên
+  char     device_uuid[33];   // the SLAVE's uuid (32 chars + '\0')
+  float    temp;              // degC -- NAN = node alive but the sensor is faulty
+  float    humidity;          // %    -- NAN, as above
   uint8_t  node_kind;         // v2: AcNodeKind
-  uint8_t  corner;            // v2: 0..3 cho node phòng, AC_CORNER_NONE cho outdoor
-} AcEspNowPacket;             // 45 byte — dư sức dưới giới hạn 250 byte của ESP-NOW
+  uint8_t  corner;            // v2: 0..3 for room nodes, AC_CORNER_NONE for outdoor
+} AcEspNowPacket;             // 45 bytes -- comfortably under ESP-NOW's 250-byte limit
 
-/// Bóc một gói vừa nhận, chấp nhận cả v1 lẫn v2.
+/// Unpack a received frame, accepting both v1 and v2.
 ///
-/// Trả false nếu không phải gói của hệ này. Gói v1 (43 byte) được điền
-/// node_kind = OUTDOOR và corner = AC_CORNER_NONE — xem chú thích ở
-/// AC_ESPNOW_VERSION cho lý do.
+/// Returns false if it is not one of this system's packets. A v1 packet (43
+/// bytes) is filled in with node_kind = OUTDOOR and corner = AC_CORNER_NONE --
+/// see the note on AC_ESPNOW_VERSION for why.
 static inline bool acEspNowParse(const uint8_t *data, int len, AcEspNowPacket *out) {
   if (data == nullptr || len < AC_ESPNOW_V1_SIZE) return false;
   if (data[0] != AC_ESPNOW_MAGIC) return false;
@@ -85,12 +91,13 @@ static inline bool acEspNowParse(const uint8_t *data, int len, AcEspNowPacket *o
     out->corner    = AC_CORNER_NONE;
     return true;
   }
-  return false;   // phiên bản lạ -> bỏ, đừng đoán bố cục
+  return false;   // unknown version -> drop it, do not guess the layout
 }
 
-/// Điền một gói để gửi đi. Người gọi tự lo NaN cho giá trị không đo được —
-/// hàm này không đoán hộ, và NaN là câu trả lời ĐÚNG cho "cảm biến hỏng"
-/// (khác hẳn 0.0, vốn là một nhiệt độ hợp lệ).
+/// Fill in a packet to send. The caller is responsible for using NaN where there
+/// is no reading -- this function does not guess on your behalf, and NaN is the
+/// CORRECT answer for "the sensor is faulty" (quite unlike 0.0, which is a valid
+/// temperature).
 static inline void acEspNowFill(AcEspNowPacket *pkt, const char *deviceUuid,
                                 float temp, float humidity,
                                 uint8_t nodeKind, uint8_t corner) {

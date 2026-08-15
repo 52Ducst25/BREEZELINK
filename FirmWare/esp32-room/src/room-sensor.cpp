@@ -15,11 +15,12 @@ uint8_t g_fails = 0;
 }  // namespace
 
 void begin(uint8_t pin) {
-  // DHTesp CHỨ KHÔNG PHẢI thư viện DHT của Adafruit — cùng lý do đã ghi trong
-  // lib_deps của platformio.ini: bản Adafruit tắt ngắt hơn một giây khi
-  // chưa cắm cảm biến và làm panic cả lõi. Trên ESP32-C3 (một lõi duy nhất, và
-  // ngăn xếp BLE chạy ngay trên đó) hậu quả nặng hơn hẳn ESP32 hai lõi: mất
-  // ngắt một giây là ngăn xếp BLE lỡ nhịp và kết nối/quét đứt đoạn.
+  // DHTesp AND NOT Adafruit's DHT library -- the same reason recorded in
+  // platformio.ini's lib_deps: the Adafruit version disables interrupts for over
+  // a second when no sensor is connected and panics the core. On an ESP32-C3 (a
+  // single core, with the BLE stack running right on it) the consequences are far
+  // worse than on a dual-core ESP32: losing interrupts for a second makes the BLE
+  // stack miss its schedule and breaks connections/scans.
   g_dht.setup(pin, DHTesp::DHT22);
   g_started = true;
   g_lastReadMs = 0;
@@ -30,9 +31,10 @@ bool poll() {
   if (g_lastReadMs != 0 && millis() - g_lastReadMs < READ_PERIOD_MS) return false;
   g_lastReadMs = millis();
 
-  // Một lượt lấy cả hai số — KHÔNG gọi getTemperature() rồi getHumidity() thành
-  // hai lệnh: mỗi lệnh là một lần bắt tay với cảm biến, mà nhịp tối thiểu của
-  // DHT22 là 2s nên lệnh thứ hai chỉ trả lại số cũ.
+  // Take both values in one round -- do NOT call getTemperature() and then
+  // getHumidity() as two separate commands: each command is a handshake with the
+  // sensor, and since the DHT22's minimum interval is 2s the second command just
+  // returns the previous value.
   const TempAndHumidity th = g_dht.getTempAndHumidity();
   const bool ok = g_dht.getStatus() == DHTesp::ERROR_NONE &&
                   !isnan(th.temperature) && !isnan(th.humidity);
@@ -46,9 +48,10 @@ bool poll() {
 
   if (g_fails < 0xFF) g_fails++;
   if (g_fails >= FAIL_LIMIT) {
-    // Xoá số cũ, có chủ đích. Giữ lại số đo của 20 giây trước và tiếp tục phát
-    // nó ra là node nói dối một cách thuyết phục: gateway thấy một góc phòng
-    // "còn sống, nhiệt độ ổn định" đúng lúc cảm biến đã tuột dây.
+    // Clearing the old values is deliberate. Holding onto a reading from 20
+    // seconds ago and continuing to broadcast it makes the node lie convincingly:
+    // the gateway sees a room corner that is "alive, with a stable temperature"
+    // at the exact moment its sensor wire has come off.
     g_temp = NAN;
     g_humidity = NAN;
   }

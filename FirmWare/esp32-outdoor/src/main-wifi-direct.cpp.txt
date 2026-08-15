@@ -1,17 +1,19 @@
 // ============================================================================
-//  BreezeLink — ESP32 · node NGOÀI TRỜI (outdoor) · bản DỰ PHÒNG (WiFi + MQTT thẳng)
+//  BreezeLink - ESP32 - OUTDOOR node - FALLBACK build (direct WiFi + MQTT)
 // ----------------------------------------------------------------------------
-//  Đọc DHT rồi đẩy telemetry {t,h,ts,rssi,fw} lên topic
-//  bl/{ORG_ID}/{DEVICE_UUID}/telemetry qua MQTT plaintext 1883 (EMQX tự host).
-//  Node này là "outdoor" -> app/web hiện là "Ngoài trời".
+//  Reads the DHT and pushes telemetry {t,h,ts,rssi,fw} to the topic
+//  bl/{ORG_ID}/{DEVICE_UUID}/telemetry over plaintext MQTT on 1883 (self-hosted
+//  EMQX). This node is "outdoor" -> the app/web show it as "Ngoài trời".
 //
-//  Giống node trong nhà về hợp đồng backend (topic/payload/client-id/LWT).
+//  Identical to the indoor node in its backend contract
+//  (topic/payload/client-id/LWT).
 //
-//  CHẠY THẬT thì dùng bản ESP-NOW (main-espnow-slave.cpp): node ngoài trời gửi
-//  về node trong nhà, không tự lên mạng. Bản này giữ làm ĐƯỜNG LÙI khi ESP-NOW
-//  trục trặc — nó không phụ thuộc node trong nhà nên tách được lỗi rất nhanh:
-//  nếu bản này lên số mà bản ESP-NOW không, lỗi nằm ở khâu ESP-NOW chứ không
-//  phải cảm biến hay backend.
+//  IN PRODUCTION use the ESP-NOW build (main-espnow-slave.cpp): the outdoor node
+//  sends to the indoor node rather than going online itself. This build is kept as
+//  a FALLBACK for when ESP-NOW misbehaves -- it does not depend on the indoor node
+//  so it isolates faults very quickly: if this build produces readings and the
+//  ESP-NOW one does not, the fault is in the ESP-NOW path rather than in the
+//  sensor or the backend.
 //      pio run -e esp32-wifi -t upload
 // ============================================================================
 #include <Arduino.h>
@@ -21,7 +23,7 @@
 #include <DHT.h>
 #include "config.h"
 
-// Broker chạy plaintext 1883 -> WiFiClient thường (không TLS), nhẹ RAM.
+// The broker runs plaintext on 1883 -> a plain WiFiClient (no TLS), light on RAM.
 static WiFiClient   net;
 static PubSubClient mqtt(net);
 static DHT          dht(DHT_PIN, DHT_TYPE);
@@ -57,7 +59,7 @@ static void connectMqtt() {
       mqtt.publish(tStatus.c_str(), "online", true);
       mqtt.subscribe(tCmd.c_str(), 1);
     } else {
-      Serial.printf("that bai rc=%d (thu lai sau 2s)\n", mqtt.state());
+      Serial.printf("failed rc=%d (retrying in 2s)\n", mqtt.state());
       delay(2000);
     }
   }
@@ -66,7 +68,7 @@ static void connectMqtt() {
 void setup() {
   Serial.begin(115200);
   delay(300);
-  Serial.println("\n== BreezeLink · ESP32 · NGOAI TROI (WiFi + MQTT thang) ==");
+  Serial.println("\n== BreezeLink - ESP32 - OUTDOOR (direct WiFi + MQTT) ==");
   dht.begin();
   buildTopics();
   connectWifi();
@@ -87,8 +89,9 @@ void loop() {
   float t = dht.readTemperature();
   float h = dht.readHumidity();
   if (isnan(t) || isnan(h)) {
-    // Chu kỳ lấy mẫu tối thiểu của DHT22 là 2s — chờ 3s để cảm biến hồi.
-    Serial.println("Doc cam bien loi (NaN) — kiem tra day/nguon DHT");
+    // The DHT22's minimum sampling interval is 2s -- wait 3s to let the sensor
+    // recover.
+    Serial.println("Sensor read error (NaN) - check the DHT wiring/supply");
     delay(3000);
     return;
   }
@@ -103,5 +106,5 @@ void loop() {
   char buf[192];
   size_t n = serializeJson(doc, buf);
   bool ok = mqtt.publish(tTelemetry.c_str(), (const uint8_t *)buf, n, false);
-  Serial.printf("[telemetry] t=%.1f h=%.0f -> %s\n", t, h, ok ? "da gui" : "GUI LOI");
+  Serial.printf("[telemetry] t=%.1f h=%.0f -> %s\n", t, h, ok ? "sent" : "SEND ERROR");
 }

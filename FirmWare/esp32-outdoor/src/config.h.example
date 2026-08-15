@@ -1,76 +1,92 @@
 #pragma once
 // ============================================================================
-//  BreezeLink — ESP32 DevKit V1  ·  node NGOÀI TRỜI (outdoor)
-//  BẢN MẪU — copy thành `config.h` rồi điền. (config.h bị gitignore vì chứa
-//  mật khẩu WiFi + token MQTT thật.)
+//  BreezeLink - ESP32 DevKit V1  -  OUTDOOR node
+//  TEMPLATE -- copy to `config.h` and fill it in. (config.h is gitignored because
+//  it holds the real WiFi password + MQTT token.)
 // ============================================================================
-//  Lấy giá trị ở: Web admin -> Khách hàng -> mở node (Ngoài trời) -> "Nạp firmware".
-//  DEVICE_UUID/MQTT_PASSWORD khác node trong nhà; ORG_ID + MQTT_HOST thì giống.
+//  Get the values from: Admin web -> Khách hàng -> open the node (Ngoài trời) ->
+//  "Nạp firmware".
+//  DEVICE_UUID/MQTT_PASSWORD differ from the indoor node; ORG_ID + MQTT_HOST are
+//  the same.
 // ============================================================================
 
 // -------- 1) WiFi --------
-//  Env `esp32-espnow` KHÔNG đăng nhập WiFi — nó chỉ QUÉT để biết router đang
-//  phát ở kênh nào rồi bám theo (ESP-NOW bắt buộc hai bên cùng kênh). Nên với
-//  env đó chỉ WIFI_SSID là có tác dụng, WIFI_PASSWORD để nguyên cũng chạy.
-//  Env `esp32-wifi` (dự phòng) thì cần cả hai.
-#define WIFI_SSID      "TEN_WIFI"
-#define WIFI_PASSWORD  "MAT_KHAU_WIFI"
+//  The `esp32-espnow` env does NOT join WiFi -- it only SCANS to learn which
+//  channel the router is broadcasting on and locks onto it (ESP-NOW requires both
+//  sides on the same channel). So with that env only WIFI_SSID matters, and
+//  WIFI_PASSWORD can be left as-is.
+//  The `esp32-wifi` env (the fallback) needs both.
+#define WIFI_SSID      "WIFI_NAME"
+#define WIFI_PASSWORD  "WIFI_PASSWORD"
 
-// -------- 2) MQTT (EMQX tự host trên VPS — plaintext 1883, KHÔNG TLS) --------
-//  CHỈ env `esp32-wifi` dùng tới. Panel web ghi MQTT_HOST = "emqx" (tên service
-//  nội bộ Docker) — ESP phải dùng IP/domain công khai của server.
-#define MQTT_HOST      "IP_CONG_KHAI_SERVER"
+// -------- 2) MQTT (self-hosted EMQX on the VPS -- plaintext 1883, NO TLS) -----
+//  Only used by the `esp32-wifi` env. The web panel prints MQTT_HOST = "emqx"
+//  (the internal Docker service name) -- the ESP has to use the server's public
+//  IP/domain.
+#define MQTT_HOST      "SERVER_PUBLIC_IP"
 #define MQTT_PORT      1883
-#define MQTT_USERNAME  "DAN_DEVICE_UUID_NGOAI_TROI"
-#define MQTT_PASSWORD  "DAN_MQTT_PASSWORD_NGOAI_TROI"
+#define MQTT_USERNAME  "PASTE_DEVICE_UUID_OUTDOOR"
+#define MQTT_PASSWORD  "PASTE_MQTT_PASSWORD_OUTDOOR"
 
-// -------- 3) Định danh node (khớp hàng devices trên web) --------
-//  DEVICE_UUID dùng cho CẢ HAI env: bản ESP-NOW gửi kèm uuid này trong gói tin
-//  để node trong nhà biết publish vào topic nào mà không cần bảng MAC->uuid.
-#define ORG_ID         "DAN_ORG_ID"
-#define DEVICE_UUID    "DAN_DEVICE_UUID_NGOAI_TROI"
+// -------- 3) Node identity (matches the devices row on the web UI) --------
+//  DEVICE_UUID is used by BOTH envs: the ESP-NOW version includes this uuid in
+//  the packet so the indoor node knows which topic to publish to without any
+//  MAC->uuid table.
+#define ORG_ID         "PASTE_ORG_ID"
+#define DEVICE_UUID    "PASTE_DEVICE_UUID_OUTDOOR"
 #define FW_VERSION     "outdoor-1.0"
 
 // ============================================================================
-//  Phần cứng — cắm cảm biến theo ../README.md
+//  Hardware -- wire the sensor as described in ../README.md
 // ============================================================================
-//  Cảm biến DHT:  VCC -> 3V3 | GND -> GND | DATA -> GPIO4
+//  DHT sensor:  VCC -> 3V3 | GND -> GND | DATA -> GPIO4
 //
-//  NUÔI 3.3V, KHÔNG 5V: chân ESP32-C3 không chịu quá áp, mà DHT22 nuôi 5V sẽ
-//  lái đường dữ liệu lên gần 5V.
+//  POWER IT FROM 3.3V, NOT 5V: the ESP32-C3 pins do not tolerate overvoltage, and
+//  a 5V-powered DHT22 drives the data line up towards 5V.
 //
-//  DHT22 là giao thức MỘT DÂY HAI CHIỀU — bắt buộc có trở kéo 4.7k lên 3.3V
-//  trên đường dữ liệu (module 3 chân đã hàn sẵn; loại 4 chân rời phải tự thêm).
-//  Thiếu trở thì đọc được lúc được lúc không: checksum bắt được nên KHÔNG ra số
-//  sai, chỉ ra NaN xen kẽ — triệu chứng rất giống dây tuột.
+//  The DHT22 uses a BIDIRECTIONAL ONE-WIRE protocol -- a 4.7k pull-up to 3.3V on
+//  the data line is mandatory (3-pin modules have it fitted; a bare 4-pin sensor
+//  needs one added). Without it, reads succeed intermittently: the checksum
+//  catches the bad ones so you get NO wrong numbers, just interleaved NaN -- a
+//  symptom that looks a lot like a loose wire.
 //
-//  CHỌN CHÂN TRÊN ESP32-C3 — những chân PHẢI TRÁNH (khác hẳn bo ESP32 cũ):
-//    GPIO2, GPIO8, GPIO9   strapping. GPIO9 là nút BOOT: DHT22 có trở kéo lên
-//                          sẽ giữ nó CAO và bo mất khả năng vào chế độ nạp.
-//    GPIO18, GPIO19        USB D-/D+. Dùng làm GPIO là mất luôn cổng nạp.
-//    GPIO11..17            nối flash SPI trong module. Đụng vào là bo chết ngay.
-//    GPIO20, GPIO21        UART0. Còn dùng được nhưng mất log serial.
-//  GPIO4 sạch ở cả hai dòng bo, nên đổi bo không phải đổi chân.
+//  CHOOSING PINS ON THE ESP32-C3 -- the pins you MUST AVOID (quite different from
+//  the old ESP32 board):
+//    GPIO2, GPIO8, GPIO9   strapping. GPIO9 is the BOOT button: a DHT22 with its
+//                          pull-up holds it HIGH and the board loses the ability
+//                          to enter programming mode.
+//    GPIO18, GPIO19        USB D-/D+. Using them as GPIO costs you the flashing
+//                          port entirely.
+//    GPIO11..17            wired to the SPI flash inside the module. Touch them
+//                          and the board dies instantly.
+//    GPIO20, GPIO21        UART0. Usable, but you lose the serial log.
+//  GPIO4 is clean on both board families, so the board change needed no pin
+//  change.
 #define DHT_PIN        4
-//  LOẠI CẢM BIẾN — kiểu của DHTesp, KHÔNG phải macro DHT22 của Adafruit.
-//  Thư viện đã đổi cùng lúc với bo (xem platformio.ini), nên khai `DHT22` trần
-//  ở đây là đứt build ở "'DHT22' was not declared in this scope".
+//  SENSOR TYPE -- a DHTesp type, NOT Adafruit's DHT22 macro.
+//  The library changed at the same time as the board (see platformio.ini), so
+//  declaring a bare `DHT22` here breaks the build at "'DHT22' was not declared in
+//  this scope".
 //
-//  ĐẶT ĐÚNG LOẠI: sai vẫn đọc được và checksum vẫn qua, chỉ ra số vô lý —
-//  DHT22 mà khai DHT11 sẽ cho ~1.8°C / ~23%.
+//  SET THE RIGHT TYPE: getting it wrong still reads successfully and still passes
+//  the checksum, it just produces nonsense values -- a DHT22 declared as a DHT11
+//  gives about 1.8 degC / 23%.
 #define DHT_TYPE       DHTesp::DHT22
 
-//  Chu kỳ gửi số liệu (ms). 15s cho dễ theo dõi khi test; 30000 khi chạy thật.
-//  5 GIAY khi chay ESP-NOW, KHONG PHAI 15. Day la NHIP TIM, khong phai nhip ghi
-//  du lieu: gateway da tu chan viec day len cloud o 15s (SlaveWatch::
-//  RELAY_INTERVAL_MS), nen phat day hon KHONG sinh them hang telemetry nao.
+//  Telemetry interval (ms). 15s is convenient while testing; 30000 in production.
+//  5 SECONDS when running ESP-NOW, NOT 15. This is a HEARTBEAT, not a
+//  data-logging cadence: the gateway already throttles the push to the cloud at
+//  15s (SlaveWatch::RELAY_INTERVAL_MS), so broadcasting more often adds NO extra
+//  telemetry rows.
 //
-//  Vi sao phai day: broadcast ESP-NOW khong co ACK nen goi roi la mat han. Do
-//  tren bo that: node phat o giay 8/23/38/53, gateway chi nhan duoc goi giay 23.
-//  Voi nhip 15s va nguong mat ket noi 20s cua SlaveWatch thi chi can ROI MOT GOI
-//  la node bi bao OFFLINE — log gateway nhap nhay ONLINE/OFFLINE lien tuc trong
-//  khi node van phat deu. 5s cho phep roi ba nhip lien tiep ma van duoc coi la
-//  con song.
+//  Why it has to be frequent: ESP-NOW broadcast has no ACK, so a dropped packet
+//  is gone for good. Measured on real hardware: the node transmitted at seconds
+//  8/23/38/53 and the gateway only received the one at second 23. At a 15s
+//  cadence with SlaveWatch's 20s disconnection threshold, LOSING A SINGLE PACKET
+//  marks the node OFFLINE -- the gateway log flickered ONLINE/OFFLINE constantly
+//  while the node was transmitting perfectly steadily. 5s tolerates three
+//  consecutive misses while still counting as alive.
 //
-//  Ban chay WiFi truc tiep thi 15s van dung: TCP co xac nhan, khong roi am tham.
+//  For the direct-WiFi version 15s is still correct: TCP acknowledges, so nothing
+//  is dropped silently.
 #define TELEMETRY_MS   5000UL

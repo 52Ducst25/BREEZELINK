@@ -6,28 +6,33 @@
 #include <esp_idf_version.h>
 
 // ============================================================================
-//  Radio ESP-NOW cho một node SLAVE (không nối WiFi, chỉ bám kênh của router).
+//  ESP-NOW radio for a SLAVE node (does not join WiFi, only locks onto the
+//  router's channel).
 // ----------------------------------------------------------------------------
-//  Dùng chung giữa node NGOÀI TRỜI và 4 node GÓC PHÒNG. Trước đây logic này nằm
-//  hẳn trong main của node ngoài trời; tách ra vì bốn node phòng cần y hệt, và
-//  hai bản sao của một cái bẫy đã trả giá thì lần sửa sau chắc chắn quên một nửa.
+//  Shared between the OUTDOOR node and the 4 ROOM-CORNER nodes. This logic used
+//  to live inside the outdoor node's main; it was extracted because the four room
+//  nodes need exactly the same thing, and with two copies of an already-costly
+//  trap the next fix would certainly miss one of them.
 //
-//  CÁI BẪY LỚN NHẤT CỦA ESP-NOW LÀ LỆCH KÊNH: hai bên bắt buộc cùng kênh WiFi,
-//  mà gateway thì đang bám theo kênh của router. Nên node này KHÔNG cắm cứng
-//  kênh — nó QUÉT tìm SSID của nhà để biết router đang ở kênh nào rồi bám theo.
-//  Router đổi kênh thì lần quét sau tự cập nhật.
+//  ESP-NOW'S BIGGEST TRAP IS A CHANNEL MISMATCH: both sides must be on the same
+//  WiFi channel, and the gateway follows the router's channel. So this node does
+//  NOT hard-code a channel -- it SCANS for the household SSID to learn which
+//  channel the router is on and locks onto that. If the router changes channel,
+//  the next scan picks it up.
 //
-//  Node này KHÔNG đăng nhập WiFi và KHÔNG cần mật khẩu WiFi — nó chỉ *quét* để
-//  đọc số kênh. Đó là lý do config.h của nó không chứa bí mật nào.
+//  This node does NOT join WiFi and does NOT need the WiFi password -- it only
+//  *scans* to read the channel number. That is why its config.h holds no secrets.
 //
-//  Gửi BROADCAST thay vì unicast tới MAC của gateway: lắp đặt không phải đi lấy
-//  MAC gateway rồi nạp vào từng bo — cứ bật là chạy. Một hộ chỉ có một gateway
-//  nên không sợ nhầm địa chỉ.
+//  It sends a BROADCAST rather than unicasting to the gateway's MAC: installation
+//  does not have to fetch the gateway MAC and program it into each board -- power
+//  it on and it works. A household has only one gateway, so there is no risk of
+//  addressing the wrong one.
 // ============================================================================
 namespace EspNowSlaveRadio {
 
-/// Chu kỳ dò lại kênh router (ms). 5 phút: đủ nhanh để bắt kịp router đổi kênh,
-/// đủ thưa để việc quét (làm radio bận ~1s) không ảnh hưởng nhịp gửi.
+/// How often to re-scan for the router's channel (ms). 5 minutes: quick enough to
+/// keep up with a router changing channel, sparse enough that the scan (which
+/// keeps the radio busy for ~1s) does not disturb the send cadence.
 static const unsigned long RESCAN_INTERVAL_MS = 300000UL;
 
 namespace detail {
@@ -37,11 +42,12 @@ inline int     currentChannel = 0;
 inline bool    lastSendOk = false;
 inline unsigned long lastRescanMs = 0;
 
-// Chữ ký callback GỬI đổi ở Arduino-ESP32 core 3.2 (IDF 5.4): tham số đầu từ
-// `const uint8_t *mac` thành `const wifi_tx_info_t *`. Phải dò theo
-// ESP_IDF_VERSION chứ KHÔNG dùng được ESP_ARDUINO_VERSION_MAJOR >= 3 như
-// callback NHẬN bên gateway: hai callback đổi ở hai mốc phiên bản khác nhau
-// (nhận đổi từ core 3.0, gửi mãi core 3.2).
+// The SEND callback signature changed in Arduino-ESP32 core 3.2 (IDF 5.4): the
+// first parameter went from `const uint8_t *mac` to `const wifi_tx_info_t *`. It
+// has to be detected via ESP_IDF_VERSION and NOT via
+// ESP_ARDUINO_VERSION_MAJOR >= 3 like the gateway's RECEIVE callback: the two
+// callbacks changed at two different version boundaries (receive changed in core
+// 3.0, send not until core 3.2).
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 4, 0)
 inline void onSent(const wifi_tx_info_t *, esp_now_send_status_t status) {
   lastSendOk = (status == ESP_NOW_SEND_SUCCESS);
@@ -52,15 +58,18 @@ inline void onSent(const uint8_t *, esp_now_send_status_t status) {
 }
 #endif
 
-// --- Chế độ NGHE NGÓNG (chỉ để truy lỗi) -----------------------------------
-// Bật bằng `-D ESPNOW_SNIFF=1`. MẶC ĐỊNH TẮT: node góc phòng chỉ có việc phát,
-// và một callback nhận chạy suốt ngày chỉ tổ tốn CPU cho việc không ai đọc.
+// --- SNIFF mode (debugging only) -------------------------------------------
+// Enable with `-D ESPNOW_SNIFF=1`. OFF BY DEFAULT: a room-corner node only has to
+// transmit, and a receive callback running all day only burns CPU on something
+// nobody reads.
 //
-// VÌ SAO ĐÁNG CÓ: khi gateway báo "nhận 0 gói" thì có hai khả năng hoàn toàn
-// khác nhau — node không thật sự bức xạ, hay node bức xạ mà gateway không nghe.
-// Callback GỬI của ESP-NOW không phân biệt được: với broadcast nó luôn báo
-// SUCCESS vì không có ACK. Bật cờ này trên MỘT node là nó nghe được ba node anh
-// em (cùng kênh, cùng không đăng nhập WiFi) và câu hỏi được chia đôi ngay.
+// WHY IT IS WORTH HAVING: when the gateway reports "0 packets received" there are
+// two completely different possibilities -- the node is not actually radiating,
+// or the node radiates and the gateway cannot hear it. ESP-NOW's SEND callback
+// cannot tell them apart: for broadcast it always reports SUCCESS because there
+// is no ACK. Turn this flag on for ONE node and it can hear its three siblings
+// (same channel, all equally not joined to WiFi) and the question splits in two
+// immediately.
 #if defined(ESPNOW_SNIFF) && ESPNOW_SNIFF
 inline volatile uint32_t sniffCount = 0;
 inline char sniffLast[40] = "";
@@ -70,9 +79,10 @@ inline void onSniff(const uint8_t *mac, const uint8_t *data, int len) {
   if (mac) {
     snprintf(sniffLast, sizeof(sniffLast), "%02X:%02X:%02X:%02X:%02X:%02X/%dB",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], len);
-    // KHÔNG in ở đây. Callback chạy trong tác vụ WiFi, còn Serial trên bo này là
-    // USB CDC — ghi từ tác vụ khác có thể chặn, và một phép đo tự làm hỏng chính
-    // nó thì tệ hơn không đo. loop() in thay (xem esp32-room/src/main.cpp).
+    // DO NOT print here. The callback runs in the WiFi task, and Serial on this
+    // board is USB CDC -- writing from another task can block, and a measurement
+    // that corrupts itself is worse than no measurement. loop() prints instead
+    // (see esp32-room/src/main.cpp).
     (void)data;
   }
 }
@@ -80,8 +90,8 @@ inline void onSniff(const uint8_t *mac, const uint8_t *data, int len) {
 
 }  // namespace detail
 
-/// Quét các mạng quanh đây để biết router nhà đang phát ở kênh nào.
-/// Trả 0 nếu không thấy SSID (router tắt / ngoài vùng phủ).
+/// Scan the nearby networks to learn which channel the household router is on.
+/// Returns 0 if the SSID is not found (router off / out of range).
 inline int findRouterChannel(const char *ssid) {
   const int n = WiFi.scanNetworks(false /*async*/, true /*show hidden*/);
   for (int i = 0; i < n; i++) {
@@ -95,108 +105,122 @@ inline int findRouterChannel(const char *ssid) {
   return 0;
 }
 
-/// Bám vào kênh [ch] và đăng ký lại peer quảng bá trên kênh đó.
+/// Lock onto channel [ch] and re-register the broadcast peer on that channel.
 inline bool bindToChannel(int ch) {
   if (ch <= 0) return false;
 
-  // WIFI_SECOND_CHAN_NONE: chỉ dùng kênh 20MHz. ESP-NOW không cần kênh phụ, mà
-  // khai kênh phụ lệch với gateway là hỏng việc.
+  // WIFI_SECOND_CHAN_NONE: 20MHz channel only. ESP-NOW does not need a secondary
+  // channel, and declaring one that differs from the gateway's breaks things.
   //
-  // KIỂM GIÁ TRỊ TRẢ VỀ. Bản trước gọi rồi bỏ qua, nên một lần đặt kênh thất bại
-  // là node phát vào kênh khác trong im lặng, mà mọi log vẫn ghi kênh mong muốn.
+  // CHECK THE RETURN VALUE. An earlier version called this and ignored it, so a
+  // single failed channel change left the node silently transmitting on a
+  // different channel while every log line still reported the intended one.
   const esp_err_t chErr = esp_wifi_set_channel((uint8_t)ch, WIFI_SECOND_CHAN_NONE);
   if (chErr != ESP_OK) {
-    Serial.printf("esp_wifi_set_channel(%d) THAT BAI: %s — node se phat sai kenh\n",
+    Serial.printf("esp_wifi_set_channel(%d) FAILED: %s - node will transmit on the wrong channel\n",
                   ch, esp_err_to_name(chErr));
   }
 
-  // Bỏ peer cũ nếu đang ở kênh khác. Peer chưa tồn tại thì hàm trả
-  // ESP_ERR_ESPNOW_NOT_FOUND — vô hại, bỏ qua giá trị trả về.
+  // Remove the old peer if it was on a different channel. If the peer does not
+  // exist the call returns ESP_ERR_ESPNOW_NOT_FOUND -- harmless, ignore it.
   esp_now_del_peer(detail::BROADCAST_MAC);
 
   esp_now_peer_info_t peer = {};
   memcpy(peer.peer_addr, detail::BROADCAST_MAC, 6);
-  // channel = 0 nghĩa là "gửi trên kênh hiện tại của giao diện", KHÔNG phải "kênh
-  // bất kỳ". Radio đã được esp_wifi_set_channel() ở ngay trên đặt vào đúng kênh
-  // cần, nên 0 và ch trỏ tới cùng một kênh — nhưng chỉ 0 mới chạy.
+  // channel = 0 means "send on the interface's current channel", NOT "any
+  // channel". The radio was just put on the required channel by
+  // esp_wifi_set_channel() above, so 0 and ch refer to the same channel -- but
+  // only 0 actually works.
   //
-  // ĐÃ ĐO ĐƯỢC, ĐỪNG ĐỔI LẠI: với channel = ch, node báo ESP_NOW_SEND_SUCCESS cho
-  // mọi gói mà KHÔNG thiết bị nào nghe được — không gateway, không cả một bo cùng
-  // loại đặt cách 20cm. Đổi đúng một số này là gói tới nơi ngay. Lý do: khi peer
-  // khai kênh khác 0, ESP-NOW tự chuyển kênh quanh mỗi lần gửi; trên giao diện
-  // station KHÔNG đăng nhập WiFi, khung bị bắn ra đúng lúc đang chuyển kênh nên
-  // rơi hết — mà callback gửi thì vẫn báo thành công vì broadcast không có ACK.
+  // MEASURED, DO NOT CHANGE THIS BACK: with channel = ch the node reports
+  // ESP_NOW_SEND_SUCCESS for every packet while NO device can hear it -- not the
+  // gateway, not even an identical board sitting 20cm away. Changing just this
+  // one number makes the packets arrive immediately. The reason: when a peer
+  // declares a channel other than 0, ESP-NOW hops channels around every send; on
+  // a station interface NOT joined to WiFi the frame goes out mid-hop and is lost
+  // -- while the send callback still reports success, because broadcast has no
+  // ACK.
   //
-  // Cách phát hiện: cho gateway phát ngược lại (nó khai channel = 0) thì node
-  // nghe được sạch sẽ. Thu tốt mà phát câm là dấu hiệu của chỗ này.
+  // How to spot it: have the gateway transmit back (it declares channel = 0) and
+  // the node hears it perfectly. Good reception with mute transmission is the
+  // signature of this bug.
   peer.channel = 0;
   peer.encrypt = false;
   peer.ifidx   = WIFI_IF_STA;
   if (esp_now_add_peer(&peer) != ESP_OK) {
-    Serial.println("Khong them duoc peer ESP-NOW");
+    Serial.println("Could not add the ESP-NOW peer");
     return false;
   }
   detail::currentChannel = ch;
-  // In cả kênh MONG MUỐN lẫn kênh THẬT: hai số này lệch nhau là đã tìm ra lỗi.
+  // Print BOTH the intended channel and the REAL one: a discrepancy between the
+  // two numbers means you have already found the bug.
   uint8_t primary = 0;
   wifi_second_chan_t second = WIFI_SECOND_CHAN_NONE;
   esp_wifi_get_channel(&primary, &second);
-  Serial.printf("ESP-NOW bam kenh %d · radio dang thuc te o kenh %u (phu=%d)\n",
+  Serial.printf("ESP-NOW locked to channel %d - radio is actually on channel %u (secondary=%d)\n",
                 ch, primary, (int)second);
   return true;
 }
 
-/// Dựng radio ở chế độ station-không-đăng-nhập và bám kênh của [ssid].
-/// Gọi trong setup(). Trả false nếu esp_now_init() hỏng (bên gọi tự quyết định
-/// khởi động lại hay chạy tiếp).
+/// Bring the radio up as a station-without-joining and lock onto [ssid]'s
+/// channel. Call this from setup(). Returns false if esp_now_init() fails (the
+/// caller decides whether to restart or carry on).
 inline bool begin(const char *ssid) {
-  // STA nhưng KHÔNG connect: ESP-NOW cần giao diện station bật, không cần vào mạng.
+  // STA but NOT connected: ESP-NOW needs the station interface up, not membership
+  // of the network.
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
 
-  // Tắt tiết kiệm điện của modem. Mặc định ESP32 cho radio ngủ giữa các beacon,
-  // mà đang ngủ thì gói ESP-NOW gửi đi bị hoãn/rơi — đúng lỗi "chết ngầm" đã
-  // gặp trên gateway (git log: "master điếc ESP-NOW sau vài phút").
+  // Disable modem power saving. By default the ESP32 lets the radio sleep between
+  // beacons, and while asleep an outgoing ESP-NOW frame is delayed or dropped --
+  // exactly the "silent death" bug already seen on the gateway (git log: "master
+  // goes deaf to ESP-NOW after a few minutes").
   WiFi.setSleep(false);
 
-  // ÉP PHY VỀ B/G/N TƯỜNG MINH, ĐỪNG TIN MẶC ĐỊNH.
+  // FORCE THE PHY TO B/G/N EXPLICITLY, DO NOT TRUST THE DEFAULT.
   //
-  // Đã đo được trên bo ESP32-C3: node báo `ESP_NOW_SEND_SUCCESS` cho từng gói,
-  // radio đúng kênh 1, mà KHÔNG một thiết bị nào nghe được — kể cả một bo khác
-  // đặt cách 20cm. Trong khi chiều ngược lại (gateway phát, node này nghe) thì
-  // gần như không mất gói. Thu tốt mà phát không ai hiểu là dấu hiệu của PHY:
-  // nếu giao diện lỡ ở chế độ LR (long-range, độc quyền Espressif) thì khung
-  // phát ra chỉ thiết bị LR mới giải mã được, còn thu khung chuẩn vẫn bình
-  // thường — đúng y triệu chứng.
+  // Measured on an ESP32-C3 board: the node reported `ESP_NOW_SEND_SUCCESS` for
+  // every packet, the radio was on the correct channel 1, and NO device could
+  // hear it -- not even another board 20cm away. Meanwhile the reverse direction
+  // (gateway transmitting, this node listening) barely dropped a packet. Good
+  // reception with transmissions nobody understands is the signature of a PHY
+  // problem: if the interface has ended up in LR mode (long-range, an Espressif
+  // extension) then only LR devices can decode what it sends, while receiving
+  // standard frames still works normally -- exactly the symptom.
   //
-  // Khai tường minh thì không phụ thuộc vào việc mặc định của core/board là gì.
+  // Declaring it explicitly removes any dependence on what the core/board default
+  // happens to be.
   const esp_err_t protoErr =
       esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
   if (protoErr != ESP_OK) {
-    Serial.printf("esp_wifi_set_protocol THAT BAI: %s\n", esp_err_to_name(protoErr));
+    Serial.printf("esp_wifi_set_protocol FAILED: %s\n", esp_err_to_name(protoErr));
   }
 
-  // CÔNG SUẤT PHÁT 8dBm, KHÔNG PHẢI TỐI ĐA — VÀ ĐÂY LÀ THỨ ĐÃ LÀM CẢ HỆ CÂM.
+  // TRANSMIT POWER 8dBm, NOT MAXIMUM -- AND THIS IS WHAT ONCE MUTED THE WHOLE
+  // SYSTEM.
   //
-  // Đơn vị 0.25dBm, nên 32 = 8dBm còn 78 = 19.5dBm (mức tối đa, mặc định của
-  // chip). Ở mức tối đa, bo ESP32-C3 ăn nguồn qua cổng USB phát ra sóng mà KHÔNG
-  // MỘT THIẾT BỊ NÀO giải mã được: gateway nhận 0 gói, một bo C3 khác đặt cách
-  // 20cm cũng nhận 0 gói, trong khi chiều ngược lại (gateway phát, node nghe) thì
-  // sạch sẽ. Hạ xuống 8dBm là gói tới nơi ngay lập tức.
+  // The unit is 0.25dBm, so 32 = 8dBm and 78 = 19.5dBm (the maximum, and the
+  // chip's default). At maximum, a USB-powered ESP32-C3 board transmits something
+  // NO DEVICE can decode: the gateway receives 0 packets, another C3 board 20cm
+  // away also receives 0 packets, while the reverse direction (gateway
+  // transmitting, node listening) is perfectly clean. Dropping to 8dBm makes the
+  // packets arrive immediately.
   //
-  // Vì sao: đỉnh dòng lúc phát ở mức tối đa khoảng 350mA. Cổng USB/hub yếu không
-  // gánh nổi, điện áp sụt ngay giữa lúc phát và tầng khuếch đại ra sóng rác.
-  // KHÔNG CÓ MỘT DÒNG LỖI NÀO ở bất kỳ đâu: callback gửi vẫn báo
-  // ESP_NOW_SEND_SUCCESS, vì broadcast không có ACK nên nó chỉ biết khung đã rời
-  // tầng MAC, không biết cái gì thật sự bay ra ngoài không khí.
+  // Why: the current peak while transmitting at maximum is around 350mA. A weak
+  // USB port or hub cannot supply it, the voltage sags mid-transmission and the
+  // power amplifier emits garbage. THERE IS NOT ONE ERROR LINE anywhere: the send
+  // callback still reports ESP_NOW_SEND_SUCCESS, because broadcast has no ACK so
+  // it only knows the frame left the MAC layer, not what actually went out over
+  // the air.
   //
-  // 8dBm vẫn phủ thừa một căn phòng (ESP-NOW ở mức này đi được vài chục mét
-  // trong nhà), nên đây không phải sự hy sinh — chỉ là bỏ đi phần công suất mà
-  // nguồn không cấp nổi.
+  // 8dBm still covers a room with room to spare (ESP-NOW at this level reaches
+  // tens of metres indoors), so this is not a sacrifice -- it just drops the part
+  // of the power budget the supply cannot deliver anyway.
   //
-  // Nâng lại bằng `-D SLAVE_TX_POWER=n` NẾU node được cấp nguồn tử tế (adapter
-  // riêng, tụ lọc đủ) và cần tầm xa hơn. Nâng xong PHẢI kiểm lại bằng log
-  // `[relay]` trên gateway, đừng tin vào việc node báo gửi thành công.
+  // Raise it again with `-D SLAVE_TX_POWER=n` IF the node has a decent supply (its
+  // own adapter, adequate decoupling) and needs more range. After raising it you
+  // MUST re-verify with the gateway's `[relay]` log; do not trust the node's own
+  // "send succeeded".
 #ifndef SLAVE_TX_POWER
 #define SLAVE_TX_POWER 32
 #endif
@@ -206,20 +230,23 @@ inline bool begin(const char *ssid) {
 
   if (esp_now_init() != ESP_OK) return false;
   esp_now_register_send_cb(detail::onSent);
-  Serial.printf("ESP-NOW: cong suat phat %.1f dBm\n", txPower * 0.25f);
+  Serial.printf("ESP-NOW: transmit power %.1f dBm\n", txPower * 0.25f);
 #if defined(ESPNOW_SNIFF) && ESPNOW_SNIFF
   esp_now_register_recv_cb(detail::onSniff);
-  Serial.println("ESP-NOW: che do NGHE NGONG bat — se dem goi cua node khac");
+  Serial.println("ESP-NOW: SNIFF mode on - will count other nodes' packets");
 #endif
 
-  // Quét vài lần: lần quét đầu ngay sau khi bật radio hay trượt, mà bám sai kênh
-  // thì gói bay vào khoảng không và KHÔNG có cách nào biết (broadcast không ACK).
-  // Đường tắt để TRUY LỖI: `-D SLAVE_FIXED_CHANNEL=n` bỏ hẳn phần quét và bám
-  // thẳng kênh n. Quét là thứ duy nhất node này làm mà gateway không làm, nên khi
-  // nghi ngờ chính việc quét làm hỏng đường phát thì đây là cách loại nó ra.
-  // KHÔNG dùng khi chạy thật: router đổi kênh là node câm mà không ai biết.
+  // Scan a few times: the very first scan after bringing the radio up often
+  // misses, and locking onto the wrong channel sends the packets into the void
+  // with NO way of knowing (broadcast has no ACK).
+  // DEBUGGING shortcut: `-D SLAVE_FIXED_CHANNEL=n` skips scanning entirely and
+  // locks straight onto channel n. Scanning is the one thing this node does that
+  // the gateway does not, so when you suspect the scan itself is breaking
+  // transmission, this is how you rule it out.
+  // NOT for production use: if the router changes channel the node goes mute and
+  // nobody finds out.
 #if defined(SLAVE_FIXED_CHANNEL) && SLAVE_FIXED_CHANNEL > 0
-  Serial.printf("BO QUA QUET (SLAVE_FIXED_CHANNEL=%d) — chi dung khi truy loi\n",
+  Serial.printf("SKIPPING SCAN (SLAVE_FIXED_CHANNEL=%d) - debugging use only\n",
                 SLAVE_FIXED_CHANNEL);
   bindToChannel(SLAVE_FIXED_CHANNEL);
   detail::lastRescanMs = millis();
@@ -230,10 +257,10 @@ inline bool begin(const char *ssid) {
   for (uint8_t attempt = 1; attempt <= 3 && ch == 0; attempt++) {
     delay(300);
     ch = findRouterChannel(ssid);
-    if (ch == 0) Serial.printf("Lan quet %u: chua thay \"%s\"\n", attempt, ssid);
+    if (ch == 0) Serial.printf("Scan %u: \"%s\" not found yet\n", attempt, ssid);
   }
   if (ch == 0) {
-    Serial.printf("Khong thay SSID \"%s\" — tam kenh 1, se do lai moi %lus\n",
+    Serial.printf("SSID \"%s\" not found - using channel 1 for now, rescanning every %lus\n",
                   ssid, RESCAN_INTERVAL_MS / 1000);
     ch = 1;
   }
@@ -242,45 +269,49 @@ inline bool begin(const char *ssid) {
   return true;
 }
 
-/// Gọi mỗi vòng loop(): dò lại kênh ĐỊNH KỲ.
+/// Call every loop(): re-scan for the channel PERIODICALLY.
 ///
-/// Định kỳ chứ không dựa vào lỗi gửi: gói broadcast không có ACK nên callback
-/// luôn báo thành công kể cả khi bắn sai kênh, chẳng ai phát hiện ra.
+/// Periodically rather than on a send failure: broadcast packets have no ACK, so
+/// the callback always reports success even when transmitting on the wrong
+/// channel, and nobody would ever notice.
 ///
-/// VÀ PHẢI BÁM LẠI KÊNH SAU MỖI LẦN QUÉT, kể cả khi kênh không đổi:
-/// scanNetworks() nhảy qua tất cả các kênh và bỏ radio lại ở kênh cuối cùng nó
-/// dừng, KHÔNG tự trả về kênh cũ. Trước đây chỉ bám lại khi kênh đổi, nên sau
-/// mỗi lần quét radio bị lạc kênh và mọi gói gửi đi đều rơi vào hư không — mà
-/// broadcast không có ACK nên không hề báo lỗi, node cứ thế "chết ngầm".
+/// AND THE CHANNEL MUST BE RE-BOUND AFTER EVERY SCAN, even when it has not
+/// changed: scanNetworks() hops across every channel and leaves the radio on
+/// whichever one it stopped on -- it does NOT restore the previous channel. An
+/// earlier version only re-bound when the channel changed, so after every scan the
+/// radio was on the wrong channel and every outgoing packet fell into the void --
+/// and since broadcast has no ACK nothing reported an error, the node just "died
+/// silently".
 inline void tickRescan(const char *ssid) {
   const unsigned long now = millis();
   if (now - detail::lastRescanMs < RESCAN_INTERVAL_MS) return;
   detail::lastRescanMs = now;
 
   int ch = findRouterChannel(ssid);
-  if (ch <= 0) ch = detail::currentChannel;   // quét trượt -> giữ nguyên kênh đang dùng
+  if (ch <= 0) ch = detail::currentChannel;   // scan missed -> keep the current channel
   bindToChannel(ch);
 }
 
-/// Bắn một gói quảng bá và chờ callback báo kết quả.
+/// Broadcast one packet and wait for the callback to report the result.
 ///
-/// LƯU Ý: với broadcast, true chỉ nghĩa là RADIO ĐÃ PHÁT ĐI — không có ACK nên
-/// không thể biết gateway có nhận được hay không. Muốn biết chắc thì xem log
-/// gateway, hoặc xem web/app có số của node này không.
+/// NOTE: for a broadcast, true only means THE RADIO TRANSMITTED IT -- there is no
+/// ACK, so there is no way to know whether the gateway received it. To be sure,
+/// check the gateway log, or check whether the web/app shows this node's numbers.
 inline bool broadcast(const void *payload, size_t len) {
   detail::lastSendOk = false;
   esp_now_send(detail::BROADCAST_MAC, (const uint8_t *)payload, len);
-  delay(60);   // chờ callback
+  delay(60);   // wait for the callback
   return detail::lastSendOk;
 }
 
-/// Kênh THẬT của radio, đọc từ phần cứng.
+/// The radio's REAL channel, read back from the hardware.
 ///
-/// TRƯỚC ĐÂY HÀM NÀY TRẢ VỀ BIẾN ĐÃ LƯU, và đó là một lời nói dối nguy hiểm:
-/// bindToChannel() bỏ qua giá trị trả về của esp_wifi_set_channel(), nên khi lệnh
-/// đó trượt thì biến vẫn ghi "kênh 1" còn radio nằm ở kênh khác. Log in ra "kenh=1"
-/// đầy tự tin ở CẢ HAI node trong khi chúng không hề nghe được nhau — đúng kiểu
-/// làm người đọc loại trừ nhầm nguyên nhân đúng.
+/// THIS FUNCTION USED TO RETURN THE STORED VARIABLE, and that was a dangerous
+/// lie: bindToChannel() ignored esp_wifi_set_channel()'s return value, so when
+/// that call failed the variable still said "channel 1" while the radio sat
+/// somewhere else. The log confidently printed "channel=1" on BOTH nodes while
+/// they could not hear each other at all -- exactly the kind of thing that makes
+/// a reader rule out the correct cause.
 inline int channel() {
   uint8_t primary = 0;
   wifi_second_chan_t second = WIFI_SECOND_CHAN_NONE;
@@ -288,10 +319,12 @@ inline int channel() {
   return detail::currentChannel;
 }
 
-/// Kênh mà firmware ĐỊNH bám (để so với channel() ở trên khi truy lỗi).
+/// The channel the firmware INTENDED to lock onto (to compare against channel()
+/// above while debugging).
 inline int intendedChannel() { return detail::currentChannel; }
 
-/// Số gói ESP-NOW node này NGHE ĐƯỢC từ thiết bị khác (0 khi chưa bật ESPNOW_SNIFF).
+/// How many ESP-NOW packets this node HEARD from other devices (0 unless
+/// ESPNOW_SNIFF is enabled).
 inline uint32_t sniffed() {
 #if defined(ESPNOW_SNIFF) && ESPNOW_SNIFF
   return detail::sniffCount;
@@ -300,7 +333,8 @@ inline uint32_t sniffed() {
 #endif
 }
 
-/// Mô tả gói nghe được gần nhất ("MAC/độ dài"), rỗng nếu chưa nghe thấy gì.
+/// Description of the most recently heard packet ("MAC/length"), empty if nothing
+/// has been heard.
 inline const char *sniffedLast() {
 #if defined(ESPNOW_SNIFF) && ESPNOW_SNIFF
   return detail::sniffLast;
