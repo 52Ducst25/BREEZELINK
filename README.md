@@ -605,6 +605,3 @@ Thuật toán comfort trong `src/app/comfort/` là bản cài đặt **từ mô 
 (de Dear & Brager, ASHRAE RP-884) — hằng số hồi quy `0.31` / `17.8` là khoa học công
 khai, không phải nội dung sao chép từ bản tiêu chuẩn.
 
----
-
-<sub>Sinh ra và duy trì với sự hỗ trợ của Claude Code.</sub>

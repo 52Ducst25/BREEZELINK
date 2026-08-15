@@ -76,9 +76,7 @@ __pycache__
 prompt.md
 ck.md
 
-# Gemini CLI settings (symlink to .claude/.mcp.json)
 .gemini/settings.json
-.claude/settings.bak.json
 # python build artifacts
 *.egg-info/
 
@@ -94,11 +92,6 @@ ck.md
 # ============================================================================
 #  DON CHO REPO PUBLIC (15/08/2026)
 # ============================================================================
-# Cau hinh cong cu AI — khong phai san pham. Chiem 84% so file cua repo (2018
-# file, phan lon la skills vendored tu noi khac).
-.claude/
-.opencode/
-.vscode/
 
 # Tai lieu BEN THU BA — khong duoc phat hanh lai cong khai:
 #   ASHRAE 55  : tieu chuan co ban quyen, ASHRAE ban no
@@ -111,7 +104,7 @@ Research/
 # trong du an tham chieu toi no.
 FirmWare/Interface/ESP32-P4-Smart-86-Box-Smarthome-Panel-main/
 
-# File le, khong ai tham chieu
+# File le trong FirmWare/ — anh du an thuoc ve docs/images/
 FirmWare/*.png
 FirmWare/Kich_ban_video_*.md
 FirmWare/*.bat
@@ -119,3 +112,6 @@ FirmWare/*.bat
 # Dia chi may chu trien khai — khong ghi cung trong file duoc commit.
 # Ban mau: scripts/deploy.env.example
 scripts/deploy.env
+
+# Cau hinh IDE cuc bo tung may
+.vscode/
