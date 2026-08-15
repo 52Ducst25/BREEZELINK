@@ -5,19 +5,21 @@
 
 namespace EspNowRelay {
 
-// Hàng đợi vòng: callback (tác vụ WiFi) ghi vào head, loop() đọc ra ở tail.
-// Một người ghi + một người đọc nên không cần khoá.
+// Ring buffer: the callback (WiFi task) writes at head, loop() reads at tail.
+// One writer + one reader, so no lock is needed.
 //
-// 32 CHỖ, KHÔNG PHẢI 8. Con số 8 cũ dựa trên "mỗi slave gửi 15s/lần" — nhưng đó
-// là nhịp ĐẨY LÊN CLOUD (SlaveWatch::RELAY_INTERVAL_MS), không phải nhịp phát
-// của node. Node góc phòng bắn mỗi 5 giây và có bốn cái, cộng node ngoài trời:
-// xấp xỉ 1 gói/giây. Tám chỗ đầy sau 8 giây.
+// 32 SLOTS, NOT 8. The old figure of 8 was based on "each slave sends every 15s" --
+// but that is the PUSH-TO-CLOUD cadence (SlaveWatch::RELAY_INTERVAL_MS), not a
+// node's transmit cadence. A room-corner node broadcasts every 5 seconds and there
+// are four of them, plus the outdoor node: roughly 1 packet/second. Eight slots
+// fill up in 8 seconds.
 //
-// Mà loop() thì CÓ LÚC không rút hàng được đúng ngần ấy: mọi lời gọi mqtt.* đều
-// chặn, và trên một socket nửa chết (WiFi còn associated nhưng đường đã đứt) một
-// lần publish có thể mất vài giây. Timeout đã được ghì trong setup() nên quãng
-// chặn ngắn hơn trước nhiều, nhưng không thể về 0 — nên hàng đợi phải chịu được
-// nó. 32 chỗ ≈ nửa phút dữ liệu, tốn thêm ~1,2 KB RAM.
+// And loop() SOMETIMES cannot drain the queue that fast: every mqtt.* call blocks,
+// and on a half-dead socket (WiFi still associated but the link is gone) a single
+// publish can take several seconds. The timeout has been clamped in setup() so the
+// blocking window is far shorter than it used to be, but it cannot be zero -- so
+// the queue has to absorb it. 32 slots is about half a minute of data, at a cost of
+// ~1.2 KB of RAM.
 static const uint8_t QUEUE_SIZE = 32;
 
 struct Slot {
@@ -30,29 +32,32 @@ static volatile uint8_t head = 0, tail = 0;
 static volatile uint32_t nRecv = 0, nDrop = 0;
 
 static void enqueue(const uint8_t *mac, const uint8_t *data, int len) {
-  // Bỏ ngay gói không đúng khuôn: trên cùng một kênh có thể có ESP-NOW của hệ
-  // khác, đọc bừa sẽ ra số rác rồi đẩy thẳng lên cloud.
+  // Drop malformed packets immediately: another system's ESP-NOW traffic can be on
+  // the same channel, and parsing it blindly would produce garbage numbers that go
+  // straight up to the cloud.
   //
-  // acEspNowParse() nhận CẢ v1 (43 byte) lẫn v2 (45 byte) — node ngoài trời đã
-  // lắp ngoài thực địa vẫn chạy v1 và firmware nó không có OTA, nên gateway phải
-  // hiểu được nó. Gói v1 được điền node_kind = OUTDOOR; xem espnow-message.h.
+  // acEspNowParse() accepts BOTH v1 (43 bytes) and v2 (45 bytes) -- the outdoor
+  // node already installed in the field still runs v1 and its firmware has no OTA,
+  // so the gateway has to understand it. A v1 packet is filled in with
+  // node_kind = OUTDOOR; see espnow-message.h.
   AcEspNowPacket parsed;
   if (!acEspNowParse(data, len, &parsed)) {
-    // KÊU LÊN, ĐỪNG IM. Bản trước `return` thẳng, nên gói sai khuôn không vào bất
-    // kỳ bộ đếm nào — và "nhan 0, rot 0" trông y hệt ca KHÔNG CÓ GÓI NÀO TỚI.
-    // Hai ca đó cần đi tìm ở hai chỗ hoàn toàn khác nhau: một bên là sóng/kênh,
-    // bên kia là khuôn gói lệch giữa hai firmware. Đã mất thời gian vì đúng chỗ
-    // này một lần.
+    // SPEAK UP, DO NOT STAY SILENT. An earlier version just `return`ed, so a
+    // malformed packet went into no counter at all -- and "received 0, dropped 0"
+    // looks exactly like the case where NO PACKET ARRIVED AT ALL. Those two cases
+    // need investigating in completely different places: one is radio/channel, the
+    // other is a packet layout mismatch between two firmwares. Time has already
+    // been lost on exactly this once.
     //
-    // In thưa dần: 3 gói đầu rồi mỗi 50 gói, để một node hàng xóm phát ESP-NOW
-    // liên tục không nhấn chìm log.
+    // Print with decreasing frequency: the first 3 packets, then every 50th, so a
+    // neighbouring node broadcasting ESP-NOW continuously does not drown the log.
     static uint32_t nBad = 0;
     if (++nBad <= 3 || nBad % 50 == 0) {
-      Serial.printf("[espnow] bo goi LA: %d byte", len);
-      if (mac) Serial.printf(" tu %02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2],
+      Serial.printf("[espnow] dropped FOREIGN packet: %d bytes", len);
+      if (mac) Serial.printf(" from %02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2],
                              mac[3], mac[4], mac[5]);
-      if (len >= 2) Serial.printf(" · magic=0x%02X version=%u", data[0], data[1]);
-      Serial.printf(" (mong doi %u hoac %u byte, magic=0x%02X)\n",
+      if (len >= 2) Serial.printf(" - magic=0x%02X version=%u", data[0], data[1]);
+      Serial.printf(" (expected %u or %u bytes, magic=0x%02X)\n",
                     (unsigned)AC_ESPNOW_V1_SIZE, (unsigned)sizeof(AcEspNowPacket),
                     AC_ESPNOW_MAGIC);
     }
@@ -60,7 +65,7 @@ static void enqueue(const uint8_t *mac, const uint8_t *data, int len) {
   }
 
   uint8_t next = (uint8_t)((head + 1) % QUEUE_SIZE);
-  if (next == tail) {           // đầy — thà bỏ gói mới còn hơn ghi đè gói chưa gửi
+  if (next == tail) {           // full -- better to drop the new packet than overwrite an unsent one
     nDrop++;
     return;
   }
@@ -71,8 +76,8 @@ static void enqueue(const uint8_t *mac, const uint8_t *data, int len) {
   nRecv++;
 }
 
-// Chữ ký callback đổi giữa Arduino-ESP32 core 2.x và 3.x — giữ cả hai để nâng
-// cấp core không làm vỡ build.
+// The callback signature changed between Arduino-ESP32 core 2.x and 3.x -- keep
+// both so a core upgrade does not break the build.
 #if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
 static void onRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
   enqueue(info ? info->src_addr : nullptr, data, len);
@@ -85,9 +90,9 @@ static void onRecv(const uint8_t *mac, const uint8_t *data, int len) {
 
 bool begin() {
   if (esp_now_init() != ESP_OK) return false;
-  // ĐÃ THỬ VÀ KHÔNG PHẢI: khai thêm peer quảng bá ở phía nhận không làm callback
-  // chạy. Nhận broadcast đúng là không cần peer — ghi lại ở đây để lần sau khỏi
-  // thử lại cùng một thứ.
+  // TRIED AND IT IS NOT THE ANSWER: registering a broadcast peer on the receiving
+  // side does not make the callback fire. Receiving broadcasts genuinely does not
+  // need a peer -- recorded here so nobody tries the same thing again.
   return esp_now_register_recv_cb(onRecv) == ESP_OK;
 }
 
@@ -95,7 +100,7 @@ void poll(Handler handler) {
   while (tail != head) {
     Slot s = queue[tail];
     tail = (uint8_t)((tail + 1) % QUEUE_SIZE);
-    s.pkt.device_uuid[sizeof(s.pkt.device_uuid) - 1] = '\0';  // phòng gói thiếu '\0'
+    s.pkt.device_uuid[sizeof(s.pkt.device_uuid) - 1] = '\0';  // guard against a packet missing its '\0'
     handler(s.pkt, s.mac);
   }
 }

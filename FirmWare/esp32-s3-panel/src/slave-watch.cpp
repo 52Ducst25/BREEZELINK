@@ -6,11 +6,11 @@ namespace SlaveWatch {
 struct Entry {
   char     uuid[33];
   uint32_t lastHeardMs;
-  uint32_t lastRelayMs;   // lần cuối đẩy số đo của slave này lên cloud
-  uint32_t lastStatusMs;  // lần cuối khẳng định trạng thái online
+  uint32_t lastRelayMs;   // last time this slave's readings were pushed to the cloud
+  uint32_t lastStatusMs;  // last time its online status was re-asserted
   bool     used;
   bool     online;
-  bool     everRelayed;   // để gói ĐẦU TIÊN được đẩy ngay, không phải chờ 15s
+  bool     everRelayed;   // so the FIRST packet is pushed at once instead of waiting 15s
 };
 
 static Entry table[MAX_SLAVES];
@@ -28,7 +28,7 @@ static Entry *claimFreeSlot() {
   for (uint8_t i = 0; i < MAX_SLAVES; i++) {
     if (!table[i].used) return &table[i];
   }
-  return nullptr;   // bảng đầy: slave thứ 9 trở đi không được theo dõi trạng thái
+  return nullptr;   // table full: a 9th slave onwards gets no status tracking
 }
 
 void heard(const char *deviceUuid, StatusChanged cb) {
@@ -41,7 +41,7 @@ void heard(const char *deviceUuid, StatusChanged cb) {
     memset(e, 0, sizeof(*e));
     strncpy(e->uuid, deviceUuid, sizeof(e->uuid) - 1);
     e->used   = true;
-    e->online = false;      // để nhánh dưới báo "vừa lên online"
+    e->online = false;      // so the branch below reports "just came online"
   }
 
   e->lastHeardMs = millis();
@@ -56,8 +56,8 @@ bool dueForRelay(const char *deviceUuid) {
   if (e == nullptr) return false;
 
   uint32_t now = millis();
-  // Gói đầu tiên sau khi master khởi động đẩy ngay: chờ 15s nữa mới có số đầu
-  // tiên khiến người lắp tưởng hệ thống không chạy.
+  // Push the first packet after the master boots immediately: waiting another 15s
+  // for the first reading makes the installer think the system is not running.
   if (!e->everRelayed || now - e->lastRelayMs >= RELAY_INTERVAL_MS) {
     e->everRelayed = true;
     e->lastRelayMs = now;
@@ -83,7 +83,7 @@ void checkTimeouts(StatusChanged cb) {
   for (uint8_t i = 0; i < MAX_SLAVES; i++) {
     Entry *e = &table[i];
     if (!e->used || !e->online) continue;
-    // Trừ số học không dấu nên vẫn đúng khi millis() tràn (~49 ngày).
+    // Unsigned arithmetic, so this stays correct across a millis() wrap (~49 days).
     if (now - e->lastHeardMs >= SLAVE_TIMEOUT_MS) {
       e->online = false;
       if (cb) cb(e->uuid, false);

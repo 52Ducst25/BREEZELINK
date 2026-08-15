@@ -1,140 +1,164 @@
 #pragma once
 // ============================================================================
-//  BreezeLink — SƠ ĐỒ CHÂN THEO BO. Chọn bằng cờ -D trong platformio.ini.
+//  BreezeLink - PER-BOARD PINOUT. Selected with a -D flag in platformio.ini.
 // ----------------------------------------------------------------------------
-//  VÌ SAO TÁCH KHỎI config.h: config.h chứa BÍ MẬT (mật khẩu WiFi, token MQTT)
-//  và ĐỊNH DANH (device_uuid) — những thứ gắn với MỘT HỘ, không phải một bo.
-//  Hai bo panel khác nhau chạy cùng một hàng `devices` trên web nên phải dùng
-//  CHUNG config.h, nhưng chân thì khác hoàn toàn. Để lẫn hai loại vào một file
-//  thì mỗi lần đổi bo là phải sửa file đang chứa mật khẩu — và file đó bị
-//  gitignore, tức là sửa sai không ai review được và git không cứu lại được.
+//  WHY THIS IS SEPARATE FROM config.h: config.h holds SECRETS (WiFi password,
+//  MQTT token) and IDENTITY (device_uuid) -- things tied to ONE HOUSEHOLD, not to
+//  a board. Two different panel boards run against the same `devices` row on the
+//  web UI, so they must SHARE a config.h, while their pins are completely
+//  different. Mixing the two kinds into one file means that every board change
+//  requires editing the file containing the passwords -- and that file is
+//  gitignored, so a bad edit cannot be reviewed and git cannot recover it.
 //
-//  THÊM MỘT BO MỚI: thêm một nhánh #elif ở dưới, KHÔNG sửa config.h.
+//  ADDING A NEW BOARD: add an #elif branch below, do NOT touch config.h.
 //
-//  CHÂN IR KHÔNG NẰM Ở ĐÂY. `IR_TX_PIN`/`IR_RX_PIN` phải ở build_flags cùng chỗ
-//  với cờ TFT_*, vì cả hai nhóm được đọc lúc biên dịch THƯ VIỆN chứ không chỉ
-//  lúc biên dịch src/.
+//  THE IR PINS ARE NOT HERE. `IR_TX_PIN`/`IR_RX_PIN` have to live in build_flags
+//  alongside the TFT_* flags, because both groups are read while compiling the
+//  LIBRARIES, not only while compiling src/.
 // ============================================================================
 
-/// Không có phần cứng đó trên bo. 255 chứ không phải -1: mọi API chân trong dự
-/// án nhận uint8_t, nên -1 lặng lẽ thành 255 ở chỗ này mà thành 0xFF ở chỗ kia.
+/// That hardware is not present on this board. 255 rather than -1: every pin API
+/// in this project takes a uint8_t, so -1 silently becomes 255 in one place and
+/// 0xFF in another.
 #define PIN_NONE 255
 
 #if defined(BOARD_S3_PANEL)
 // ============================================================================
-//  Bo panel 2.8" ESP32-S3  (màn ILI9341V + cảm ứng FT6336G + mic/loa I2S + thẻ SD)
+//  2.8" ESP32-S3 panel board  (ILI9341V display + FT6336G touch + I2S mic/speaker
+//  + SD card)
 // ----------------------------------------------------------------------------
-//  THAY CHO QR Box Advance. Bo QR Box hỏng mạch nạp (esptool dò được chip nhưng
-//  mọi lần ghi đều đứt giữa chừng), và bo này có sẵn cảm ứng điện dung + màn
-//  cùng cỡ 2.8" 240x320 nên giao diện LVGL bê nguyên sang được.
+//  REPLACES the QR Box Advance. The QR Box board has a broken programming circuit
+//  (esptool detects the chip but every write aborts partway), and this board comes
+//  with capacitive touch and a display of the same 2.8" 240x320 size, so the LVGL
+//  interface ports across unchanged.
 //
-//  ĐIỀU PHẢI BIẾT TRƯỚC KHI HÀN: bo gần như kín chân. Mọi chân đã có chủ trừ:
-//    IO2, IO3, IO14, IO21   — hàng "Expand pin" trong tài liệu bo
-//    IO43, IO44             — UART0, CHỈ rảnh vì console đi qua USB gốc
-//  Đã có chủ: màn (10/11/12/13/45/46), cảm ứng (15/16/17/18), thẻ SD
-//  (38/39/40/41/47/48), âm thanh I2S (1/4/5/6/7/8), đèn RGB (42), đo pin (9),
-//  nút BOOT (0).
+//  WHAT TO KNOW BEFORE SOLDERING: the board is nearly out of pins. Everything is
+//  spoken for except:
+//    IO2, IO3, IO14, IO21   -- the "Expand pin" row in the board documentation
+//    IO43, IO44             -- UART0, free ONLY because the console goes over
+//                              native USB
+//  Already spoken for: display (10/11/12/13/45/46), touch (15/16/17/18), SD card
+//  (38/39/40/41/47/48), I2S audio (1/4/5/6/7/8), RGB LED (42), battery monitor
+//  (9), BOOT button (0).
 //
-//  Chia như sau:
-//    IO2  IR phát        IO43/44  UART sang UNO Q (xem platformio.ini: chiều
-//    IO3  IR thu                  KHÔNG được đảo, và điều kiện USB gốc)
-//    IO14 IO21  ĐỂ TRỐNG cho PZEM giai đoạn sau — Modbus-RTU qua UART, 2 chân.
+//  Allocated as follows:
+//    IO2  IR transmit    IO43/44  UART to the UNO Q (see platformio.ini: the
+//    IO3  IR receive              direction must NOT be swapped, and the native
+//                                 USB precondition)
+//    IO14 IO21  RESERVED for the PZEM in a later phase -- Modbus-RTU over UART,
+//               2 pins.
 //
-//  Nên VẪN KHÔNG CÒN CHÂN CHO CÒI (xem BUZZER_PIN).
+//  So there is STILL NO PIN LEFT FOR A BUZZER (see BUZZER_PIN).
 // ============================================================================
 
-//  Bus I2C: chỉ có chip cảm ứng FT6336G (0x38). KHÔNG có DS1307, KHÔNG có SHT3x.
-//  Vì bus này giờ chỉ còn một chip chịu được 400kHz, trần 100kHz trong touch.cpp
-//  là thừa — nhưng cứ để, nó không làm chậm gì thấy được (đọc 5 byte mỗi 5ms).
+//  I2C bus: only the FT6336G touch controller (0x38). NO DS1307, NO SHT3x.
+//  Since this bus now has just one chip and that chip tolerates 400kHz, the 100kHz
+//  ceiling in touch.cpp is redundant -- but leave it, it costs nothing measurable
+//  (5 bytes read every 5ms).
 #define I2C_SDA_PIN        16
 #define I2C_SCL_PIN        15
 #define TOUCH_RST_PIN      18
 #define TOUCH_INT_PIN      17
 
-//  Đèn nền: mức CAO = sáng, PWM được.
+//  Backlight: HIGH = lit, PWM-capable.
 //
-//  IO45 LÀ CHÂN STRAPPING (VDD_SPI) — PHẢI THẤP LÚC RESET, nếu cao thì chip chọn
-//  mức 1.8V cho flash và bo KHÔNG BOOT. An toàn ở đây vì LEDC chỉ gắn vào chân
-//  sau khi đã boot xong. NHƯNG: TUYỆT ĐỐI KHÔNG HÀN TRỞ KÉO LÊN vào chân này,
-//  và đừng để firmware nào kéo nó cao rồi reset mềm.
+//  IO45 IS A STRAPPING PIN (VDD_SPI) -- IT MUST BE LOW AT RESET; if it is high the
+//  chip selects the 1.8V flash level and the board WILL NOT BOOT. It is safe here
+//  because LEDC only attaches to the pin after boot completes. BUT: NEVER SOLDER A
+//  PULL-UP onto this pin, and do not let any firmware drive it high and then do a
+//  soft reset.
 #define LCD_BACKLIGHT_PIN  45
 
-//  KHÔNG CÓ CÒI TRÊN BO NÀY.
+//  NO BUZZER ON THIS BOARD.
 //
-//  Không phải quên: bốn chân tự do đã dùng hết cho IR + UART UNO Q (xem đầu
-//  khối), và còi là thứ đáng hy sinh nhất trong số đó — nó chỉ báo "đã nhận
-//  chạm", mà màn hình cũng làm được việc đó bằng toast.
+//  Not an oversight: the four free pins all went to IR + the UNO Q UART (see the
+//  top of this block), and the buzzer is the most expendable of the lot -- all it
+//  signals is "touch registered", which the screen can do with a toast.
 //
-//  Bo CÓ loa qua I2S (IO1/4/5/6/7/8) nên tiếng bíp vẫn khả thi sau này, chỉ là
-//  phải phát mẫu PCM qua I2S chứ không PWM một chân — việc riêng, không gộp vào
-//  lần chuyển bo này.
+//  The board DOES have a speaker over I2S (IO1/4/5/6/7/8) so a beep is still
+//  feasible later, it just has to play a PCM sample over I2S rather than PWM on a
+//  pin -- separate work, not bundled into this board migration.
 #define BUZZER_PIN         PIN_NONE
 
-//  KHÔNG CÓ TXS0104 (bộ dịch mức). Bo này 3.3V thẳng ra header, không có IC đệm
-//  nào — nên đường UART sang UNO Q KHÔNG phụ thuộc chân cho phép nào cả. Đây là
-//  ĐIỀU TỐT: cái bẫy lớn nhất của bo QR Box (quên kéo OE lên là UART câm hoàn
-//  toàn mà không có lỗi nào) biến mất.
+//  NO TXS0104 (level shifter). This board brings 3.3V straight out to the header
+//  with no buffer IC at all -- so the UART link to the UNO Q depends on no enable
+//  pin whatsoever. This is a GOOD THING: the QR Box board's biggest trap
+//  (forgetting to raise OE leaves the UART completely mute with no error at all)
+//  disappears.
 #define EN_LEVEL_SHIFT_PIN PIN_NONE
 
-//  KHÔNG CÓ DS1307. Đồng hồ lấy từ NTP vào đồng hồ hệ thống của chip.
-//  Hệ quả PHẢI BIẾT: mất điện là mất giờ (không có pin nuôi), nên sau mỗi lần
-//  khởi động thanh trạng thái hiện "--:--" cho tới khi có mạng và SNTP trả lời —
-//  thường vài giây. Đó là hành vi đúng, không phải lỗi.
+//  NO DS1307. The clock comes from NTP into the chip's system clock.
+//  A CONSEQUENCE YOU MUST KNOW: a power cut loses the time (there is no backup
+//  battery), so after every boot the status bar shows "--:--" until the network is
+//  up and SNTP answers -- usually a few seconds. That is correct behaviour, not a
+//  bug.
 #define HAS_RTC_DS1307     0
 
-//  1 hoặc 3 = nằm ngang 320x240 (panel gốc 240x320 dọc, xoay bằng phần mềm).
-//  CHƯA ĐO TRÊN BO THẬT — nếu hình đúng nhưng lộn ngược 180 độ thì đổi sang 3.
+//  1 or 3 = landscape 320x240 (the native panel is 240x320 portrait, rotated in
+//  software).
+//  NOT YET MEASURED ON REAL HARDWARE -- if the image is correct but upside down by
+//  180 degrees, change it to 3.
 #define TFT_ROTATION       1
 
-//  Xoay/lật toạ độ cảm ứng về hệ của TFT.
-//  CHƯA ĐO TRÊN BO THẬT. Cách chỉnh: chạm góc TRÊN-TRÁI của màn rồi xem log.
-//    - chạm trái/phải mà con trỏ chạy lên/xuống  -> đổi TOUCH_SWAP_XY
-//    - chạm trái ra phải                          -> đổi TOUCH_INVERT_X
-//    - chạm trên ra dưới                          -> đổi TOUCH_INVERT_Y
-//  Ba cờ độc lập nhau; sửa từng cái một, đừng sửa hai cái cùng lúc.
+//  Rotate/flip the touch coordinates into the TFT's frame.
+//  NOT YET MEASURED ON REAL HARDWARE. How to adjust: touch the TOP-LEFT corner of
+//  the screen and watch the log.
+//    - touching left/right moves the cursor up/down  -> change TOUCH_SWAP_XY
+//    - touching left lands on the right               -> change TOUCH_INVERT_X
+//    - touching the top lands at the bottom           -> change TOUCH_INVERT_Y
+//  The three flags are independent; change one at a time, never two at once.
 #define TOUCH_SWAP_XY      1
 #define TOUCH_INVERT_X     0
 #define TOUCH_INVERT_Y     1
 
 #else
 // ============================================================================
-//  Bo QR Box Advance Touch Screen  (ESP32-WROOM-32E-N8 + màn YT280S030/ST7789)
+//  QR Box Advance Touch Screen board  (ESP32-WROOM-32E-N8 + YT280S030/ST7789
+//  display)
 // ----------------------------------------------------------------------------
-//  Mặc định khi không khai cờ bo nào — giữ nguyên hành vi cũ.
-//  Cách đọc ngược sơ đồ chân từ schematic: ../../Interface/README.md
+//  The default when no board flag is declared -- preserves the old behaviour.
+//  How the pinout was reverse-engineered from the schematic:
+//  ../../Interface/README.md
 // ============================================================================
 
-//  Bus I2C dùng chung: cảm ứng màn (0x38/0x5D/0x15) + DS1307 (0x68) + SHT3x (0x44).
-//  ĐỪNG nâng lên 400kHz — DS1307 chỉ chịu 100kHz, xem Interface/README.md §2.1.
+//  Shared I2C bus: the display's touch controller (0x38/0x5D/0x15) + DS1307
+//  (0x68) + SHT3x (0x44).
+//  DO NOT raise it to 400kHz -- the DS1307 only tolerates 100kHz, see
+//  Interface/README.md §2.1.
 #define I2C_SCL_PIN        4
 #define I2C_SDA_PIN        16
 #define TOUCH_RST_PIN      25
 #define TOUCH_INT_PIN      33
 
-//  Đèn nền qua Q5 (BSS138 hạ áp phía mát): mức CAO = sáng, PWM được.
+//  Backlight via Q5 (a low-side BSS138): HIGH = lit, PWM-capable.
 #define LCD_BACKLIGHT_PIN  27
 #define BUZZER_PIN         13
 
-//  OE của TXS0104 (bộ dịch mức cho UART_1 ra cổng P3).
+//  OE of the TXS0104 (the level shifter for UART_1 out to port P3).
 //
-//  ĐƯỜNG UART SANG UNO Q (GPIO2/15) ĐI QUA IC NÀY — nên chân này là điều kiện
-//  sống còn của nó. OE thấp thì ngõ ra treo lơ lửng và UART câm hoàn toàn mà
-//  không có lỗi nào. (IR thì không: cả phát GPIO5 lẫn thu GPIO17 đều 3.3V thẳng.)
+//  THE UART LINK TO THE UNO Q (GPIO2/15) GOES THROUGH THIS IC -- so this pin is a
+//  precondition for it working at all. With OE low the outputs float and the UART
+//  is completely mute with no error at all. (IR does not: both the GPIO5
+//  transmitter and the GPIO17 receiver are 3.3V direct.)
 //
-//  PHẢI đặt trong setup() chứ không kéo bằng trở ngoài: GPIO12 = MTDI, HIGH
-//  lúc reset thì ROM chọn mức flash 1.8V và bo không boot. Trên bo này R7 10k
-//  kéo GPIO12 XUỐNG GND — đúng chuẩn (đã đối chiếu schematic).
+//  It MUST be set inside setup() rather than pulled up with an external resistor:
+//  GPIO12 = MTDI, and HIGH at reset makes the ROM select the 1.8V flash level so
+//  the board does not boot. On this board R7 10k pulls GPIO12 DOWN to GND -- which
+//  is correct (cross-checked against the schematic).
 #define EN_LEVEL_SHIFT_PIN 12
 
-//  DS1307 có pin nuôi riêng -> giữ giờ qua cả lúc mất điện.
+//  The DS1307 has its own backup battery -> it keeps time across a power cut.
 #define HAS_RTC_DS1307     1
 
-//  1 hoặc 3 = nằm ngang 320x240 (panel gốc là 240x320 dọc, xoay bằng phần mềm).
-//  Bo này dùng 1 — đã đo trên bo thật: 3 cho ra hình ĐÚNG NHƯNG LỘN NGƯỢC 180 độ.
+//  1 or 3 = landscape 320x240 (the native panel is 240x320 portrait, rotated in
+//  software).
+//  This board uses 1 -- measured on real hardware: 3 gives a CORRECT image but
+//  UPSIDE DOWN by 180 degrees.
 #define TFT_ROTATION       1
 
-//  Xoay/lật toạ độ cảm ứng về hệ của TFT. Mỗi lô module dán tấm cảm ứng lệch
-//  trục khác nhau và schematic không nói gì — chạm thử rồi chỉnh ba cờ này.
+//  Rotate/flip the touch coordinates into the TFT's frame. Every batch of modules
+//  laminates the touch panel with a different axis orientation and the schematic
+//  says nothing about it -- test by touching and adjust these three flags.
 #define TOUCH_SWAP_XY      1
 #define TOUCH_INVERT_X     0
 #define TOUCH_INVERT_Y     1

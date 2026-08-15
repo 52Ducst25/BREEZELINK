@@ -2,80 +2,95 @@
 #include <Arduino.h>
 
 // ============================================================================
-//  Theo dõi node SLAVE còn sống hay không (chạy trên node MASTER).
+//  Tracking whether a SLAVE node is alive (runs on the MASTER node).
 // ----------------------------------------------------------------------------
-//  VÌ SAO CẦN: node slave không nối MQTT nên broker KHÔNG có Last Will cho nó.
-//  Slave mất điện/hỏng thì không ai báo, web sẽ hiện "Trực tuyến" mãi mãi —
-//  tệ hơn cả không hiện gì, vì nó khẳng định sai.
+//  WHY IT IS NEEDED: a slave node has no MQTT connection, so the broker has NO
+//  Last Will for it. If a slave loses power or fails, nothing reports it and the
+//  web UI shows "Trực tuyến" forever -- which is worse than showing nothing,
+//  because it asserts something false.
 //
-//  CÁCH LÀM: mỗi gói ESP-NOW của slave chính là một nhịp tim. Master ghi lại
-//  thời điểm nghe được lần cuối; quá SLAVE_TIMEOUT_MS không nghe thấy thì master
-//  ĐỨNG TÊN slave publish "offline" lên topic status của nó, nghe lại thì
-//  publish "online".
+//  HOW IT WORKS: every ESP-NOW packet from a slave is a heartbeat. The master
+//  records when it was last heard; after SLAVE_TIMEOUT_MS without hearing from it,
+//  the master publishes "offline" to that node's status topic ON ITS BEHALF, and
+//  publishes "online" again when it comes back.
 // ============================================================================
 namespace SlaveWatch {
 
-/// Bao lâu không nghe thấy thì coi là node đã mất kết nối.
+/// How long without being heard before a node counts as disconnected.
 ///
-/// PHẢI TÍNH TỪ NHỊP TIM THẬT CỦA NODE. Nhịp đó là 5 GIÂY, ở cả hai loại node:
+/// THIS MUST BE DERIVED FROM THE NODE'S REAL HEARTBEAT. That heartbeat is 5
+/// SECONDS on both node types:
 ///     esp32-room/src/main.cpp      ROOM_PUBLISH_MS = 5000
 ///     esp32-outdoor/src/config.h   TELEMETRY_MS    = 5000
 ///
-///     35s / 5s  =  chịu được 7 nhịp rơi LIÊN TIẾP mới báo mất kết nối.
+///     35s / 5s  =  tolerates 7 CONSECUTIVE missed beats before reporting a
+///                  disconnection.
 ///
-/// 20 GIÂY LÀ CON SỐ CŨ, VÀ NÓ SAI VÌ MỘT GIẢ ĐỊNH SAI. Chú thích cũ ghi "slave
-/// bắn nhịp tim mỗi 3s; ngưỡng 20s -> chịu được ~6.6 nhịp rơi". Ý định đúng,
-/// nhưng KHÔNG NODE NÀO phát mỗi 3 giây — cả hai đều 5 giây. Ở nhịp thật thì 20
-/// giây chỉ chịu được 3 nhịp rơi, tức chưa tới một nửa mức mà chính chú thích đó
-/// tuyên bố là đã cân nhắc và chấp nhận.
+/// 20 SECONDS WAS THE OLD NUMBER, AND IT WAS WRONG BECAUSE OF A WRONG ASSUMPTION.
+/// The old comment said "the slave beats every 3s; a 20s threshold -> tolerates
+/// ~6.6 missed beats". The intent was right, but NO NODE transmits every 3
+/// seconds -- both use 5. At the real cadence, 20 seconds only tolerates 3 missed
+/// beats, less than half of what that very comment claimed to have considered and
+/// accepted.
 ///
-/// TRIỆU CHỨNG NGOÀI HIỆN TRƯỜNG: một chuỗi mất sóng ngắn — chuyện thường với
-/// node đặt ngoài trời, xuyên tường, và công suất phát bị ghì ở 8 dBm vì lý do
-/// nguồn (xem espnow-slave-radio.h) — là đủ để panel báo "MẤT KẾT NỐI" rồi tự
-/// khỏi sau vài chục giây. Người dùng đọc ra là bo lỗi chập chờn, đúng cái mà
-/// việc chọn "ngưỡng RỘNG" sinh ra để tránh.
+/// THE SYMPTOM IN THE FIELD: a short run of lost packets -- routine for a node
+/// mounted outdoors, through a wall, with its transmit power held down at 8 dBm
+/// for power-supply reasons (see espnow-slave-radio.h) -- was enough for the panel
+/// to report "MẤT KẾT NỐI" and then recover by itself a few tens of seconds later.
+/// Users read that as a flaky board, exactly what choosing a WIDE threshold exists
+/// to avoid.
 ///
-/// SỬA Ở PANEL CHỨ KHÔNG SỬA Ở NODE, vì hai lý do độc lập nhau đều dẫn tới đây:
-/// nguyên tắc thiết kế là giữ nhịp tim DÀY và ngưỡng RỘNG (nhịp dày cho nhiều cơ
-/// hội điểm danh trong cùng một cửa sổ), nên bên phải nới là ngưỡng; và node thì
-/// KHÔNG CÓ OTA — sửa chúng nghĩa là leo lên tường tháo từng bo.
+/// FIXED AT THE PANEL AND NOT AT THE NODE, for two independent reasons that both
+/// lead here: the design principle is a DENSE heartbeat with a WIDE threshold (a
+/// dense heartbeat gives many chances to check in within the same window), so the
+/// side to widen is the threshold; and the nodes have NO OTA -- fixing them means
+/// climbing the wall and removing each board.
 ///
-/// Cái giá vẫn là cái giá cũ, chỉ dài hơn: mất điện thật thì ~35 giây mới hiện
-/// offline. Chấp nhận được, vì báo nhầm liên tục làm người dùng mất tin vào đèn
-/// trạng thái — tệ hơn nhiều so với biết chậm mười lăm giây.
+/// The cost is the same cost as before, just longer: a real power cut takes ~35
+/// seconds to show as offline. Acceptable, because repeated false alarms destroy
+/// the user's trust in the status light -- far worse than finding out fifteen
+/// seconds later.
 ///
-/// ĐỔI NHỊP PHÁT CỦA NODE THÌ PHẢI ĐỔI SỐ NÀY THEO. Quy tắc: ngưỡng ≈ 7 × nhịp.
+/// IF YOU CHANGE A NODE'S TRANSMIT CADENCE YOU MUST CHANGE THIS NUMBER TOO. Rule
+/// of thumb: threshold ~= 7 x cadence.
 static const uint32_t SLAVE_TIMEOUT_MS = 35000UL;
 
-/// Nhịp tim 5s là để biết SỐNG/CHẾT nhanh, không phải để lưu số đo dày đặc:
-/// nhiệt độ phòng không đổi trong 5 giây, lưu hết chỉ làm phồng DB và bắt thuật
-/// toán comfort tính lại vô ích. Nên số đo chỉ được đẩy lên cloud mỗi 15s.
+/// The 5s heartbeat exists to detect ALIVE/DEAD quickly, not to log readings
+/// densely: room temperature does not change over 5 seconds, and storing all of it
+/// would only bloat the DB and make the comfort algorithm recompute for nothing.
+/// So readings are only pushed to the cloud every 15s.
 static const uint32_t RELAY_INTERVAL_MS = 15000UL;
 
-/// Số slave tối đa theo dõi cùng lúc (1 hộ hiện có 1; chừa chỗ cho nhiều phòng).
+/// Maximum slaves tracked at once (a household currently has 1; leaving room for
+/// multiple rooms).
 static const uint8_t MAX_SLAVES = 8;
 
 typedef void (*StatusChanged)(const char *deviceUuid, bool online);
 
-/// Ghi nhận vừa nghe thấy slave. Nếu đây là lần đầu hoặc nó vừa sống lại,
-/// [cb] được gọi với online=true (để bên gọi publish status).
+/// Record that a slave was just heard. If this is the first time, or it has just
+/// come back to life, [cb] is called with online=true (so the caller can publish
+/// its status).
 void heard(const char *deviceUuid, StatusChanged cb);
 
-/// Định kỳ khẳng định LẠI slave đang online, không chỉ báo lúc chuyển trạng thái.
-/// Lý do: khi slave chuyển từ chế độ WiFi sang ESP-NOW, broker phải chờ hết
-/// keepalive (~22s) mới nhận ra phiên MQTT cũ đã chết rồi mới bắn Last Will
-/// "offline" — cái này ĐÈ LÊN thông báo "online" master vừa gửi trước đó. Nếu
-/// chỉ báo một lần thì node sống nhăn mà web hiện offline vĩnh viễn.
+/// Periodically RE-ASSERT that a slave is online rather than only reporting state
+/// transitions.
+/// The reason: when a slave switches from WiFi mode to ESP-NOW, the broker has to
+/// wait out the keepalive (~22s) before realising the old MQTT session is dead and
+/// firing its "offline" Last Will -- which OVERWRITES the "online" the master just
+/// sent. Reporting only once would leave a perfectly alive node showing as offline
+/// on the web forever.
 static const uint32_t STATUS_REFRESH_MS = 60000UL;
 
-/// true nếu đã tới lúc đẩy số đo của slave này lên cloud (>= RELAY_INTERVAL_MS
-/// kể từ lần đẩy trước). Gọi sau heard(); trả true thì tự tính là đã đẩy.
+/// true if it is time to push this slave's readings to the cloud (>=
+/// RELAY_INTERVAL_MS since the last push). Call after heard(); returning true
+/// counts as having pushed.
 bool dueForRelay(const char *deviceUuid);
 
-/// true nếu đã tới lúc khẳng định lại trạng thái online của slave này.
+/// true if it is time to re-assert this slave's online status.
 bool dueForStatusRefresh(const char *deviceUuid);
 
-/// Gọi mỗi vòng loop(): slave nào quá hạn thì [cb] được gọi với online=false.
+/// Call every loop(): any slave past its deadline gets [cb] called with
+/// online=false.
 void checkTimeouts(StatusChanged cb);
 
 } // namespace SlaveWatch

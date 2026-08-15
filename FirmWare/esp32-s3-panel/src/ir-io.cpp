@@ -7,21 +7,24 @@
 
 namespace IrIo {
 
-/// Bộ đệm thu. Khung điều hoà dài gấp nhiều lần remote TV nên 1024 là mức thư
-/// viện khuyến nghị riêng cho máy lạnh; để mặc định (~100) sẽ bắt thiếu đuôi.
+/// Capture buffer. An air conditioner frame is many times longer than a TV
+/// remote's, so 1024 is the size the library recommends specifically for air
+/// conditioners; the default (~100) would capture a truncated tail.
 static const uint16_t CAPTURE_BUFFER = 1024;
 
-/// Khoảng lặng đủ để kết luận "hết khung" (ms). Remote điều hoà có quãng nghỉ
-/// giữa các cụm dài hơn remote thường — để 15ms như mặc định thì một lần bấm bị
-/// cắt thành hai khung, học ra mã cụt.
+/// How much silence is enough to conclude "end of frame" (ms). Air conditioner
+/// remotes have longer gaps between bursts than ordinary remotes -- leaving it at
+/// the 15ms default splits one button press into two frames and learns a truncated
+/// code.
 static const uint8_t CAPTURE_TIMEOUT_MS = 50;
 
-/// Sóng mang chuẩn của remote gia dụng.
+/// The standard carrier for consumer remotes.
 static const uint16_t CARRIER_KHZ = 38;
 
-/// Dưới ngưỡng này gần như chắc chắn là nhiễu (đèn huỳnh quang, remote khác
-/// lướt qua), không phải một lần bấm thật. Khung điều hoà ngắn nhất cũng vài
-/// chục mốc. Bỏ qua và học tiếp thay vì gửi rác lên backend.
+/// Below this length it is almost certainly noise (a fluorescent lamp, another
+/// remote sweeping past) rather than a real button press. Even the shortest air
+/// conditioner frame has several tens of transitions. Discard it and keep
+/// learning, rather than uploading junk to the backend.
 static const uint16_t MIN_RAW_LEN = 20;
 
 static IRsend *sender = nullptr;
@@ -35,15 +38,17 @@ static uint32_t deadline = 0;
 void begin(uint8_t txPin, uint8_t rxPin) {
   sender = new IRsend(txPin);
   sender->begin();
-  // Cấp phát thôi, CHƯA enableIRIn() — mắt thu chỉ bật khi vào chế độ học.
+  // Allocate only, NO enableIRIn() yet -- the receiver is only enabled in learn
+  // mode.
   receiver = new IRrecv(rxPin, CAPTURE_BUFFER, CAPTURE_TIMEOUT_MS, true);
 }
 
 void blast(const uint16_t *raw, uint16_t len) {
   if (sender == nullptr || raw == nullptr || len == 0) return;
 
-  // Nếu đang học mà có lệnh phát chen vào: tắt mắt thu trong lúc bắn, không thì
-  // node bắt lại chính khung của mình và tưởng đó là remote người dùng bấm.
+  // If a transmit request arrives mid-learn: disable the receiver while
+  // transmitting, otherwise the node captures its own frame and mistakes it for
+  // the user pressing the remote.
   bool wasLearning = active;
   if (wasLearning && receiver) receiver->disableIRIn();
 
@@ -58,19 +63,22 @@ void blast(const uint16_t *raw, uint16_t len) {
 void learnStart(uint32_t timeoutMs) {
   if (receiver == nullptr) return;
 
-  // TẮT TRƯỚC NẾU ĐANG HỌC DỞ. enableIRIn() của IRremoteESP8266 gọi timerBegin()
-  // + timerAttachInterrupt() + attachInterrupt() MỖI LẦN, không tự kiểm tra đã
-  // gắn hay chưa. Gọi chồng lên nhau thì ESP-IDF từ chối:
+  // DISABLE FIRST IF A LEARN IS STILL IN PROGRESS. IRremoteESP8266's enableIRIn()
+  // calls timerBegin() + timerAttachInterrupt() + attachInterrupt() EVERY TIME,
+  // without checking whether they are already attached. Calling it on top of
+  // itself makes ESP-IDF refuse:
   //     addApbChangeCallback(): duplicate func=...
   //     timer_group: timer_isr_callback_add(236): register interrupt service failed
-  // và bộ định thời lấy mẫu KHÔNG chạy -> mắt thu chết hẳn cho tới khi khởi động
-  // lại, trong khi log vẫn thản nhiên in "[learn] huong remote vao mat thu roi
-  // bam nut". Hỏng câm đúng kiểu tệ nhất: người lắp bấm remote mãi không được và
-  // sẽ đi nghi mắt thu, dây, hay khoảng cách.
+  // and the sampling timer DOES NOT run -> the receiver is dead until a restart,
+  // while the log cheerfully keeps printing "[learn] point the remote at the
+  // receiver and press the button". A silent failure of the worst kind: the
+  // installer keeps pressing the remote to no effect and goes off suspecting the
+  // receiver, the wiring, or the distance.
   //
-  // Vào lại chế độ học khi đang học dở KHÔNG hiếm: backend gửi lại lệnh, người
-  // dùng bấm nút "học" lần nữa vì lần đầu chưa kịp, hoặc đổi sang học nút khác.
-  // disableIRIn() dọn sạch (timerEnd + detachInterrupt) nên gọi lại là an toàn.
+  // Re-entering learn mode mid-learn is NOT rare: the backend resends the command,
+  // the user presses "learn" again because they were not ready the first time, or
+  // they switch to learning a different button. disableIRIn() cleans up fully
+  // (timerEnd + detachInterrupt) so calling it again is safe.
   if (active) receiver->disableIRIn();
 
   receiver->enableIRIn();
@@ -84,8 +92,8 @@ bool learning() { return active; }
 
 uint32_t learnRemainingMs() {
   if (!active) return 0;
-  // Trừ số học có dấu để vẫn đúng khi millis() tràn (~49 ngày) — cùng lý do
-  // với expired() bên dưới.
+  // Signed arithmetic so it stays correct across a millis() wrap (~49 days) -- the
+  // same reason as expired() below.
   const int32_t left = (int32_t)(deadline - millis());
   return left > 0 ? (uint32_t)left : 0;
 }
@@ -97,11 +105,12 @@ void learnStop() {
 
 bool learnTimedOut() {
   bool t = timedOut;
-  timedOut = false;   // một lần rồi thôi, khỏi báo lặp mỗi vòng loop()
+  timedOut = false;   // report once and no more, rather than every loop()
   return t;
 }
 
-/// Hết giờ chờ chưa? Trừ số học có dấu để vẫn đúng khi millis() tràn (~49 ngày).
+/// Has the wait expired? Signed arithmetic so it stays correct across a millis()
+/// wrap (~49 days).
 static bool expired() { return (int32_t)(millis() - deadline) >= 0; }
 
 uint16_t learnPoll(uint16_t *out, uint16_t maxLen) {
@@ -115,20 +124,20 @@ uint16_t learnPoll(uint16_t *out, uint16_t maxLen) {
     return 0;
   }
 
-  // resultToRawArray() trả mảng micro-giây đã bù kMarkExcess và đã BỎ khoảng
-  // lặng dẫn đầu — đúng khuôn "mark/space xen kẽ" mà backend lưu vào
-  // ir_codes.raw_timing và gửi ngược lại trong ir_raw. Mảng cấp phát bằng new[],
-  // phải tự delete[].
+  // resultToRawArray() returns a microsecond array already compensated for
+  // kMarkExcess and with the leading silence REMOVED -- exactly the alternating
+  // mark/space layout the backend stores in ir_codes.raw_timing and sends back in
+  // ir_raw. The array is allocated with new[], so it must be delete[]d.
   uint16_t len = getCorrectedRawLength(&results);
   uint16_t *raw = resultToRawArray(&results);
   uint16_t taken = 0;
 
   if (raw == nullptr) {
-    Serial.println("[ir] het RAM khi doc khung — bam lai remote");
+    Serial.println("[ir] out of RAM while reading the frame - press the remote again");
   } else if (len < MIN_RAW_LEN) {
-    Serial.printf("[ir] bo qua nhieu (%u moc) — dang cho ban bam remote\n", len);
+    Serial.printf("[ir] ignoring noise (%u transitions) - still waiting for you to press the remote\n", len);
   } else if (len > maxLen) {
-    Serial.printf("[ir] khung %u moc vuot gioi han %u — bo qua (khung cat doi la ma sai)\n",
+    Serial.printf("[ir] frame of %u transitions exceeds the %u limit - discarded (a truncated frame is a wrong code)\n",
                   len, maxLen);
   } else {
     memcpy(out, raw, (size_t)len * sizeof(uint16_t));

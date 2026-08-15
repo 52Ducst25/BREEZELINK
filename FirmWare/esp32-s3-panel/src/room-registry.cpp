@@ -17,13 +17,14 @@ Room *find(const char *uuid) {
 }
 
 bool isFresh(const Room &r) {
-  // Trừ số học không dấu nên vẫn đúng khi millis() tràn (~49 ngày) — cùng luật
-  // đã dùng ở SlaveWatch::checkTimeouts().
+  // Unsigned arithmetic, so this stays correct across a millis() wrap (~49 days) --
+  // the same rule already used in SlaveWatch::checkTimeouts().
   return r.used && (millis() - r.lastHeardMs) < ROOM_STALE_MS;
 }
 
-/// Sắp xếp chèn tại chỗ. n ≤ 6 nên thuật toán O(n²) là lựa chọn đúng: qsort()
-/// kéo theo con trỏ hàm và vài trăm byte mã cho một bài toán sáu phần tử.
+/// In-place insertion sort. n <= 6, so an O(n^2) algorithm is the right choice:
+/// qsort() drags in a function pointer and a few hundred bytes of code for a
+/// six-element problem.
 void sortAsc(float *v, uint8_t n) {
   for (uint8_t i = 1; i < n; i++) {
     const float key = v[i];
@@ -36,8 +37,9 @@ void sortAsc(float *v, uint8_t n) {
 float medianOf(float *v, uint8_t n) {
   sortAsc(v, n);
   const uint8_t mid = (uint8_t)(n / 2);
-  // Số chẵn -> trung bình hai giá trị giữa, để con số nhích mượt theo phòng ấm
-  // dần thay vì nhảy bậc mỗi khi thứ tự hai góc giữa hoán đổi.
+  // Even count -> average the two middle values, so the number drifts smoothly as
+  // the room warms rather than stepping every time the two middle corners swap
+  // places.
   return (n % 2 == 1) ? v[mid] : (v[mid - 1] + v[mid]) / 2.0f;
 }
 
@@ -49,7 +51,7 @@ bool update(const AcEspNowPacket &pkt) {
     for (uint8_t i = 0; i < MAX_ROOMS; i++) {
       if (!g_rooms[i].used) { r = &g_rooms[i]; break; }
     }
-    if (r == nullptr) return false;   // bảng đầy
+    if (r == nullptr) return false;   // table full
     memset(r, 0, sizeof(*r));
     r->used = true;
     strncpy(r->uuid, pkt.device_uuid, sizeof(r->uuid) - 1);
@@ -57,9 +59,9 @@ bool update(const AcEspNowPacket &pkt) {
 
   r->corner      = pkt.corner;
   r->lastHeardMs = millis();
-  // NaN được ghi vào có chủ đích: node còn sống nhưng cảm biến hỏng. Giữ lại số
-  // đo cũ ở đây là để một góc đã tuột dây tiếp tục bỏ phiếu vào trung vị bằng
-  // nhiệt độ của nửa giờ trước.
+  // Storing NaN is deliberate: the node is alive but its sensor is faulty. Keeping
+  // the old reading here would let a corner whose wire has come off keep voting in
+  // the median with a temperature from half an hour ago.
   r->t = pkt.temp;
   r->h = pkt.humidity;
   return true;
@@ -78,9 +80,10 @@ bool median(float &tempC, float &humidity, uint8_t *usedOut) {
   if (usedOut) *usedOut = n;
   if (n == 0) return false;
 
-  // Nhiệt độ và độ ẩm lấy trung vị ĐỘC LẬP, nên kết quả có thể là một cặp
-  // (t, h) mà không góc nào báo cáo đúng như vậy. Cố ý: đó là hai đại lượng vật
-  // lý khác nhau và góc lạc về độ ẩm hiếm khi là góc lạc về nhiệt độ.
+  // Temperature and humidity are median-ed INDEPENDENTLY, so the result can be a
+  // (t, h) pair that no single corner actually reported. Deliberate: they are two
+  // different physical quantities, and the humidity outlier is rarely the same
+  // corner as the temperature outlier.
   tempC = medianOf(temps, n);
   humidity = medianOf(hums, n);
   return true;

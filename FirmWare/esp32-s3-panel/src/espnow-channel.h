@@ -2,105 +2,124 @@
 #include <Arduino.h>
 
 // ============================================================================
-//  Giữ panel ở ĐÚNG KÊNH mà các node đang phát — kể cả khi mất WiFi.
+//  Keep the panel on THE SAME CHANNEL the nodes are transmitting on -- even when
+//  WiFi is down.
 // ----------------------------------------------------------------------------
-//  VÌ SAO CẦN. ESP-NOW bắt buộc hai bên cùng kênh. Node góc phòng và node ngoài
-//  trời tự quét SSID của router rồi bám kênh đó (shared/espnow-slave-radio.h),
-//  nên ROUTER là ĐIỂM HẸN của cả hệ. Panel thì trước đây không có một dòng nào
-//  chọn kênh: nó ăn theo kênh mà giao diện station đang bám.
+//  WHY IT IS NEEDED. ESP-NOW requires both sides on the same channel. The
+//  room-corner nodes and the outdoor node scan for the router's SSID and lock onto
+//  its channel (shared/espnow-slave-radio.h), so THE ROUTER IS THE WHOLE SYSTEM'S
+//  MEETING POINT. The panel, meanwhile, used to have no line of code selecting a
+//  channel at all: it simply inherited whatever channel the station interface was
+//  on.
 //
-//  Hệ quả: mất WiFi là mất luôn điểm hẹn. Tệ hơn, vòng thử nối lại gọi
-//  `WiFi.begin()` trần mỗi 15 giây, mà `begin()` không biết kênh thì station
-//  QUÉT KHẮP CÁC KÊNH để tìm SSID — radio panel không bao giờ đậu yên, và gói
-//  của node rơi vào đúng lúc nó đang ở kênh khác thì mất. Broadcast không có ACK
-//  nên node vẫn báo gửi thành công, không một dòng lỗi nào ở bất kỳ đâu.
+//  The consequence: losing WiFi meant losing the meeting point. Worse, the
+//  reconnect loop called a bare `WiFi.begin()` every 15 seconds, and with no
+//  channel hint `begin()` makes the station SCAN ACROSS EVERY CHANNEL looking for
+//  the SSID -- so the panel's radio never settles, and any node packet arriving
+//  while it is on another channel is lost. Broadcast has no ACK, so the node still
+//  reports a successful send and not one error line appears anywhere.
 //
-//  CÁCH LÀM — SOI GƯƠNG HÀNH VI CỦA NODE, KHÔNG SÁNG TẠO THÊM.
-//  Node không sửa được (4 bo trên tường + 1 bo ngoài trời, KHÔNG CÓ OTA), nên
-//  panel phải là bên khớp theo. Hành vi thật của node, đọc từ
-//  espnow-slave-radio.h:
+//  THE APPROACH -- MIRROR THE NODES' BEHAVIOUR, DO NOT INVENT ANYTHING NEW.
+//  The nodes cannot be changed (4 boards on the wall + 1 outdoors, WITH NO OTA),
+//  so the panel has to be the side that adapts. The nodes' actual behaviour, read
+//  from espnow-slave-radio.h:
 //
-//      lúc boot   : quét 3 lần -> thấy: bám kênh router · trượt: bám kênh 1
-//      mỗi 5 phút : quét      -> thấy: bám kênh router · trượt: GIỮ NGUYÊN kênh
+//      at boot     : scan 3 times -> found: lock to the router's channel
+//                                 -> missed: lock to channel 1
+//      every 5 min : scan         -> found: lock to the router's channel
+//                                 -> missed: KEEP the current channel
 //
-//  Chú ý dòng cuối: node KHÔNG BAO GIỜ rơi về kênh 1 khi router chết giữa chừng,
-//  nó bám lì kênh cuối cùng biết được. Nên panel cũng phải nhớ kênh cuối cùng và
-//  quay về đúng đó — chứ KHÔNG phải rơi về kênh 1. Đây là chỗ dễ làm sai nhất:
-//  "cả hai cùng fallback kênh 1" nghe hợp lý nhưng sẽ đẩy panel sang kênh 1
-//  trong khi node vẫn nằm ở kênh cũ, tức là tự tay tạo ra đúng cái lệch kênh
-//  đang muốn chữa.
+//  Note that last line: a node NEVER falls back to channel 1 when the router dies
+//  mid-run, it stubbornly holds the last channel it knew. So the panel must also
+//  remember its last channel and return to exactly that -- and NOT fall back to
+//  channel 1. This is the easiest thing to get wrong: "both sides fall back to
+//  channel 1" sounds reasonable but would push the panel to channel 1 while the
+//  nodes stay on the old one, manufacturing the very channel mismatch this is
+//  meant to cure.
 //
-//  KÊNH PHẢI SỐNG QUA LẦN KHỞI ĐỘNG LẠI, nên nó nằm trong NVS: mất điện cả nhà
-//  rồi có điện lại nhưng router hỏng là ca có thật, và khi đó panel vừa boot
-//  không có gì trong RAM để mà nhớ.
+//  THE CHANNEL HAS TO SURVIVE A RESTART, so it lives in NVS: a whole-house power
+//  cut followed by power returning while the router is broken is a real scenario,
+//  and a freshly booted panel has nothing in RAM to remember.
 // ============================================================================
 namespace EspNowChannel {
 
-/// Kênh dùng khi CHƯA TỪNG thấy router (bo mới nạp, NVS trống).
+/// The channel to use when the router has NEVER been seen (freshly flashed board,
+/// empty NVS).
 ///
-/// PHẢI LÀ 1, và không được đổi thành số khác cho "đẹp": đây đúng là kênh mà
-/// EspNowSlaveRadio::begin() rơi về khi quét trượt 3 lần lúc boot. Hai bên cùng
-/// lạc thì vẫn phải lạc về cùng một chỗ mới gặp được nhau.
+/// IT MUST BE 1, and must not be changed to a "nicer" number: this is exactly the
+/// channel EspNowSlaveRadio::begin() falls back to when its 3 boot scans all miss.
+/// If both sides get lost, they still have to get lost in the same place in order
+/// to find each other.
 static const uint8_t FALLBACK_CHANNEL = 1;
 
-/// Chu kỳ dò lại kênh router trong lúc đang mất WiFi (ms).
+/// How often to re-scan for the router's channel while WiFi is down (ms).
 ///
-/// BẰNG ĐÚNG EspNowSlaveRadio::RESCAN_INTERVAL_MS của node. Không phải trùng hợp
-/// và cũng không nên "tối ưu" lệch đi: dò thưa hơn node thì có quãng panel còn
-/// bám kênh cũ trong khi node đã chuyển; dò dày hơn thì tốn thêm những lần quét
-/// mà mỗi lần đều kéo radio ra khỏi việc thu ~1 giây.
+/// EXACTLY EQUAL TO the nodes' EspNowSlaveRadio::RESCAN_INTERVAL_MS. That is not a
+/// coincidence and should not be "optimised" away from it: scanning less often
+/// than the nodes leaves a window where the panel is still on the old channel
+/// after the nodes have moved; scanning more often costs extra scans, each of
+/// which pulls the radio away from receiving for ~1 second.
 static const uint32_t RESCAN_INTERVAL_MS = 300000UL;
 
-/// Nạp kênh đã nhớ từ NVS. Gọi trong setup(), TRƯỚC connectWifi().
+/// Load the remembered channel from NVS. Call in setup(), BEFORE connectWifi().
 void begin();
 
-/// Ghi nhận kênh router vừa thấy (gọi mỗi lần WiFi nối thành công).
-/// Chỉ chạm NVS khi số thật sự đổi — flash có hạn ghi.
+/// Record the router channel just observed (call every time WiFi connects
+/// successfully).
+/// Only touches NVS when the number actually changes -- flash has a finite write
+/// endurance.
 void note(uint8_t channel);
 
-/// Kênh đã nhớ, hoặc FALLBACK_CHANNEL nếu chưa từng thấy router.
+/// The remembered channel, or FALLBACK_CHANNEL if the router has never been seen.
 uint8_t last();
 
-/// Ghim radio về kênh đã nhớ. Trả false nếu phần cứng từ chối.
+/// Pin the radio to the remembered channel. Returns false if the hardware refuses.
 ///
-/// CHỈ GỌI KHI ĐÃ MẤT WiFi, và PHẢI gọi sau `WiFi.disconnect(false)`: lúc station
-/// còn đang dò mạng thì ngăn xếp WiFi tự lái kênh theo ý nó và lệnh đặt kênh ở
-/// đây bị ghi đè trong im lặng. Gọi lúc ĐANG nối được vào router thì còn tệ hơn —
-/// nó cắt luôn đường WiFi mà không ai yêu cầu.
+/// ONLY CALL THIS ONCE WiFi IS DOWN, and it MUST be called after
+/// `WiFi.disconnect(false)`: while the station is still probing for networks, the
+/// WiFi stack drives the channel as it pleases and the channel set here is
+/// silently overwritten. Calling it while actually connected to the router is
+/// worse still -- it cuts the WiFi link with nobody having asked for that.
 bool park();
 
-/// Thôi ghim (WiFi đã nối lại — từ giờ router giữ kênh hộ).
+/// Stop pinning (WiFi is back -- from now on the router holds the channel for us).
 void release();
 
-/// Radio còn ở đúng kênh ghim không; lệch thì kéo về. Gọi mỗi vòng loop() TRONG
-/// LÚC ĐANG ĐẬU (không gọi khi đang dở một lần thử nối, xem dưới).
+/// Is the radio still on the pinned channel; pull it back if it has drifted. Call
+/// every loop() WHILE PARKED (do not call in the middle of a connection attempt,
+/// see below).
 ///
-/// RẺ: chỉ đọc thanh ghi kênh, và chỉ đặt lại khi thật sự lệch — nên gọi mỗi
-/// vòng không tốn gì.
+/// CHEAP: it only reads the channel register, and only writes when there really is
+/// a mismatch -- so calling it every loop costs nothing.
 ///
-/// VÌ SAO CẦN, dù park() đã đọc ngược để xác nhận: park() chỉ đúng TẠI THỜI ĐIỂM
-/// gọi. Ngăn xếp WiFi có thể lái kênh về sau vì những việc không phải mình khởi
-/// xướng (một sự kiện nội bộ, một lần dò sót lại). Không có hàm này thì lần sửa
-/// gần nhất là ở lượt thử kế tiếp — tức là tối đa 5 phút câm, mà không có gì báo.
+/// WHY IT IS NEEDED even though park() already reads back to confirm: park() is
+/// only correct AT THE MOMENT it is called. The WiFi stack can drive the channel
+/// later for reasons we did not initiate (an internal event, a leftover probe).
+/// Without this function, the earliest fix would be the next retry -- i.e. up to 5
+/// minutes of silence with nothing reporting it.
 ///
-/// KHÔNG GỌI KHI ĐANG THỬ NỐI: lúc đó ngăn xếp WiFi đang cố tình nhảy kênh để dò
-/// SSID, kéo nó về là hai bên giằng nhau và không lần nối nào xong.
+/// DO NOT CALL IT DURING A CONNECTION ATTEMPT: at that point the WiFi stack is
+/// deliberately hopping channels to find the SSID, and pulling it back makes the
+/// two fight each other so no connection ever completes.
 void hold();
 
-/// Panel có đang tự ghim kênh hay không. Dùng cho màn THÔNG TIN: người đi lắp
-/// cần phân biệt "kênh này do router quyết" với "kênh này do panel tự nhớ" —
-/// hai trạng thái đó dẫn tới hai chỗ phải đi tìm khác hẳn nhau.
+/// Whether the panel is currently pinning the channel itself. Used by the INFO
+/// screen: an installer needs to distinguish "the router decides this channel"
+/// from "the panel remembered this channel" -- those two states lead to entirely
+/// different places to go looking.
 bool pinned();
 
-/// Quét tìm [ssid] để cập nhật kênh, rồi BÁM LẠI. Trả true nếu thấy router.
+/// Scan for [ssid] to refresh the channel, then RE-LOCK. Returns true if the
+/// router was found.
 ///
-/// LUÔN BÁM LẠI KỂ CẢ KHI KÊNH KHÔNG ĐỔI, kể cả khi quét trượt. scanNetworks()
-/// nhảy qua tất cả các kênh và bỏ radio lại ở kênh cuối cùng nó dừng, KHÔNG tự
-/// trả về chỗ cũ. Đây đúng là cái bẫy đã làm node "chết ngầm" một lần và được
-/// ghi lại ở EspNowSlaveRadio::tickRescan — đừng để panel dẫm lại.
+/// ALWAYS RE-LOCK EVEN WHEN THE CHANNEL HAS NOT CHANGED, and even when the scan
+/// missed. scanNetworks() hops across every channel and leaves the radio on
+/// whichever one it stopped on -- it does NOT restore the previous one. This is
+/// exactly the trap that once made a node "die silently", recorded in
+/// EspNowSlaveRadio::tickRescan -- do not let the panel step in it again.
 ///
-/// TỐN ~1 GIÂY và trong lúc đó không thu được gói nào, nên gọi thưa (xem
-/// RESCAN_INTERVAL_MS) và tuyệt đối không gọi khi WiFi đang nối bình thường.
+/// IT COSTS ~1 SECOND during which no packets are received, so call it rarely (see
+/// RESCAN_INTERVAL_MS) and never while WiFi is connected normally.
 bool rescan(const char *ssid);
 
 } // namespace EspNowChannel

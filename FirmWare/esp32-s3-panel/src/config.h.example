@@ -1,88 +1,99 @@
 #pragma once
 // ============================================================================
-//  BreezeLink — QR Box Advance Touch Screen  ·  node TRONG NHÀ (indoor) + MASTER + IR
-//  BẢN MẪU — copy thành `config.h` rồi điền. (config.h bị gitignore vì chứa
-//  mật khẩu WiFi + token MQTT thật.)
+//  BreezeLink - QR Box Advance Touch Screen  -  INDOOR node + MASTER + IR
+//  TEMPLATE -- copy to `config.h` and fill it in. (config.h is gitignored because
+//  it holds the real WiFi password + MQTT token.)
 // ============================================================================
-//  Lấy ORG_ID / DEVICE_UUID / MQTT_PASSWORD ở đâu?
-//    Web admin -> Khách hàng -> mở node (Trong nhà) -> mục "Nạp firmware".
-//    MQTT_USERNAME luôn = DEVICE_UUID.
+//  Where do I get ORG_ID / DEVICE_UUID / MQTT_PASSWORD?
+//    Admin web -> Khách hàng -> open the node (Trong nhà) -> the "Nạp firmware"
+//    section.
+//    MQTT_USERNAME is always = DEVICE_UUID.
 //
-//  QUAN TRỌNG — ĐẶT VAI TRÒ MẠNG CỦA NODE NÀY LÀ **MASTER** TRÊN WEB:
-//    backend chọn "node nào nhận lệnh điều khiển" bằng role=master trước, rồi
-//    mới rơi về node_type=indoor cũ nhất (telemetry_service.get_gateway_device).
-//    Không đặt master thì hộ nào có hai hàng indoor sẽ bị lái nhầm node, và
-//    triệu chứng là lệnh publish thành công mà máy lạnh không nhúc nhích.
+//  IMPORTANT -- SET THIS NODE'S NETWORK ROLE TO **MASTER** ON THE WEB UI:
+//    the backend picks "which node receives control commands" by looking for
+//    role=master first, only then falling back to the oldest node_type=indoor
+//    (telemetry_service.get_gateway_device).
+//    Without the master role, a household with two indoor rows will drive the
+//    wrong node, and the symptom is a command that publishes successfully while
+//    the air conditioner does not move.
 // ============================================================================
 
 // -------- 1) WiFi --------
-#define WIFI_SSID      "TEN_WIFI"
-#define WIFI_PASSWORD  "MAT_KHAU_WIFI"
+#define WIFI_SSID      "WIFI_NAME"
+#define WIFI_PASSWORD  "WIFI_PASSWORD"
 
-// -------- 2) MQTT (EMQX tự host trên VPS — plaintext 1883, KHÔNG TLS) --------
-//  LƯU Ý: panel web ghi MQTT_HOST = "emqx" — đó là tên service nội bộ Docker,
-//  ESP không phân giải được. Phải dùng IP/domain công khai của server.
-#define MQTT_HOST      "IP_CONG_KHAI_SERVER"
+// -------- 2) MQTT (self-hosted EMQX on the VPS -- plaintext 1883, NO TLS) -----
+//  NOTE: the web panel prints MQTT_HOST = "emqx" -- that is the internal Docker
+//  service name, which an ESP cannot resolve. You must use the server's public
+//  IP/domain.
+#define MQTT_HOST      "SERVER_PUBLIC_IP"
 #define MQTT_PORT      1883
-//  Broker đã bật authentication (built-in DB): user = DEVICE_UUID, pass = token.
-#define MQTT_USERNAME  "DAN_DEVICE_UUID"
-#define MQTT_PASSWORD  "DAN_MQTT_PASSWORD"
+//  The broker has authentication enabled (built-in DB): user = DEVICE_UUID,
+//  pass = token.
+#define MQTT_USERNAME  "PASTE_DEVICE_UUID"
+#define MQTT_PASSWORD  "PASTE_MQTT_PASSWORD"
 
-// -------- 3) Định danh node (khớp hàng devices trên web) --------
-#define ORG_ID         "DAN_ORG_ID"
-#define DEVICE_UUID    "DAN_DEVICE_UUID"
+// -------- 3) Node identity (matches the devices row on the web UI) --------
+#define ORG_ID         "PASTE_ORG_ID"
+#define DEVICE_UUID    "PASTE_DEVICE_UUID"
 #define FW_VERSION     "gateway-2.0"
 
-// -------- 4) Node cảm biến góc phòng: KHÔNG PHẢI KHAI GÌ Ở ĐÂY --------
-//  Trước đây chỗ này có một mảng ROOM_NODE_UUIDS, và thêm/bớt một góc là phải
-//  nạp lại gateway. Nó đã bỏ khi các node góc chuyển sang ESP-NOW: gói ESP-NOW
-//  chở được 250 byte nên mỗi node mang thẳng device_uuid 32 ký tự của chính nó
-//  (../../shared/espnow-message.h). Gateway cứ thế publish hộ vào topic của node
-//  đó — nó không cần biết trước có bao nhiêu góc, cũng không cần biết góc nào là
-//  góc nào.
+// -------- 4) Room-corner sensor nodes: NOTHING TO DECLARE HERE --------
+//  This used to hold a ROOM_NODE_UUIDS array, and adding or removing a corner
+//  meant reflashing the gateway. It went away when the corner nodes moved to
+//  ESP-NOW: an ESP-NOW frame carries 250 bytes, so each node carries its own
+//  32-character device_uuid directly (../../shared/espnow-message.h). The gateway
+//  simply publishes on that node's behalf to that node's topic -- it does not need
+//  to know in advance how many corners there are, nor which corner is which.
 //
-//  Kèm theo đó là mất hẳn một lớp lỗi: mảng cũ lệch một ô thì số đo của góc A
-//  được nộp lên cloud dưới tên góc B, biểu đồ vẫn có số, không lỗi ở đâu cả, và
-//  hai góc bị hoán tên vĩnh viễn.
+//  That also removed an entire class of bug: with the old array, one slot out of
+//  place meant corner A's readings landed in the cloud under corner B's name, the
+//  charts still showed numbers, nothing anywhere reported an error, and the two
+//  corners stayed permanently swapped.
 //
-//  Node góc phòng cấu hình ở ../../esp32-room/src/config.h — mỗi bo một
-//  DEVICE_UUID riêng, lấy trên web ở mục "Nạp firmware" của chính node đó.
+//  Room-corner nodes are configured in ../../esp32-room/src/config.h -- one
+//  DEVICE_UUID per board, taken from that node's own "Nạp firmware" section on the
+//  web UI.
 
 // ============================================================================
-//  Phần cứng — bo QR Box Advance Touch Screen
+//  Hardware -- the QR Box Advance Touch Screen board
 // ----------------------------------------------------------------------------
-//  Cách đọc ngược sơ đồ chân từ schematic + thiết kế giao diện:
+//  How the pinout was reverse-engineered from the schematic, plus the UI design:
 //  ../../Interface/README.md
 //
-//  CHÂN IR KHÔNG KHAI Ở ĐÂY. `IR_TX_PIN` (5) và `IR_RX_PIN` (17) nằm trong
-//  build_flags của platformio.ini, cùng chỗ với các cờ TFT_* — vì cả hai nhóm
-//  đều phải có mặt lúc biên dịch THƯ VIỆN, không chỉ lúc biên dịch src/. Lý do
-//  chọn từng chân + các bẫy phần cứng: đọc khối chú thích đầu platformio.ini,
-//  và Interface/README.md §3.
+//  THE IR PINS ARE NOT DECLARED HERE. `IR_TX_PIN` (5) and `IR_RX_PIN` (17) live in
+//  platformio.ini's build_flags alongside the TFT_* flags -- because both groups
+//  have to be present while compiling the LIBRARIES, not only while compiling
+//  src/. The reasoning behind each pin choice plus the hardware traps: read the
+//  comment block at the top of platformio.ini, and Interface/README.md §3.
 //
-//  BO NÀY KHÔNG CÒN CẢM BIẾN NHIỆT/ẨM. Cả DHT22 lẫn SHT3x đã bỏ khỏi firmware:
-//  số "trong nhà" nay là trung vị của các node góc phòng (ROOM_NODE_UUIDS ở
-//  trên). Một cảm biến treo trên tường chỉ nói được nhiệt độ của cái tường đó.
+//  THIS BOARD NO LONGER HAS A TEMPERATURE/HUMIDITY SENSOR. Both the DHT22 and the
+//  SHT3x have been removed from the firmware: the "indoor" number is now the
+//  median of the room-corner nodes. A sensor on a wall only tells you the
+//  temperature of that wall.
 // ============================================================================
 
-//  Thời gian chờ người dùng bấm remote khi vào chế độ HỌC (ms).
-//  30s: đủ để đi từ chỗ đặt node tới chỗ cầm remote, chưa lâu tới mức người
-//  lắp tưởng máy treo.
+//  How long to wait for the user to press the remote in LEARN mode (ms).
+//  30s: long enough to walk from the node to wherever the remote is, not so long
+//  that the installer thinks the device has hung.
 #define LEARN_TIMEOUT_MS  30000UL
 
-//  Chu kỳ gửi số liệu (ms). 15s cho dễ theo dõi khi test; 30000 khi chạy thật.
+//  Telemetry interval (ms). 15s is convenient while testing; 30000 in production.
 #define TELEMETRY_MS   15000UL
 
 // ----------------------------------------------------------------------------
-//  SƠ ĐỒ CHÂN KHÔNG NẰM Ở ĐÂY NỮA — xem board-pins.h
+//  THE PINOUT IS NO LONGER HERE -- see board-pins.h
 // ----------------------------------------------------------------------------
-//  Chân (I2C, cảm ứng, đèn nền, còi, xoay màn) đã chuyển sang board-pins.h vì
-//  chúng thuộc về BO, còn file này thuộc về HỘ. Firmware panel nay chạy trên hai
-//  bo khác nhau (QR Box Advance và bo 2.8" ESP32-S3) dùng CHUNG một hàng
-//  `devices` trên web — tức chung file này, nhưng chân thì khác hoàn toàn.
+//  The pins (I2C, touch, backlight, buzzer, screen rotation) moved to
+//  board-pins.h because they belong to the BOARD, while this file belongs to the
+//  HOUSEHOLD. The panel firmware now runs on two different boards (QR Box Advance
+//  and the 2.8" ESP32-S3 board) sharing one `devices` row on the web UI -- i.e.
+//  sharing this file, while their pins are completely different.
 //
-//  Đổi bo: khai cờ -D BOARD_* trong platformio.ini, KHÔNG sửa file này.
+//  Changing board: declare a -D BOARD_* flag in platformio.ini, do NOT edit this
+//  file.
 #include "board-pins.h"
 
-//  KHÔNG CÒN TZ_INFO ở đây: múi giờ là hằng số trong ui/board-io.cpp (sản phẩm
-//  bán trong nước, thêm một ô cho người lắp điền là thêm một chỗ điền sai).
+//  TZ_INFO IS NO LONGER HERE: the timezone is a constant in ui/board-io.cpp (a
+//  domestically sold product, and one more field for the installer to fill in is
+//  one more field to fill in wrongly).
