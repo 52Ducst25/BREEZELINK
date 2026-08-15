@@ -1,254 +1,262 @@
-# Panel treo tường — bo 2.8" ESP32-S3
+# Wall panel — 2.8" ESP32-S3 board
 
-**Panel chính thức của BreezeLink.** Thay cho bo QR Box Advance.
+**BreezeLink's official panel.** Replaces the QR Box Advance board.
 
 | | |
 |---|---|
 | Chip | ESP32-S3 |
-| Màn | 2.8" IPS 240×320, **ILI9341V**, SPI 4 dây |
-| Cảm ứng | **FT6336G** điện dung, I²C |
-| Có thêm | mic + loa I2S, thẻ microSD, đèn RGB, đo pin |
-| Nạp | `pio run -e esp32s3-panel -t upload --upload-port COMx` |
+| Display | 2.8" IPS 240×320, **ILI9341V**, 4-wire SPI |
+| Touch | **FT6336G** capacitive, I²C |
+| Also on board | I2S mic + speaker, microSD, RGB LED, battery monitor |
+| Flash | `pio run -e esp32s3-panel -t upload --upload-port COMx` |
 
 ```
-pio run -e esp32s3-panel -t upload --upload-port COM5   # nạp
-pio device monitor -p COM5 -b 115200                    # xem log
+pio run -e esp32s3-panel -t upload --upload-port COM5   # flash
+pio device monitor -p COM5 -b 115200                    # watch the log
 ```
 
 ---
 
-## 1. Mã nguồn panel nằm ở đây — bản duy nhất
+## 1. The panel source lives here — one copy only
 
-`src/` trong thư mục này là bản thật, kể cả `ui/`.
+`src/` in this directory is the real thing, `ui/` included.
 
-Từng có thêm hai env dùng chung đúng `src/` này — `esp32-qrbox` (bo QR Box cũ) và
-`esp32-s3-gateway` (bo gỡ lỗi không màn) — **đã gỡ khỏi repo ngày 15/08/2026**. Cần
-xem lại thì `git log --diff-filter=D -- FirmWare/esp32-qrbox`.
+There used to be two more envs sharing exactly this `src/` — `esp32-qrbox` (the old QR Box board)
+and `esp32-s3-gateway` (a headless debug board) — **both removed from the repo on 2026-08-15**. To
+look them up: `git log --diff-filter=D -- FirmWare/esp32-qrbox`.
 
-Chép mã sang thư mục khác cho "gọn" là tạo ra **hai panel**. Logic thi hành lệnh, chống
-trùng `req_id`, xin lại mã IR, ranh giới đề xuất/lệnh của UNO Q — toàn những chỗ tinh vi
-mà mỗi cái đều đã trả giá một lần để viết cho đúng. Hai bản sao lệch nhau ngay lần sửa
-thứ nhất, và triệu chứng là bo này chạy đúng còn bo kia thì không, không có cách nào
-biết bên nào mới là bản thật.
+Copying the source into another directory "to keep things tidy" creates **two panels**. Command
+execution logic, `req_id` deduplication, re-requesting IR codes, the advice/command boundary with
+the UNO Q — all subtle places, each of which cost something to get right once. Two copies diverge
+on the very first edit, and the symptom is that this board works and that one does not, with no way
+to tell which is the real version.
 
-Chỗ khác nhau giữa các bo nằm ở [`src/board-pins.h`](src/board-pins.h), chọn bằng cờ
-`-D BOARD_S3_PANEL`. **Không rải `#ifdef` vào mã.** Luật này giữ nguyên dù giờ chỉ còn
-một bo — nó là thứ khiến thêm bo thứ hai sau này không phải chép mã.
+Per-board differences live in [`src/board-pins.h`](src/board-pins.h), selected with the
+`-D BOARD_S3_PANEL` flag. **Do not sprinkle `#ifdef` through the code.** This rule stands even
+though there is only one board now — it is what makes adding a second board later not require
+copying the source.
 
-Cấu hình (WiFi, token MQTT, `DEVICE_UUID`) ở [`src/config.h`](src/config.h.example),
-**bị gitignore** vì chứa mật khẩu thật; bản được commit là `src/config.h.example`.
-File đó kết thúc bằng `#include "board-pins.h"` — thiếu dòng ấy là đứt build ở
+Configuration (WiFi, MQTT token, `DEVICE_UUID`) is in [`src/config.h`](src/config.h.example),
+**gitignored** because it holds real passwords; the committed version is `src/config.h.example`.
+That file ends with `#include "board-pins.h"` — without that line the build breaks at
 `I2C_SDA_PIN was not declared`.
 
 ---
 
-## 2. Sơ đồ chân
+## 2. Pinout
 
-Bo gần như kín chân. Bảng dưới là **toàn bộ** phần còn trống và cách chia:
+The board is nearly out of pins. The table below is **everything** still free and how it is
+allocated:
 
-| Chân | Dùng làm gì | Ghi chú |
+| Pin | Used for | Note |
 |---|---|---|
-| IO2 | IR **phát** | |
-| IO3 | IR **thu** | strapping, xem §2.2 |
-| IO43 | UART **TX** → UNO Q | xem §2.1 |
+| IO2 | IR **transmit** | |
+| IO3 | IR **receive** | strapping, see §2.2 |
+| IO43 | UART **TX** → UNO Q | see §2.1 |
 | IO44 | UART **RX** ← UNO Q | |
-| IO14, IO21 | *để trống* | dành cho **PZEM** (Modbus-RTU = 2 chân) |
+| IO14, IO21 | *reserved* | for the **PZEM** (Modbus-RTU = 2 pins) |
 
-Đã có chủ, đừng đụng: màn (10/11/12/13/45/46) · cảm ứng (15/16/17/18) · thẻ SD
-(38/39/40/41/47/48) · âm thanh I2S (1/4/5/6/7/8) · đèn RGB (42) · đo pin (9) · nút BOOT (0).
+Already spoken for, do not touch: display (10/11/12/13/45/46) · touch (15/16/17/18) · SD card
+(38/39/40/41/47/48) · I2S audio (1/4/5/6/7/8) · RGB LED (42) · battery monitor (9) · BOOT button (0).
 
-### Dây phải hàn
+### Wires that must be soldered
 
 ```
-   Bo panel                        Thiết bị ngoài
+   Panel board                     External device
   ┌──────────┐
-  │ IO2      │───────────────────  module IR phát   (nuôi 3.3V)
-  │ IO3      │───────────────────  mắt thu TSOP     (nuôi 3.3V)
-  │ IO43  TX │──────────────────>  RX của Arduino UNO Q
-  │ IO44  RX │<──────────────────  TX của Arduino UNO Q
-  │ GND      │───────────────────  GND CHUNG  ← thiếu là ra byte rác
+  │ IO2      │───────────────────  IR transmitter module (3.3V supply)
+  │ IO3      │───────────────────  TSOP receiver         (3.3V supply)
+  │ IO43  TX │──────────────────>  RX on the Arduino UNO Q
+  │ IO44  RX │<──────────────────  TX on the Arduino UNO Q
+  │ GND      │───────────────────  COMMON GND  ← missing this gives you garbage bytes
   └──────────┘
 ```
 
-**Đấu chéo là bắt buộc** ở cặp UART: TX bo này vào RX bo kia. Nối TX-TX thì im lặng
-hoàn toàn, không hỏng gì cả — nên rất dễ mất thời gian đi tìm ở phía phần mềm.
+**Crossing over is mandatory** on the UART pair: TX on this board goes to RX on the other. Wiring
+TX-TX gives complete silence and damages nothing — which makes it very easy to waste time looking
+for the problem in software.
 
-**Nuôi mắt thu bằng 3.3V, không 5V.** Ngưỡng tuyệt đối của chân là VDD+0.3 (~3.6V).
-Ở 3.3V thì module phát nên có transistor riêng; loại chỉ có LED nối tiếp trở (kiểu
-KY-005) vẫn chạy nhưng dòng thấp, tầm phát yếu.
+**Power the receiver from 3.3V, not 5V.** The absolute maximum on the pin is VDD+0.3 (~3.6V). At
+3.3V the transmitter module should have its own transistor; the LED-plus-resistor type (KY-005
+style) still works but at low current, so the range is poor.
 
-### 2.1 Vì sao mượn được chân UART0
+### 2.1 Why UART0's pins can be borrowed
 
-Chỉ vì cổng USB-C là **USB gốc** của S3 — `Serial` (console) đi qua USB, không qua
-UART0, nên IO43/44 rảnh thật. Nếu bo hoá ra có chip cầu CH34x thì console nằm chính
-trên hai chân đó, và nối UNO Q vào là mất cả console lẫn đường UNO Q.
-**Kiểm trước khi hàn** — §4 bước 1.
+Only because the USB-C port is the S3's **native USB** — `Serial` (the console) goes over USB, not
+over UART0, so IO43/44 really are free. If the board turned out to have a CH34x bridge chip, the
+console would be on exactly those two pins, and wiring the UNO Q in would cost you both the console
+and the UNO Q link. **Check before soldering** — §4 step 1.
 
-Được gì: IO14 + IO21 rảnh ra, vừa đúng số chân PZEM cần cho giai đoạn sau. Không có
-đường này thì tới lúc gắn PZEM sẽ hết chân và phải tháo bớt thứ khác.
+What you gain: IO14 + IO21 are freed, exactly the number of pins the PZEM will need later. Without
+this, the PZEM stage would run out of pins and something else would have to be removed.
 
-**Chiều không được đảo.** Tài liệu bo ghi `RXD0(IO43) / TXD0(IO44)` — **ngược** với
-datasheet ESP32-S3 (IOMUX mặc định: IO43 = U0TXD, IO44 = U0RXD). Tin datasheet, vì nó
-quyết định ROM bootloader lái chân nào lúc khởi động. Đặt ngược thì mỗi lần reset,
-ROM lái IO43 làm ngõ ra trong khi UNO Q cũng đang đẩy ngõ ra vào đó — hai ngõ ra đấu
-nhau trên một dây.
+**The direction cannot be swapped.** The board documentation says `RXD0(IO43) / TXD0(IO44)` — the
+**opposite** of the ESP32-S3 datasheet (default IOMUX: IO43 = U0TXD, IO44 = U0RXD). Trust the
+datasheet, because it determines which pin the ROM bootloader drives at startup. Get it backwards
+and on every reset the ROM drives IO43 as an output while the UNO Q is also driving an output into
+it — two outputs fighting on one wire.
 
-Mỗi lần bo reset, UNO Q sẽ nhận một nhúm byte lạ (ROM + bootloader tầng 2 in log ra
-IO43 trước khi `setup()` chạy). **Bình thường** — khung gói lọc sẵn bằng magic `0xAC`
-+ CRC8 + trượt byte dò lại. Sau khi `Serial1.begin()` gắn UART1 vào hai chân này qua
-ma trận GPIO thì UART0 không còn ra tới chân nữa.
+On every board reset the UNO Q will receive a handful of stray bytes (the ROM and the second-stage
+bootloader print their log on IO43 before `setup()` runs). **This is normal** — the framing filters
+them out with a `0xAC` magic byte + CRC8 + byte-sliding resync. Once `Serial1.begin()` attaches
+UART1 to these pins through the GPIO matrix, UART0 no longer reaches the pins at all.
 
-Trả giá: còn dây UNO Q thì **không nạp được qua UART0** — nạp bằng USB-C.
+The price: while the UNO Q wire is attached you **cannot flash over UART0** — flash over USB-C.
 
-### 2.2 Hai chân strapping phải nhớ
+### 2.2 Two strapping pins to remember
 
-**IO45 (đèn nền)** — chọn mức điện áp VDD_SPI, **phải thấp lúc reset**. Cao là chip
-chọn mức 1.8V cho flash và bo không boot. An toàn vì LEDC chỉ gắn vào chân sau khi
-boot xong, nhưng: **tuyệt đối không hàn trở kéo lên vào chân này.**
+**IO45 (backlight)** — selects the VDD_SPI voltage level and **must be low at reset**. High makes
+the chip select 1.8V for the flash and the board will not boot. It is safe because LEDC only
+attaches to the pin after boot completes, but: **never solder a pull-up onto this pin.**
 
-**IO3 (IR thu)** — chọn nguồn tín hiệu JTAG, nhưng chỉ có tác dụng khi eFuse
-`JTAG_SEL_ENABLE` đã đốt, mà mặc định thì chưa. Vẫn cố ý đặt IR **thu** (không phải
-phát) lên đây: mắt thu TSOP giữ chân ở mức cao ngay từ lúc cấp nguồn, tức mức lúc
-reset là xác định. Đầu phát thì thả nổi cho tới khi `setup()` chạy — và một chân
-strapping thả nổi là thứ không nên có.
+**IO3 (IR receive)** — selects the JTAG signal source, but only takes effect once the
+`JTAG_SEL_ENABLE` eFuse is burned, which it is not by default. IR **receive** (not transmit) is
+deliberately placed here: a TSOP receiver holds the pin high from the moment it is powered, so the
+level at reset is deterministic. The transmitter side floats until `setup()` runs — and a floating
+strapping pin is something you should not have.
 
 ---
 
-## 3. Khác gì bo QR Box
+## 3. Differences from the QR Box board
 
-| | QR Box | Bo này |
+| | QR Box | This board |
 |---|---|---|
-| Chip màn | ST7789 | **ILI9341** |
-| Còi | có (GPIO13) | **không** |
-| Đồng hồ | DS1307 (có pin nuôi) | **không** — lấy từ NTP |
-| Bộ dịch mức | TXS0104 (phải bật OE) | **không** — 3.3V thẳng |
-| SPI màn | 27 MHz | 40 MHz (chân IOMUX của FSPI) |
+| Display controller | ST7789 | **ILI9341** |
+| Buzzer | yes (GPIO13) | **no** |
+| Clock | DS1307 (battery-backed) | **no** — taken from NTP |
+| Level shifter | TXS0104 (OE must be driven) | **no** — 3.3V direct |
+| Display SPI | 27 MHz | 40 MHz (FSPI IOMUX pins) |
 
-**Mất còi** vì hết chân, và nó chỉ báo "đã nhận chạm" — toast trên màn làm được việc
-đó. Bo có loa I2S nên tiếng bíp vẫn khả thi sau này, chỉ là phải phát mẫu PCM qua I2S
-chứ không PWM một chân.
+**No buzzer** because there are no pins left, and all it signalled was "touch registered" — an
+on-screen toast does that job. The board has an I2S speaker, so a beep is still feasible later, it
+just has to play a PCM sample over I2S rather than PWM on a pin.
 
-> Vì vậy **hàng `ÂM THANH` trong màn Cài đặt đã gỡ hẳn**. Một công tắc bật/tắt cho
-> phần cứng không tồn tại là kiểu điều khiển tệ nhất: bấm được, đổi màu, và không
-> làm gì cả — người dùng sẽ đi tìm lỗi ở loa. Đường phát tiếng
-> (`Theme::setPressSound` → `BoardIo::beep`) thì GIỮ NGUYÊN: `beep()` tự im khi
-> chân = 255, còn bo QR Box dùng chung mã nguồn này thì vẫn có còi thật.
+> Which is why the **`ÂM THANH` row in the Settings screen has been removed entirely**. A toggle
+> for hardware that does not exist is the worst kind of control: it presses, it changes colour, and
+> it does nothing — the user will go looking for a fault in the speaker. The sound path
+> (`Theme::setPressSound` → `BoardIo::beep`) is KEPT AS IS: `beep()` stays silent when the pin is
+> 255, and the QR Box board, which shares this source, still has a real buzzer.
 
-**Mất RTC** nên mất điện là mất giờ: thanh trạng thái hiện `--:--` vài giây tới khi
-SNTP trả lời. Đổi lại thoát được ca tệ hơn của DS1307 — pin nuôi giữ một giờ **sai**
-vĩnh viễn mà `clockRead()` vẫn khẳng định hợp lệ, đúng ca đã gặp trên bo cũ.
+**No RTC**, so a power cut loses the time: the status bar shows `--:--` for a few seconds until SNTP
+answers. In exchange it avoids the worse DS1307 case — a backup battery preserving a **wrong** time
+forever while `clockRead()` still declares it valid, which is exactly what happened on the old board.
 
-**Mã IR đã học không mất** khi đổi bo: bảng phân vùng giữ nguyên nên NVS vẫn ở đúng
-chỗ cũ. (Vẫn phải học lại nếu thay chip, vì NVS nằm trong flash của chip.)
+**Learned IR codes survive** a board swap: the partition table is unchanged so NVS is still in the
+same place. (You still have to relearn if you replace the chip, since NVS lives in the chip's flash.)
 
 ---
 
-## 4. Bring-up — làm đúng thứ tự
+## 4. Bring-up — in this order
 
-Ba thứ dưới đây **chưa đo được trên bo thật**, cấu hình đang là suy luận từ tài liệu.
+The three items below **have not been measured on real hardware**; the current configuration is
+inferred from documentation.
 
-### Bước 1 — USB gốc hay chip cầu? *(làm TRƯỚC KHI HÀN)*
+### Step 1 — native USB or bridge chip? *(do this BEFORE soldering)*
 
 ```bash
 esptool.py --port COM5 chip_id
 ```
 
-- Có dòng `USB mode: USB-Serial/JTAG` → **USB gốc**, cấu hình hiện tại đúng, hàn được.
-- Không có → bo dùng chip cầu. Phải **cả hai** việc:
-  1. xoá `-D ARDUINO_USB_MODE=1` và `-D ARDUINO_USB_CDC_ON_BOOT=1`
-  2. trả UART UNO Q về `UNOQ_TX_PIN=14 / UNOQ_RX_PIN=21` — và mất chân cho PZEM
+- If you see `USB mode: USB-Serial/JTAG` → **native USB**, the current configuration is right, go
+  ahead and solder.
+- If not → the board uses a bridge chip. You must do **both**:
+  1. remove `-D ARDUINO_USB_MODE=1` and `-D ARDUINO_USB_CDC_ON_BOOT=1`
+  2. move the UNO Q UART back to `UNOQ_TX_PIN=14 / UNOQ_RX_PIN=21` — and lose the PZEM pins
 
-Đoán sai mà vẫn nạp thì màn hình serial **im như bo chết** trong khi nạp báo thành
-công. Node ESP32-C3 của dự án đã dính đúng bẫy này theo chiều ngược lại.
+Guess wrong and flash anyway and the serial monitor is **as silent as a dead board** while the flash
+itself reports success. This project's ESP32-C3 node fell into exactly this trap in the other
+direction.
 
-### Bước 2 — flash mấy MB?
+### Step 2 — how many MB of flash?
 
 ```bash
 esptool.py --port COM5 flash_id
 ```
 
-`platformio.ini` đang khai **4MB, cố ý**: khai thiếu chỉ phí flash dư, khai thừa thì
-bootloader thấy phân vùng nằm ngoài vùng flash nó biết và **bỏ cuộc trong im lặng** —
-lặp `rst` vô hạn, không in nổi một dòng log, rất dễ chẩn đoán nhầm thành chết phần
-cứng. Firmware hiện chiếm ~1,29 MB nên 4MB thừa sức.
+`platformio.ini` declares **4MB, deliberately**: under-declaring only wastes the surplus flash, but
+over-declaring makes the bootloader find partitions outside the flash range it knows about and
+**give up in silence** — endless `rst` loops, not one line of log, very easily misdiagnosed as dead
+hardware. The firmware currently occupies ~1.29 MB, so 4MB is ample.
 
-Muốn nới thì sửa **cả hai** khoá `board_build.flash_size` và `board_upload.flash_size`
-— esptool đọc khoá thứ hai để ghi header ảnh, khoá thứ nhất không thay được nó.
+To increase it, change **both** the `board_build.flash_size` and `board_upload.flash_size` keys —
+esptool reads the second one to write the image header, and the first cannot change it.
 
-### Bước 3 — màu có đúng không?
+### Step 3 — are the colours right?
 
-`-D DISPLAY_SELFTEST=1` đang bật: lúc khởi động hiện 3 ô màu có ghi tên trong 3 giây.
+`-D DISPLAY_SELFTEST=1` is currently on: at startup it shows 3 named colour swatches for 3 seconds.
 
-- Ra **XANH DUONG / TRANG / XANH LA** → đúng. **Xoá dòng đó đi.**
-- Ra âm bản (nền đen thành trắng, xanh thành cam) → thêm `-D DISPLAY_INVERT=1`.
+- If you get **XANH DUONG / TRANG / XANH LA** → correct. **Delete that line.**
+- If you get a negative image (black backgrounds turn white, blue turns orange) → add
+  `-D DISPLAY_INVERT=1`.
 
-Nhớ xoá sau khi chốt: đây là bảng treo tường, 3 giây màn kiểm tra kỹ thuật mỗi lần bật
-nguồn nhìn như màn hình lỗi chứ không phải màn khởi động.
+Remember to remove it once settled: this is a wall-mounted panel, and 3 seconds of engineering test
+pattern on every power-up looks like a fault screen, not a splash screen.
 
-### Bước 4 — trục cảm ứng
+### Step 4 — touch axes
 
-Ba cờ trong [`board-pins.h`](src/board-pins.h) đang để y bo cũ, chưa đo.
-Chạm góc **trên-trái** rồi xem con trỏ chạy đâu:
+The three flags in [`board-pins.h`](src/board-pins.h) are still set as on the old board, unmeasured.
+Touch the **top-left** corner and see where the cursor goes:
 
-| Triệu chứng | Đổi cờ |
+| Symptom | Flag to change |
 |---|---|
-| chạm trái/phải mà con trỏ chạy lên/xuống | `TOUCH_SWAP_XY` |
-| chạm trái ra phải | `TOUCH_INVERT_X` |
-| chạm trên ra dưới | `TOUCH_INVERT_Y` |
+| touching left/right moves the cursor up/down | `TOUCH_SWAP_XY` |
+| touching left lands on the right | `TOUCH_INVERT_X` |
+| touching the top lands at the bottom | `TOUCH_INVERT_Y` |
 
-**Sửa từng cờ một.** Ba cờ độc lập nhau; đổi hai cái cùng lúc thì không biết cái nào
-có tác dụng.
+**Change one flag at a time.** The three are independent; changing two at once leaves you unable to
+tell which one did anything.
 
-Hình đúng nhưng **lộn ngược 180°** thì đổi `TFT_ROTATION` từ 1 sang 3.
+If the image is correct but **upside down by 180°**, change `TFT_ROTATION` from 1 to 3.
 
-### Ba thứ TFT_eSPI bắt trả giá trên ESP32-S3 — đã chốt trên bo thật (14/08/2026)
+### Three things TFT_eSPI charges you for on the ESP32-S3 — settled on real hardware (2026-08-14)
 
-Cả ba đều đã nằm sẵn trong `platformio.ini`; ghi lại đây vì **cả ba đều hỏng theo
-kiểu không nói ra nguyên nhân**, và hai cái đầu làm bo lặp khởi động vô hạn.
+All three are already in `platformio.ini`; they are recorded here because **all three fail without
+saying why**, and the first two put the board in an endless boot loop.
 
-| Cờ | Vì sao bắt buộc |
+| Flag | Why it is mandatory |
 |---|---|
-| `-D USE_FSPI_PORT` | Thiếu nó, `Processors/TFT_eSPI_ESP32_S3.c` lấy **tham chiếu** tới `SPI` toàn cục (`SPIClass& spi = SPI`) thay vì tự dựng bus. `spi.begin()` không cấp được bus, `_spi` vẫn NULL, và lời gọi `beginTransaction()` đầu tiên ghi vào `0x10`. Sập ngay trong `tft.init()`. FSPI chứ không HSPI: FSPI mới có IOMUX cho IO10..13, giữ được 40 MHz. |
-| `-D TFT_USE_DMA=0` | `dma_end_callback()` của thư viện ghi vào `SPI_DMA_CONF_REG(spi_host)`, thanh ghi này **không ánh xạ như trên ESP32 cổ điển**. Sập trong NGẮT ở lần truyền DMA đầu tiên (`EXCVADDR: 0x30`). `initDMA()` vẫn trả **true**, nên không thể phát hiện bằng giá trị trả về — phải chặn từ cấu hình. |
-| `-D DISPLAY_INVERT=1` | **Ngược với bo QR Box.** TFT_eSPI gửi `INVON` vô điều kiện cho ST7789 nhưng không gửi cho ILI9341V, nên cùng một trị số cho hai kết quả trái ngược. |
+| `-D USE_FSPI_PORT` | Without it, `Processors/TFT_eSPI_ESP32_S3.c` takes a **reference** to the global `SPI` (`SPIClass& spi = SPI`) instead of creating its own bus. `spi.begin()` cannot allocate the bus, `_spi` stays NULL, and the first `beginTransaction()` call writes to `0x10`. Crashes inside `tft.init()`. FSPI rather than HSPI: only FSPI has IOMUX for IO10..13, which is what keeps 40 MHz. |
+| `-D TFT_USE_DMA=0` | The library's `dma_end_callback()` writes to `SPI_DMA_CONF_REG(spi_host)`, a register that **is not mapped as it is on the classic ESP32**. Crashes IN AN INTERRUPT on the first DMA transfer (`EXCVADDR: 0x30`). `initDMA()` still returns **true**, so the return value cannot detect it — it has to be blocked from the configuration. |
+| `-D DISPLAY_INVERT=1` | **Opposite of the QR Box board.** TFT_eSPI sends `INVON` unconditionally for ST7789 but not for ILI9341V, so the same setting produces opposite results. |
 
-Hai crash đầu rất dễ chẩn nhầm vì log **dừng ở một chỗ trông hoàn toàn bình
-thường**: cái thứ nhất ngay sau `Cam ung: OK`, cái thứ hai ngay sau
-`Bo dem ve: 2 x 48 dong ...` — tức là sau khi màn đã init xong. Nhìn log thì
-giống hết RAM hoặc hỏng cấu hình LVGL; nó không phải cả hai. Giải mã backtrace là
-đường nhanh nhất:
+The first two crashes are very easy to misdiagnose because the log **stops at a point that looks
+perfectly normal**: the first right after `Cam ung: OK`, the second right after
+`Bo dem ve: 2 x 48 dong ...` — that is, after the display has finished initialising. From the log it
+looks like out-of-memory or a bad LVGL configuration; it is neither. Decoding the backtrace is the
+fastest route:
 
 ```bash
 ~/.platformio/packages/toolchain-xtensa-esp32s3/bin/xtensa-esp32s3-elf-addr2line \
     -pfiaC -e .pio/build/esp32s3-panel/firmware.elf 0x42016ea8 0x42016f81 ...
 ```
 
-Cái giá của `TFT_USE_DMA=0`: mỗi lượt flush do CPU đẩy (`pushColors`) thay vì DMA.
-Chấp nhận được — nhịp vẽ 200 ms và vùng bẩn thường nhỏ hơn nhiều một màn hình.
+The cost of `TFT_USE_DMA=0`: every flush is pushed by the CPU (`pushColors`) rather than DMA.
+Acceptable — the draw interval is 200 ms and the dirty region is usually much smaller than a full
+screen.
 
 ---
 
-## 5. Sự cố hay gặp
+## 5. Common problems
 
-| Triệu chứng | Nguyên nhân thường gặp nhất |
+| Symptom | Most likely cause |
 |---|---|
-| Nạp xong, serial im hoàn toàn | Sai chế độ USB — §4 bước 1 |
-| Lặp `rst:0x3 (SW_RESET)`, không log | Khai flash lớn hơn thật, hoặc thiếu `board_upload.offset_address` |
-| Màn tối, log vẫn chạy | Thiếu `-D BOARD_S3_PANEL=1` → biên dịch nhầm chân bo QR Box |
-| `fillScreen` đúng màu, chữ thì nhiễu/xé | Sai chip màn (ILI9341 ↔ ST7789) |
-| Lặp khởi động ngay sau `Cam ung: OK` | Thiếu `-D USE_FSPI_PORT` — xem §4 |
-| Lặp khởi động ngay sau `Bo dem ve: ...` | Thiếu `-D TFT_USE_DMA=0` — xem §4 |
-| Toàn bộ giao diện âm bản (ô TRẮNG ra ĐEN) | `DISPLAY_INVERT` ngược |
-| Ô TRẮNG vẫn trắng nhưng xanh dương ra đỏ/cam | Đảo thứ tự R↔B, **không** phải đảo màu → `-D TFT_RGB_ORDER=TFT_RGB` |
-| Chạm lệch trục | §4 bước 4 |
-| UNO Q không nhận gói | TX-TX (chưa đấu chéo), hoặc thiếu GND chung |
-| Máy lạnh không nhúc nhích, log vẫn "da phat" | Chưa hàn LED IR, hoặc module phát thiếu transistor |
+| Flash succeeds, serial completely silent | Wrong USB mode — §4 step 1 |
+| `rst:0x3 (SW_RESET)` loop, no log | Flash declared larger than it is, or `board_upload.offset_address` missing |
+| Screen dark, log still running | Missing `-D BOARD_S3_PANEL=1` → compiled with the QR Box pinout |
+| `fillScreen` gives the right colour, text is noisy/torn | Wrong display controller (ILI9341 ↔ ST7789) |
+| Boot loop right after `Cam ung: OK` | Missing `-D USE_FSPI_PORT` — see §4 |
+| Boot loop right after `Bo dem ve: ...` | Missing `-D TFT_USE_DMA=0` — see §4 |
+| The whole UI is a negative (WHITE swatch comes out BLACK) | `DISPLAY_INVERT` is backwards |
+| WHITE swatch stays white but blue comes out red/orange | R↔B order swapped, **not** colour inversion → `-D TFT_RGB_ORDER=TFT_RGB` |
+| Touch axes off | §4 step 4 |
+| The UNO Q receives no packets | TX-TX (not crossed over), or no common GND |
+| The AC does not react, log still says "da phat" | The IR LED is not soldered, or the transmitter module lacks a transistor |
 
 ---
 
-## 6. Liên quan
+## 6. Related
 
-- [`src/board-pins.h`](src/board-pins.h) — sơ đồ chân theo bo, chọn bằng cờ `-D BOARD_*`
-- [`../shared/unoq-link-protocol.h`](../shared/unoq-link-protocol.h) — khung gói UART sang UNO Q
-- [`../shared/espnow-message.h`](../shared/espnow-message.h) — khuôn gói 4 góc phòng + ngoài trời
-- [`../Interface/README.md`](../Interface/README.md) — wireframe, toạ độ, lý do từng quyết định bố cục
+- [`src/board-pins.h`](src/board-pins.h) — per-board pinout, selected with `-D BOARD_*` flags
+- [`../shared/unoq-link-protocol.h`](../shared/unoq-link-protocol.h) — UART framing to the UNO Q
+- [`../shared/espnow-message.h`](../shared/espnow-message.h) — packet layout for the 4 room corners + outdoor
+- [`../Interface/README.md`](../Interface/README.md) — wireframes, coordinates, and the reasoning behind each layout decision

@@ -1,51 +1,55 @@
-# BreezeLink — Firmware node
+# BreezeLink — Node firmware
 
-Sáu thiết bị cho **một nhà**, ba thư mục firmware:
+Six devices for **one household**, three firmware directories:
 
-| Thư mục | Bo | Loại node | Hiện trên app/web |
+| Directory | Board | Node type | Shown in app/web as |
 |---|---|---|---|
-| `esp32-s3-panel/` | **Bo 2.8" ESP32‑S3** (ILI9341V + FT6336G) | **Gateway / panel treo tường** — thu ESP‑NOW, phát IR, màn cảm ứng, UART tới UNO Q, **không cảm biến** | "Gateway trong nhà" |
-| `esp32-room/` | 4× **ESP32‑C3‑DevKitM‑1** + DHT22 | **Cảm biến phòng** — slave ESP‑NOW | "Cảm biến trong phòng" |
-| `esp32-outdoor/` | **ESP32‑C3‑DevKitM‑1** + DHT22 | **Ngoài trời** — slave ESP‑NOW | "Nút ngoài trời" |
-| `shared/` | — | Khuôn gói dùng chung: ESP‑NOW, radio slave, giao thức UART với UNO Q. **Cả ba node trên đều `-I../shared`** | — |
-| (không ở đây) | Arduino UNO Q | Edge AI — nối gateway qua **UART**, xem [`../edge-ai/`](../edge-ai/) | — |
+| `esp32-s3-panel/` | **2.8" ESP32‑S3 board** (ILI9341V + FT6336G) | **Gateway / wall panel** — receives ESP‑NOW, transmits IR, touch screen, UART to the UNO Q, **no sensor** | "Gateway trong nhà" |
+| `esp32-room/` | 4× **ESP32‑C3‑DevKitM‑1** + DHT22 | **Room sensor** — ESP‑NOW slave | "Cảm biến trong phòng" |
+| `esp32-outdoor/` | **ESP32‑C3‑DevKitM‑1** + DHT22 | **Outdoor** — ESP‑NOW slave | "Nút ngoài trời" |
+| `shared/` | — | Shared definitions: ESP‑NOW packets, slave radio, the UART protocol to the UNO Q. **All three nodes above use `-I../shared`** | — |
+| (not here) | Arduino UNO Q | Edge AI — connects to the gateway over **UART**, see [`../edge-ai/`](../edge-ai/) | — |
 
-> **Mã nguồn panel nằm ở `esp32-s3-panel/src/` — đúng MỘT bản.** Chỗ nào khác nhau
-> giữa các bo thì để ở `esp32-s3-panel/src/board-pins.h`, chọn bằng `-D BOARD_*`,
-> **không rải `#ifdef` vào mã**.
+> **The panel source lives in `esp32-s3-panel/src/` — exactly ONE copy.** Anything that
+> differs between boards goes in `esp32-s3-panel/src/board-pins.h` and is selected with
+> `-D BOARD_*`; **do not sprinkle `#ifdef` through the code**.
 >
-> Lần dọn 15/08/2026 đã gỡ ba thư mục: `esp32-qrbox/` (bo QR Box cũ, hỏng mạch nạp),
-> `esp32-s3-gateway/` (bo gỡ lỗi không màn) — cả hai chỉ là cấu hình build trỏ về
-> `esp32-s3-panel/src/` — và `esp32-humidity/` (bo thử máy tạo ẩm, logic đã port vào
-> panel). Cần xem lại: `git log --diff-filter=D -- FirmWare/esp32-qrbox`.
+> The 2026-08-15 cleanup removed three directories: `esp32-qrbox/` (the old QR Box board,
+> broken programming circuit) and `esp32-s3-gateway/` (a headless debug board) — both were
+> only build configurations pointing at `esp32-s3-panel/src/` — plus `esp32-humidity/` (the
+> humidifier test board, whose logic has been ported into the panel). To look them up:
+> `git log --diff-filter=D -- FirmWare/esp32-qrbox`.
 >
-> Sơ đồ chân và trình tự bring-up: [`esp32-s3-panel/README.md`](esp32-s3-panel/README.md).
+> Pinout and bring-up order: [`esp32-s3-panel/README.md`](esp32-s3-panel/README.md).
 
-> **GATEWAY KHÔNG CÒN ĐO NHIỆT ĐỘ.** Cả DHT22 lẫn SHT3x đã bỏ khỏi firmware của nó:
-> một cảm biến treo tường chỉ đo được *cái tường đó*, còn bốn góc phòng chênh nhau
-> 3–4 °C là chuyện thường. Số "trong nhà" nay là **trung vị** các góc còn tươi
-> (`esp32-s3-panel/src/room-registry.h`).
+> **THE GATEWAY NO LONGER MEASURES TEMPERATURE.** Both the DHT22 and the SHT3x have been
+> removed from its firmware: a wall-mounted sensor only measures *that wall*, and four room
+> corners differing by 3–4 °C is normal. The "indoor" number is now the **median** of the
+> fresh corners (`esp32-s3-panel/src/room-registry.h`).
 
-> **CẢ HAI NODE ĐỀU LÀ ESP32.** Trước đây mỗi node một dòng chip (indoor ESP32‑S3,
-> outdoor ESP8266) nên hai bên dùng hai bộ API ESP‑NOW khác hẳn nhau — sửa giao
-> thức là phải sửa hai lần theo hai kiểu, đúng loại việc dễ quên một nửa. Nay
-> chung một API (`esp_now.h` của IDF), chung toolchain, chung cách nạp.
+> **BOTH NODES ARE NOW ESP32.** They used to be different chip families (indoor ESP32‑S3,
+> outdoor ESP8266), so each side used a completely different ESP‑NOW API — changing the
+> protocol meant changing it twice in two different styles, exactly the kind of work where
+> one half gets forgotten. Now they share one API (IDF's `esp_now.h`), one toolchain, one
+> flashing procedure.
 >
-> Hai thư mục cũ `esp32s3-indoor-master/` (bản thử nghiệm không IR) và
-> `esp8266-outdoor/` **đã bỏ** — xem lịch sử git nếu cần tra lại.
+> The two old directories `esp32s3-indoor-master/` (an experimental version without IR) and
+> `esp8266-outdoor/` have **been removed** — check the git history if you need them.
 
 ---
 
-## 1. Cắm cảm biến nhiệt/ẩm
+## 1. Wiring the temperature/humidity sensor
 
-**Hai node dùng hai loại cảm biến khác nhau** — không phải tuỳ hứng mà do bo:
+**The two nodes use two different sensor types** — not by whim, but because of the boards:
 
-### Node ngoài trời (ESP32‑C3‑DevKitM‑1) — DHT22
+### Outdoor node (ESP32‑C3‑DevKitM‑1) — DHT22
 
-Đổi từ ESP32 DevKit V1 sang C3 ngày 15/08/2026 — **cùng bo với 4 node góc phòng**,
-nên cả năm node cảm biến giờ chung một dòng chip, một toolchain, một bộ bài học.
+Moved from an ESP32 DevKit V1 to the C3 on 2026-08-15 — **the same board as the 4 room
+nodes**, so all five sensor nodes now share one chip family, one toolchain, one set of
+lessons learned.
 
-DHT có 2 loại: **module 3 chân** (đã có trở kéo — nối thẳng) hoặc **cảm biến 4 chân rời** (mắc thêm điện trở 4.7k–10kΩ giữa DATA và 3V3).
+DHT comes in 2 forms: a **3-pin module** (pull-up already fitted — wire it directly) or a
+**bare 4-pin sensor** (add a 4.7k–10kΩ resistor between DATA and 3V3).
 
 ```
    DHT22/DHT11        ESP32-C3-DevKitM-1
@@ -56,180 +60,194 @@ DHT có 2 loại: **module 3 chân** (đã có trở kéo — nối thẳng) ho�
   └───────────┘
 ```
 
-⚠️ Cấp nguồn DHT bằng **3V3**, không dùng 5V (chân DATA vào GPIO 3.3V).
-Muốn đổi chân: sửa `DHT_PIN` trong `src/config.h` — nhưng trên C3 phải tránh
-GPIO2/8/9 (strapping, GPIO9 là nút BOOT), GPIO18/19 (USB), GPIO11‑17 (flash),
-GPIO20/21 (UART0). `DHT_TYPE` nay là kiểu của DHTesp (`DHTesp::DHT22`), không
-phải macro của Adafruit.
+⚠️ Power the DHT from **3V3**, not 5V (the DATA pin goes into a 3.3V GPIO).
+To change the pin: edit `DHT_PIN` in `src/config.h` — but on the C3 you must avoid
+GPIO2/8/9 (strapping, GPIO9 is the BOOT button), GPIO18/19 (USB), GPIO11‑17 (flash),
+GPIO20/21 (UART0). `DHT_TYPE` is now a DHTesp type (`DHTesp::DHT22`), not an Adafruit
+macro.
 
-> **Công suất phát để MẶC ĐỊNH 8 dBm trên bo này.** Bo cũ chạy 19,5 dBm được nhờ
-> AMS1117 gánh nổi đỉnh dòng; C3 nuôi qua USB ở mức đó thì sóng méo và gateway
-> nhận 0 gói — mà broadcast không có ACK nên node vẫn báo "da phat". Lý do đầy
-> đủ ở cuối `esp32-outdoor/platformio.ini`.
+> **Leave the transmit power at the DEFAULT 8 dBm on this board.** The old board could run
+> 19.5 dBm because the AMS1117 could supply the current peaks; a USB-powered C3 at that
+> level produces distorted output and the gateway receives 0 packets — and since broadcast
+> has no ACK, the node still reports "sent". The full reasoning is at the end of
+> `esp32-outdoor/platformio.ini`.
 
-### Node góc phòng (ESP32‑C3‑DevKitM‑1) — DHT22 trên GPIO4
+### Room-corner node (ESP32‑C3‑DevKitM‑1) — DHT22 on GPIO4
 
-Bốn bo giống hệt nhau, chỉ khác `DEVICE_UUID`. DATA → GPIO4, **trở kéo 4.7k lên 3.3V**,
-nuôi bằng **3.3V không phải 5V**. Chân phải tránh trên C3 và lý do:
+Four identical boards differing only in `DEVICE_UUID`. DATA → GPIO4, **4.7k pull-up to
+3.3V**, powered from **3.3V not 5V**. The pins to avoid on the C3 and why:
 [`esp32-room/README.md`](esp32-room/README.md).
 
-### Gateway (QR Box Advance) — **KHÔNG cắm cảm biến nào**
+### Gateway (QR Box Advance) — **NO sensor at all**
 
-Bo này từng có tuỳ chọn SHT3x trên I²C 0x44; đã bỏ hẳn khỏi firmware. Cắm vào cũng
-không có tác dụng — không còn mã nào đọc nó, và có đọc thì cũng chỉ thêm một nguồn
-số thứ hai khiến màn nhảy qua lại giữa nhiệt độ của cái tường và nhiệt độ căn phòng.
+This board once had an optional SHT3x on I²C 0x44; that has been removed from the firmware
+entirely. Wiring one in now does nothing — no code reads it, and if it did it would only add
+a second source of numbers, making the screen flip back and forth between the wall's
+temperature and the room's.
 
 ---
 
-## 2. Điền cấu hình (`src/config.h` mỗi node)
+## 2. Filling in the configuration (`src/config.h` on each node)
 
-Lấy giá trị từ **web admin → Khách hàng → mở từng node → mục "Nạp firmware"**:
+Take the values from **admin web → Khách hàng → open each node → the "Nạp firmware"
+section**:
 
-| Điền vào config.h | Lấy ở panel | Ghi chú |
+| Field in config.h | Where on the panel | Note |
 |---|---|---|
-| `ORG_ID` | ô ORG_ID | **giống nhau** cả 2 node |
-| `DEVICE_UUID` | ô DEVICE_UUID | **khác nhau** mỗi node |
+| `ORG_ID` | ORG_ID field | **the same** on both nodes |
+| `DEVICE_UUID` | DEVICE_UUID field | **different** per node |
 | `MQTT_USERNAME` | = DEVICE_UUID | |
-| `MQTT_PASSWORD` | ô MQTT_PASSWORD | **khác nhau** mỗi node |
-| `MQTT_HOST` | ô MQTT_HOST | **giống nhau** — xem cảnh báo dưới |
-| `MQTT_PORT` | 1883 | cố định (plaintext, KHÔNG TLS) |
+| `MQTT_PASSWORD` | MQTT_PASSWORD field | **different** per node |
+| `MQTT_HOST` | MQTT_HOST field | **the same** — see the warning below |
+| `MQTT_PORT` | 1883 | fixed (plaintext, NO TLS) |
 
-> ⚠️ **Panel web ghi `MQTT_HOST = "emqx"`** — đó là tên service nội bộ Docker, ESP
-> không phân giải được. Phải điền **IP/domain công khai** của server.
+> ⚠️ **The web panel prints `MQTT_HOST = "emqx"`** — that is the internal Docker service
+> name, which an ESP cannot resolve. You must fill in the server's **public IP/domain**.
 
-WiFi (`WIFI_SSID`/`WIFI_PASSWORD`): điền mạng tại nơi lắp node.
+WiFi (`WIFI_SSID`/`WIFI_PASSWORD`): the network at the node's installation site.
 
-Riêng node ngoài trời chạy env `esp32-espnow` thì **không đăng nhập WiFi** — nó chỉ
-*quét* để biết router đang phát ở kênh nào rồi bám theo (ESP‑NOW bắt buộc hai bên
-cùng kênh). Với env đó chỉ `WIFI_SSID` có tác dụng, và cả khối MQTT bị bỏ qua.
+The outdoor node running the `esp32-espnow` env **does not join WiFi** — it only *scans* to
+learn which channel the router is broadcasting on and then locks onto it (ESP‑NOW requires
+both sides on the same channel). With that env only `WIFI_SSID` matters, and the entire MQTT
+block is ignored.
 
 ---
 
-## 3. Build & nạp (PlatformIO)
+## 3. Build & flash (PlatformIO)
 
 ```bash
-# Panel treo tường CHÍNH THỨC (bo 2.8" ESP32-S3) — cắm thẳng cổng USB-C
-# ĐỌC esp32-s3-panel/README.md §4 TRƯỚC KHI HÀN: 3 thứ phải đo trên bo thật.
+# The OFFICIAL wall panel (2.8" ESP32-S3 board) — plug straight into the USB-C port
+# READ esp32-s3-panel/README.md §4 BEFORE SOLDERING: 3 things to measure on real hardware.
 cd esp32-s3-panel
-cp src/config.h.example src/config.h      # điền như §2 — DÙNG CHUNG cho mọi bo panel
+cp src/config.h.example src/config.h      # fill in as per §2 — SHARED by every panel board
 pio run -e esp32s3-panel -t upload --upload-port COMx
-pio device monitor -p COMx -b 115200      # xem log
+pio device monitor -p COMx -b 115200      # watch the log
 
-# 4 node góc phòng — nạp LẦN LƯỢT, đổi DEVICE_UUID giữa mỗi lần
+# The 4 room-corner nodes — flash them ONE AT A TIME, changing DEVICE_UUID in between
 cd esp32-room
-cp src/config.h.example src/config.h      # WIFI_SSID (chỉ dò kênh) + DEVICE_UUID
+cp src/config.h.example src/config.h      # WIFI_SSID (channel discovery only) + DEVICE_UUID
 pio run -e esp32c3-room -t upload --upload-port COMz
 
-# Node ngoài trời (ESP32-C3-DevKitM-1)
+# Outdoor node (ESP32-C3-DevKitM-1)
 cd esp32-outdoor
 cp src/config.h.example src/config.h
-pio run -e esp32-espnow -t upload --upload-port COMy   # MẶC ĐỊNH: slave ESP-NOW
+pio run -e esp32-espnow -t upload --upload-port COMy   # DEFAULT: ESP-NOW slave
 pio device monitor -p COMy -b 115200
 ```
 
-> ⚠️ **Bo QR Box Advance phải có nguồn riêng 9–24 VDC ở P2/P4.** Cổng P3 chỉ có
-> TX/RX/GND cho debug — cấp mỗi USB‑TTL thì màn + ESP32 không đủ dòng, bo sụt áp
-> và **reset lặp liên tục** (log ra `rst:0x3 (SW_RESET)` mỗi vài chục ms, không
-> bao giờ in nổi một dòng của firmware).
+> ⚠️ **The QR Box Advance board needs its own 9–24 VDC supply on P2/P4.** Port P3 only has
+> TX/RX/GND for debugging — powering it from a USB‑TTL alone leaves the display + ESP32
+> short of current, the board browns out and **resets continuously** (the log emits
+> `rst:0x3 (SW_RESET)` every few tens of ms and never manages to print a single line of
+> firmware output).
 
-Node ngoài trời có **env dự phòng** tự nối WiFi + MQTT thẳng, dùng khi ESP‑NOW
-trục trặc — nó không phụ thuộc node trong nhà nên tách lỗi rất nhanh:
+The outdoor node has a **fallback env** that connects straight to WiFi + MQTT, for use when
+ESP‑NOW misbehaves — it does not depend on the indoor node, so it isolates faults very
+quickly:
 
 ```bash
 pio run -e esp32-wifi -t upload --upload-port COMy
 ```
 
-Log chạy đúng sẽ thấy:
+A healthy run looks like:
 ```
-WiFi -> "TEN_WIFI" .... OK  IP=192.168.x.x
+WiFi -> "SSID_NAME" .... OK  IP=192.168.x.x
 MQTT ... connected
-[telemetry] t=30.0°C h=60% -> da gui
+[telemetry] t=30.0°C h=60% -> sent
 ```
 
 ---
 
-## 4. Kiểm tra đồng bộ
+## 4. Verifying the link
 
-- **Web:** node hiện **"Trực tuyến"**; mục *Nhiệt độ/Độ ẩm mới nhất* + biểu đồ cập nhật.
-- **App:** thẻ thiết bị hiện *"Nhiệt độ trong nhà"* (ESP32) và *"Nhiệt độ ngoài trời"* (ESP8266).
+- **Web:** the node shows **"Trực tuyến"**; the *Nhiệt độ/Độ ẩm mới nhất* section and the
+  chart update.
+- **App:** the device card shows *"Nhiệt độ trong nhà"* (ESP32) and *"Nhiệt độ ngoài trời"*
+  (ESP8266).
 
 ---
 
-## 5. Xử lý lỗi thường gặp
+## 5. Common problems
 
-| Log | Nguyên nhân | Cách xử lý |
+| Log | Cause | Fix |
 |---|---|---|
-| `MQTT ... that bai rc=4` | Sai username/password | Copy lại DEVICE_UUID/MQTT_PASSWORD từ panel |
-| `MQTT ... that bai rc=5` | Broker chưa cấp quyền cho device | Cần nạp cặp user/token của device vào EMQX (seed/sync auth) — xem *Câu hỏi mở* |
-| `rc=-2` lặp mãi | Mạng/host | Kiểm tra MQTT_HOST là IP công khai (không phải `emqx`), WiFi có internet |
-| `Doc cam bien loi (NaN)` *(node ngoài trời)* | Sai chân/nguồn/loại DHT | Kiểm lại VCC 3V3 + DATA đúng chân + (loại 4 chân) trở kéo 10k + `DHT_TYPE` đúng |
-| `Chua co so do SHT3x` *(node trong nhà)* | Chưa câu dây SHT3x vào bus I²C, hoặc sai địa chỉ | Câu vào J1 (§1); SHT3x phải ở 0x44 |
-| `rst:0x3 (SW_RESET)` lặp mỗi vài chục ms | Bo QR Box thiếu nguồn chính | Cấp 9–24 VDC vào P2/P4 — USB‑TTL ở P3 không nuôi nổi bo (§3) |
+| `MQTT ... failed rc=4` | Wrong username/password | Re-copy DEVICE_UUID/MQTT_PASSWORD from the panel |
+| `MQTT ... failed rc=5` | The broker has not authorised the device | The device's user/token pair needs loading into EMQX (seed/sync auth) — see *Open questions* |
+| `rc=-2` repeating forever | Network/host | Check that MQTT_HOST is the public IP (not `emqx`) and that the WiFi has internet |
+| `Sensor read error (NaN)` *(outdoor node)* | Wrong pin/supply/DHT type | Re-check VCC 3V3 + DATA on the right pin + (4-pin type) the 10k pull-up + the correct `DHT_TYPE` |
+| `No SHT3x reading yet` *(indoor node)* | The SHT3x is not wired to the I²C bus, or the address is wrong | Wire it to J1 (§1); the SHT3x must be at 0x44 |
+| `rst:0x3 (SW_RESET)` every few tens of ms | The QR Box board is missing its main supply | Feed 9–24 VDC into P2/P4 — a USB‑TTL on P3 cannot power the board (§3) |
 
 ---
 
-## 6. Gateway — panel treo tường (IR + màn cảm ứng)
+## 6. Gateway — the wall panel (IR + touch screen)
 
-Mã ở `esp32-s3-panel/src/`, nạp lên bo `esp32-s3-panel/` (chính thức) hoặc bo QR Box cũ.
+The code is in `esp32-s3-panel/src/`, flashed onto the `esp32-s3-panel/` board (official) or
+the old QR Box board.
 
-Bo này gộp **5 vai trò** — nhưng **đo nhiệt độ không còn là một trong số đó**: thu ESP‑NOW
-từ 4 node góc phòng và node ngoài trời · trung chuyển lên MQTT hộ từng node · điều khiển
-máy lạnh bằng hồng ngoại · hiển thị + điều khiển tại chỗ trên màn 2.8" · nói chuyện với
-Arduino UNO Q qua UART. Cả năm đều là *chuyển tiếp* và *thi hành*; không vai trò nào
-tạo ra một phép đo.
+This board combines **5 roles** — but **measuring temperature is no longer one of them**:
+receiving ESP‑NOW from the 4 room-corner nodes and the outdoor node · relaying each node's
+data up to MQTT on its behalf · driving the air conditioner over infrared · displaying and
+controlling locally on the 2.8" screen · talking to the Arduino UNO Q over UART. All five are
+*relaying* and *executing*; none of them produces a measurement.
 
-Thiết kế giao diện, cách đọc ngược sơ đồ chân từ schematic, và lý do phải tách hai lõi:
-[`Interface/README.md`](Interface/README.md).
+UI design, how the pinout was reverse-engineered from the schematic, and why the two cores
+must be separated: [`Interface/README.md`](Interface/README.md).
 
-### 6.1 Vì sao gateway nối MQTT thẳng thay vì làm một slave nữa
+### 6.1 Why the gateway connects to MQTT directly instead of being another slave
 
-1. **Đích của lệnh là một lookup, không phải suy luận.** `get_gateway_device()` chọn
-   `role=master` trước (và **từ chối** node `room` — chúng không có phiên MQTT nào), rồi mới
-   rơi về `node_type=indoor` cũ nhất. Nên **phải đặt vai trò master cho bo này trên web**;
-   không đặt thì hộ nào có hai hàng indoor sẽ bị lái nhầm node, và triệu chứng là lệnh
-   publish thành công mà máy lạnh không nhúc nhích.
-2. **Lệnh IR quá to để đi qua ESP‑NOW.** `command_publisher.py` gửi kèm `ir_raw` — mảng vài
-   trăm mốc thời gian µs, cỡ vài KB. ESP‑NOW giới hạn **250 byte/gói**, muốn trung chuyển
-   qua master thì phải tự viết giao thức chia mảnh + ghép lại + báo thiếu mảnh. Nối MQTT
-   thẳng thì broker đã lo sẵn.
+1. **The target of a command is a lookup, not an inference.** `get_gateway_device()` picks
+   `role=master` first (and **refuses** `room` nodes — they have no MQTT session at all),
+   only then falling back to the oldest `node_type=indoor`. So **this board must be given the
+   master role on the web UI**; without that, a household with two indoor rows will drive the
+   wrong node, and the symptom is a command that publishes successfully while the air
+   conditioner does not move.
+2. **IR commands are too large to travel over ESP‑NOW.** `command_publisher.py` includes
+   `ir_raw` — an array of several hundred µs timings, a few KB. ESP‑NOW is limited to
+   **250 bytes per frame**, so relaying through the master would mean writing our own
+   fragmentation + reassembly + missing-fragment protocol. Connecting to MQTT directly means
+   the broker has already solved it.
 
-→ Node này **mang chính `DEVICE_UUID` của node ESP32‑S3 cũ**. Không tạo device mới trên web.
+→ This node **carries the old ESP32‑S3 node's own `DEVICE_UUID`**. Do not create a new device
+on the web UI.
 
-### 6.2 Cắm dây
+### 6.2 Wiring
 
-Module thu và phát là hai bo rời, mỗi bo 3 chân. Trên bo QR Box Advance **không còn
-GPIO trống nào**, nên hai chân IR phải lấy từ hai chỗ khác nhau — đây là ràng buộc
-phần cứng, không phải lựa chọn:
+The receiver and transmitter are two separate 3-pin modules. The QR Box Advance board has **no
+free GPIO left**, so the two IR pins have to come from two different places — this is a
+hardware constraint, not a preference:
 
 ```
-   IR Transmitter (LED phát)   QR Box Advance
+   IR Transmitter (emitter LED)   QR Box Advance
    VCC ──────────────────────── 3V3
-   DAT ──────────────────────── GPIO17   ← chân TX của module 4G A7680C
+   DAT ──────────────────────── GPIO17   ← TX pin of the A7680C 4G module
    GND ──────────────────────── GND
 
-   IR Receiver (mắt thu)
-   VCC ──────────────────────── 5V       ← có sẵn trên header P3
-   OUT ──────────────────────── GPIO15   ← P3, đi qua bộ dịch mức TXS0104
+   IR Receiver
+   VCC ──────────────────────── 5V       ← available on header P3
+   OUT ──────────────────────── GPIO15   ← P3, through the TXS0104 level shifter
    GND ──────────────────────── GND
 ```
 
-- **IR phát → GPIO17** chỉ dùng được khi **KHÔNG hàn module 4G A7680C** lên bo (dự án
-  này không dùng 4G). Chân này **không ra header** — phải hàn dây thẳng vào pad chân
-  module. Chạy 3.3V trực tiếp: đường UART_2 **không** đi qua TXS0104.
-- **IR thu → GPIO15** đi qua TXS0104 nên mắt thu chạy được ở 5V. Bộ dịch mức này chỉ
-  thông khi `EN_LEVEL_SHIFT` (GPIO12) được kéo HIGH — `Ui::begin()` làm việc đó *trong
-  `setup()`*, và **tuyệt đối không được kéo lên bằng trở ngoài**: GPIO12 là MTDI, HIGH
-  lúc reset thì ROM chọn mức flash 1.8V và **bo không boot**.
+- **IR transmit → GPIO17** is only usable if the **A7680C 4G module is NOT soldered** to the
+  board (this project does not use 4G). This pin **does not reach a header** — you have to
+  solder a wire directly to the module's pad. It runs at 3.3V directly: the UART_2 lines do
+  **not** pass through the TXS0104.
+- **IR receive → GPIO15** goes through the TXS0104, so the receiver can run at 5V. That level
+  shifter only conducts while `EN_LEVEL_SHIFT` (GPIO12) is driven HIGH — `Ui::begin()` does
+  that *inside `setup()`*, and it **must never be pulled up with an external resistor**:
+  GPIO12 is MTDI, and HIGH at reset makes the ROM select the 1.8V flash level so **the board
+  will not boot**.
 
-Hai chân này khai trong `build_flags` của `platformio.ini` (cùng chỗ với các cờ `TFT_*`),
-**không phải** trong `src/config.h`.
+These two pins are declared in `platformio.ini`'s `build_flags` (alongside the `TFT_*` flags),
+**not** in `src/config.h`.
 
-**Đặt bo ở đâu:** LED phát trên module này được kéo thẳng từ chân dữ liệu, không có
-transistor khuếch đại → **tầm với chỉ ~2‑5 m và cần nhìn thẳng vào mắt nhận của dàn lạnh**.
-Muốn xa hơn phải tự thêm transistor + LED công suất. Mắt thu để hướng ra phía người dùng
-đứng bấm remote.
+**Where to mount the board:** the transmitter LED on this module is driven straight from the
+data pin with no amplifying transistor → **its range is only ~2‑5 m and it needs line of sight
+to the indoor unit's receiver**. Going further requires adding your own transistor + power
+LED. Point the receiver towards wherever the user stands to press the remote.
 
-### 6.3 Nạp
+### 6.3 Flashing
 
 ```bash
 cd esp32-s3-panel
@@ -237,64 +255,70 @@ pio run -e esp32s3-panel -t upload --upload-port COMx
 pio device monitor -p COMx -b 115200
 ```
 
-Log chạy đúng:
+A healthy run:
 ```
-== BreezeLink · QR Box Advance Touch · TRONG NHA (indoor + master + IR) ==
-LCD: ST7789 320x240 (rotation 1) · cam ung: GT911
-WiFi -> "TEN_WIFI" .... OK  IP=192.168.x.x
+== BreezeLink · QR Box Advance Touch · INDOOR (indoor + master + IR) ==
+LCD: ST7789 320x240 (rotation 1) · touch: GT911
+WiFi -> "SSID_NAME" .... OK  IP=192.168.x.x
 MQTT ... connected
-ESP-NOW san sang · MAC master = XX:XX:... · kenh 6
-IR: phat GPIO17 · thu GPIO15
-[telemetry] t=30.0°C h=60% -> da gui · espnow nhan=0 bo=0 · kenh=6
+ESP-NOW ready · master MAC = XX:XX:... · channel 6
+IR: tx GPIO17 · rx GPIO15
+[telemetry] t=30.0°C h=60% -> sent · espnow rx=0 dropped=0 · channel=6
 ```
 
-### 6.4 Học remote (bắt buộc làm trước khi auto‑control chạy được)
+### 6.4 Learning the remote (required before auto-control can work)
 
-Trên web/app bấm **"Học nút này"** cho từng mục. Backend gửi `{"learn":"COOL 25"}` xuống
-topic `cmd`, node bật mắt thu 30s, bạn bấm nút tương ứng trên remote thật, node gửi dạng
-sóng lên topic `learn` và backend lưu vào `ir_codes`.
+On the web/app press **"Học nút này"** for each entry. The backend sends `{"learn":"COOL 25"}`
+to the `cmd` topic, the node enables the receiver for 30s, you press the corresponding button
+on the real remote, the node uploads the waveform to the `learn` topic and the backend stores
+it in `ir_codes`.
 
-Cần học đủ (theo `ir_service._REQUIRED_*`): **COOL 24, 25, 26, 27, 28** + **DRY**, **FAN**,
-**OFF**. Thiếu bất kỳ mục nào thì `comfort_engine` ném `NoIrCodesError` và **auto‑control bị
-khoá hoàn toàn**. Các nút rời (`FAN_SPEED`, `SLEEP`, `SWING_V`…) là tuỳ chọn.
+You need the full set (per `ir_service._REQUIRED_*`): **COOL 24, 25, 26, 27, 28** + **DRY**,
+**FAN**, **OFF**. If any entry is missing, `comfort_engine` raises `NoIrCodesError` and
+**auto-control is completely locked out**. The discrete buttons (`FAN_SPEED`, `SLEEP`,
+`SWING_V`…) are optional.
 
-Log khi học:
+The log while learning:
 ```
-[learn] "COOL 25" — huong remote vao mat thu roi bam nut (toi da 30s)
-[learn] "COOL 25" 227 moc (1348 byte) -> da gui len cloud
-```
-
-### 6.5 Nhận lệnh
-
-```
-[cmd] c-1a2b3c4d -> COOL 26 (auto:COOL@26) · 227 moc, cho phat
-[cmd] da luu ma 7f3e…-… vao NVS (227 moc)
-[ir] da phat 227 moc ra may lanh
-[state] ack=c-1a2b3c4d mode=COOL setpoint=26 -> da gui
+[learn] "COOL 25" — point the remote at the receiver and press the button (max 30s)
+[learn] "COOL 25" 227 marks (1348 bytes) -> uploaded to cloud
 ```
 
-Backend chỉ gửi kèm `ir_raw` **lần đầu** của mỗi `ir_code_id`; những lần sau nó tin node đã
-giữ mã trong NVS và chỉ gửi id. Mã trong NVS **sống qua mất điện và qua cả `pio run -t
-upload`** (NVS nằm ở phân vùng riêng).
+### 6.5 Receiving commands
 
-### 6.6 Xử lý lỗi riêng của node này
+```
+[cmd] c-1a2b3c4d -> COOL 26 (auto:COOL@26) · 227 marks, ready to transmit
+[cmd] saved code 7f3e…-… to NVS (227 marks)
+[ir] transmitted 227 marks to the air conditioner
+[state] ack=c-1a2b3c4d mode=COOL setpoint=26 -> sent
+```
 
-| Log | Nguyên nhân | Cách xử lý |
+The backend only includes `ir_raw` on the **first** use of each `ir_code_id`; after that it
+trusts that the node has kept the code in NVS and sends only the id. Codes in NVS **survive
+power loss and even `pio run -t upload`** (NVS lives in its own partition).
+
+### 6.6 Problems specific to this node
+
+| Log | Cause | Fix |
 |---|---|---|
-| `ir_code_id=… khong co trong NVS ma server khong gui kem ir_raw` | **Lệch cache**: node bị `erase_flash`/đổi bo nên mất NVS, nhưng Redis phía server vẫn nhớ "node đã có mã này" | Xoá cache IR của org trong Redis (key của `redis_ir_cache`) để server gửi lại `ir_raw`. Node **cố ý không ack** trong trường hợp này để `commands.acked_at` trên web không báo sai là đã thi hành |
-| `[learn] het gio cho "…"` | Remote hết pin, không hướng đúng mắt thu, hoặc quá xa | Bấm cách mắt thu < 1 m, chĩa thẳng vào |
-| `[ir] bo qua nhieu (3 moc)` | Đèn huỳnh quang/remote khác lọt vào | Bình thường — node vẫn đang chờ, cứ bấm remote |
-| `[cmd] … chua hoc ma nay` | Chưa học mã cho (mode, nhiệt độ) đó | Xem §6.4, học đủ bộ |
-| Máy lạnh không phản ứng dù log báo `da phat` | Ngoài tầm/lệch hướng LED phát | Xem ghi chú tầm với ở §6.2 |
-| `Khong cap phat duoc bo dem MQTT` | Hết heap lúc khởi động | Hiếm; nếu gặp thì giảm `MQTT_BUFFER_BYTES` và `IrIo::RAW_MAX` |
-| Học mã IR luôn hết giờ, dù remote tốt | `EN_LEVEL_SHIFT` chưa lên HIGH → TXS0104 chặn mắt thu | Xem §6.2; kiểm tra `Ui::begin()` có chạy không (màn có sáng không) |
+| `ir_code_id=… not in NVS and the server sent no ir_raw` | **Cache mismatch**: the node was `erase_flash`ed or swapped so it lost NVS, but Redis on the server still remembers "that node has this code" | Clear the org's IR cache in Redis (the `redis_ir_cache` key) so the server resends `ir_raw`. The node **deliberately does not ack** in this case, so that `commands.acked_at` on the web UI does not falsely report execution |
+| `[learn] timed out waiting for "…"` | Flat remote battery, not aimed at the receiver, or too far away | Press it within 1 m of the receiver, aimed straight at it |
+| `[ir] ignoring noise (3 marks)` | A fluorescent lamp or another remote leaked in | Normal — the node is still waiting, just press the remote |
+| `[cmd] … this code has not been learned` | No code learned for that (mode, temperature) | See §6.4 and learn the full set |
+| The AC does not react even though the log says `transmitted` | Out of range / the emitter LED is aimed wrong | See the range note in §6.2 |
+| `Could not allocate the MQTT buffer` | Out of heap at startup | Rare; if it happens, reduce `MQTT_BUFFER_BYTES` and `IrIo::RAW_MAX` |
+| IR learning always times out even with a good remote | `EN_LEVEL_SHIFT` never went HIGH → the TXS0104 is blocking the receiver | See §6.2; check whether `Ui::begin()` is running (does the screen light up?) |
 
-> `espnow-relay.*` và `slave-watch.*` **từng** là bản sao chung với
-> `esp32s3-indoor-master/`. Thư mục đó đã bỏ, nên nay `esp32-s3-panel/src/` là **nơi
-> duy nhất** giữ chúng — sửa một chỗ là xong, không còn phải nhớ đồng bộ hai nơi.
-> Khuôn gói tin thì vẫn dùng chung với node ngoài trời qua `shared/espnow-message.h`.
+> `espnow-relay.*` and `slave-watch.*` **used to be** copies shared with
+> `esp32s3-indoor-master/`. That directory is gone, so `esp32-s3-panel/src/` is now the
+> **only** place holding them — fix once and you are done, no more remembering to sync two
+> places. The packet layout is still shared with the outdoor node via
+> `shared/espnow-message.h`.
 
 ---
 
-## Câu hỏi mở
-- **Auth EMQX cho device mới:** backend lưu `mqtt_token` per‑device; cần xác nhận cơ chế nạp cặp (username=DEVICE_UUID, password=token) vào EMQX built‑in DB đã tự chạy khi tạo device trên web chưa. Nếu chưa, `rc=5` sẽ xuất hiện và phải seed thủ công.
+## Open questions
+- **EMQX auth for new devices:** the backend stores a per-device `mqtt_token`; we still need
+  to confirm whether loading the pair (username=DEVICE_UUID, password=token) into the EMQX
+  built-in DB already happens automatically when a device is created on the web UI. If not,
+  `rc=5` will appear and it has to be seeded by hand.

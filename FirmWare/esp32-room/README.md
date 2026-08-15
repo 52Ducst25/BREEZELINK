@@ -1,101 +1,112 @@
-# Node cảm biến góc phòng — ESP32-C3-DevKitM-1 + DHT22
+# Room-corner sensor node — ESP32-C3-DevKitM-1 + DHT22
 
-Bốn bo giống hệt nhau đặt ở bốn góc một phòng. Mỗi bo đọc DHT22 rồi **bắn ESP-NOW**
-về gateway đặt gần máy lạnh. Không WiFi, không MQTT, không bí mật nào trong `config.h`.
+Four identical boards, one in each corner of a room. Each board reads a DHT22 and
+**broadcasts over ESP-NOW** to the gateway mounted near the air conditioner. No WiFi, no
+MQTT, no secrets in `config.h`.
 
-## Vì sao lại là bốn cảm biến
+## Why four sensors
 
-Một cảm biến treo trên tường không nói được nhiệt độ của phòng — nó nói nhiệt độ của
-**cái tường đó**. Góc có nắng chiếu, góc dưới miệng gió điều hoà và góc sau tủ chênh
-nhau 3–4 °C là chuyện thường.
+A single sensor on a wall does not tell you the temperature of the room — it tells you the
+temperature of **that wall**. A corner in direct sun, a corner under the AC outlet and a
+corner behind a cabinet routinely differ by 3–4 °C.
 
-Gateway và backend đều lấy **trung vị** các góc còn tươi (không phải trung bình cộng),
-nên một góc bất thường không kéo được nhiệt độ đặt đi. Trung bình cộng thì kéo được —
-vĩnh viễn, và triệu chứng duy nhất là "ở trong nhà thấy sai sai".
+Both the gateway and the backend take the **median** of the fresh corners (not the mean), so
+one misbehaving corner cannot drag the setpoint away. A mean can — permanently — and the
+only symptom is "it just feels wrong in here".
 
-## Vì sao ESP-NOW chứ không phải Bluetooth
+## Why ESP-NOW and not Bluetooth
 
-Gói ESP-NOW chở được 250 byte nên nó mang thẳng **`device_uuid` 32 ký tự của chính
-node**. Gateway cứ thế publish vào topic của node đó — thêm hay bớt một góc chỉ cần
-nạp bo mới, gateway không phải sửa gì và không phải nạp lại.
+An ESP-NOW frame carries 250 bytes, so it can carry the node's own **32-character
+`device_uuid`** directly. The gateway simply publishes to that node's topic — adding or
+removing a corner only means flashing a new board; the gateway needs no change and no
+reflash.
 
-Gói BLE advertising cổ điển chỉ có 31 byte, chở không nổi uuid. Đi đường đó thì gateway
-buộc phải giữ một mảng uuid theo thứ tự và nạp lại mỗi lần đổi node; lệch một ô là số đo
-của góc A nộp lên cloud dưới tên góc B — biểu đồ vẫn có số, không lỗi ở đâu cả.
+A classic BLE advertising packet is only 31 bytes, not enough for the uuid. Going that route
+would force the gateway to keep an ordered uuid array and be reflashed every time a node
+changes; one slot out of place and corner A's readings land in the cloud under corner B's
+name — the charts still show numbers and nothing anywhere reports an error.
 
-Bluetooth trong hệ này dành cho đường **gateway ↔ Arduino UNO Q**, nơi hai bên có kết
-nối GATT thật (hai chiều, MTU thương lượng được) và không bị trần 31 byte.
+Bluetooth in this system is reserved for the **gateway ↔ Arduino UNO Q** link, where both
+sides have a real GATT connection (bidirectional, negotiable MTU) and no 31-byte ceiling.
 
-## Nạp firmware
+## Flashing
 
-Bốn bo chạy **cùng một firmware**, khác nhau đúng hai giá trị (`DEVICE_UUID`,
-`ROOM_CORNER`). Nên chúng là **bốn env**, không phải bốn thư mục:
+All four boards run **the same firmware** and differ in exactly two values (`DEVICE_UUID`,
+`ROOM_CORNER`). So they are **four envs**, not four directories:
 
 ```bash
 cd FirmWare/esp32-room
-cp src/config.h.example src/config.h     # WIFI_SSID + FW_VERSION, dùng chung cả 4 bo
-cp nodes.ini.example nodes.ini           # danh tính từng bo
+cp src/config.h.example src/config.h     # WIFI_SSID + FW_VERSION, shared by all 4 boards
+cp nodes.ini.example nodes.ini           # per-board identity
 
 pio run -e ss1 -t upload --upload-port COM30
 pio run -e ss4 -t upload --upload-port COM33
 pio device monitor -e ss1 --port COM30
 
-pio run                                   # dựng cả 4 — kiểm một thay đổi có gãy bo nào không
+pio run                                   # build all 4 — check whether a change broke any board
 ```
 
-Mỗi env có thư mục build riêng (`.pio/build/ss1…`), nên nạp bo này không phải dựng lại bo kia.
+Each env has its own build directory (`.pio/build/ss1…`), so flashing one board does not
+rebuild the others.
 
-**Vì sao không tách bốn thư mục:** tách là bốn bản sao của `main.cpp` +
-`room-sensor.cpp`. Sửa một lỗi phải sửa bốn lần, và lần thứ tư sẽ có người quên — rồi
-một góc phòng chạy bản cũ mà không ai nhận ra, vì nó **vẫn gửi số đo bình thường**.
+**Why not four separate directories:** splitting them means four copies of `main.cpp` +
+`room-sensor.cpp`. One bug fix has to be applied four times, and on the fourth someone will
+forget — then one corner of the room runs an old build and nobody notices, because it
+**still reports perfectly normal readings**.
 
-**Vì sao danh tính rời khỏi `config.h`:** file đó chỉ có một, mà bốn bo thì khác nhau.
-Nạp bo thứ ba nghĩa là sửa file rồi nạp, sửa lại rồi nạp bo thứ tư — và không cách nào
-nhìn vào thư mục mà biết nó đang giữ danh tính của bo nào.
+**Why identity lives outside `config.h`:** there is only one of that file, but the four
+boards differ. Flashing the third board would mean editing the file, flashing, editing again,
+flashing the fourth — and there is no way to look at the directory and tell which board's
+identity it currently holds.
 
-`DEVICE_UUID` lấy ở web admin → **Khách hàng** → mở node *Cảm biến phòng* → mục
-**Nạp firmware**. Mỗi góc là một hàng device riêng, nên **mỗi bo một uuid khác nhau** —
-trùng uuid là hai bo cùng ghi đè lên một hàng device và biểu đồ nhảy loạn không lý do.
+Get `DEVICE_UUID` from the admin web UI → **Khách hàng** → open the *Cảm biến phòng* node →
+**Nạp firmware**. Each corner is its own device row, so **every board needs a different
+uuid** — duplicate uuids mean two boards overwrite the same device row and the charts jump
+around for no visible reason.
 
-## Ba điều dễ mất thời gian nhất
+## The three biggest time sinks
 
-- **`WIFI_SSID` phải giống hệt gateway và phải là băng 2.4 GHz.** Đây là chỗ hỏng câm
-  số một. Node **không đăng nhập** WiFi — nó chỉ *quét* đúng chuỗi tên này để biết
-  router đang ở kênh nào, vì ESP-NOW bắt buộc mọi bên cùng kênh. Gõ lệch một ký tự
-  (hoặc điền tên băng 5 GHz) thì node bám kênh 1 mặc định, gói bay vào khoảng không,
-  và vì broadcast **không có ACK** nên không một dòng log nào ở bất kỳ đâu báo lỗi.
+- **`WIFI_SSID` must match the gateway exactly and must be a 2.4 GHz network.** This is
+  silent-failure number one. The node **does not join** WiFi — it only *scans* for this exact
+  name to learn which channel the router is on, because ESP-NOW requires every party to be on
+  the same channel. One wrong character (or a 5 GHz network name) and the node stays on
+  default channel 1, the frames go nowhere, and since broadcast has **no ACK** not a single
+  log line anywhere reports a problem.
 
-  *Kiểm:* log lúc boot in ra tên mạng nó đang tìm và kênh nó bám được.
+  *Check:* the boot log prints the network name it is looking for and the channel it locked
+  onto.
 
-- **`ROOM_CORNER` chỉ là nhãn hiển thị.** Định danh thật là `DEVICE_UUID`. Hai bo trùng
-  số góc là **vô hại**: cả hai vẫn có topic riêng, vẫn vào trung vị, chỉ là màn hình ghi
-  nhãn trùng nhau. Đặt đúng thì người đi bảo trì đọc màn là biết ngay góc nào đang lệch.
+- **`ROOM_CORNER` is only a display label.** The real identity is `DEVICE_UUID`. Two boards
+  sharing a corner number is **harmless**: both still have their own topic, both still feed
+  the median, the screen just shows duplicate labels. Setting it correctly means a technician
+  can read the screen and immediately see which corner is drifting.
 
-- **Trở kéo 4.7k lên 3.3V trên đường dữ liệu DHT22.** Thiếu thì đọc được lúc được lúc
-  không (checksum bắt được nên **không** ra số sai, chỉ NaN xen kẽ) — nhìn y hệt dây
-  tuột. Và **nuôi DHT22 bằng 3.3V, không 5V**: chân ESP32-C3 không chịu quá áp.
+- **4.7k pull-up to 3.3V on the DHT22 data line.** Without it, reads succeed intermittently
+  (the checksum catches the bad ones, so you get **no wrong numbers**, just interleaved NaN) —
+  which looks exactly like a loose wire. And **power the DHT22 from 3.3V, not 5V**: the
+  ESP32-C3 pins do not tolerate overvoltage.
 
-## Sơ đồ chân
+## Pinout
 
-| Chân C3 | Nối tới | Ghi chú |
+| C3 pin | Connects to | Note |
 |---|---|---|
-| GPIO4 | DATA của DHT22 | + trở kéo 4.7k lên 3.3V |
-| 3V3 | VCC của DHT22 | **không** dùng 5V |
-| GND | GND của DHT22 | |
+| GPIO4 | DHT22 DATA | + 4.7k pull-up to 3.3V |
+| 3V3 | DHT22 VCC | do **not** use 5V |
+| GND | DHT22 GND | |
 
-Những chân **phải tránh** trên C3 và lý do: xem khối chú thích đầu
+The pins you **must avoid** on the C3 and why: see the comment block at the top of
 [platformio.ini](platformio.ini).
 
-## Khuôn gói
+## Packet layout
 
-45 byte, định nghĩa ở [`../shared/espnow-message.h`](../shared/espnow-message.h) — dùng
-chung với node ngoài trời và gateway. Phần radio (quét kênh, bám kênh, bắn quảng bá) nằm
-ở [`../shared/espnow-slave-radio.h`](../shared/espnow-slave-radio.h), cũng dùng chung với
-node ngoài trời: cái bẫy "scanNetworks bỏ radio lại ở kênh cuối" đã trả giá một lần rồi,
-không nên có hai bản sao của nó.
+45 bytes, defined in [`../shared/espnow-message.h`](../shared/espnow-message.h) — shared with
+the outdoor node and the gateway. The radio part (channel scan, channel lock, broadcast) lives
+in [`../shared/espnow-slave-radio.h`](../shared/espnow-slave-radio.h) and is also shared with
+the outdoor node: the "scanNetworks leaves the radio on the last channel" trap has already
+cost us once, and there should not be two copies of it.
 
-## Điện năng
+## Power
 
-Bản này chạy **nguồn USB 5V**. Muốn chạy pin thì phải thêm deep-sleep — ESP-NOW rất hợp
-với việc đó vì không có bắt tay WiFi/DHCP/TCP nào phải làm lại sau mỗi lần thức, khác hẳn
-một node nối WiFi thật. Chưa làm.
+This version runs on **5V USB power**. Battery operation would need deep sleep — ESP-NOW suits
+that well because there is no WiFi/DHCP/TCP handshake to redo after each wake, unlike a node
+that actually joins WiFi. Not implemented yet.

@@ -1,236 +1,246 @@
-# Kiến trúc hệ thống
+# System architecture
 
-Cập nhật: 2026-08-11 · Phạm vi: toàn hệ, sau khi chuyển từ 2 node sang 6 thiết bị mỗi hộ.
+Updated: 2026-08-11 · Scope: the whole system, after the move from 2 nodes to 6 devices per
+household.
 
-Tài liệu này trả lời **vì sao** từng ranh giới nằm ở chỗ nó đang nằm. Cách chạy và cách
-nạp firmware nằm ở [`../README.md`](../README.md); chi tiết từng phase nằm trong
+This document answers **why** each boundary sits where it sits. How to run the system and how
+to flash the firmware is in [`../README.md`](../README.md); per-phase detail lives in
 `plans/260811-1809-kien-truc-4-node-phong-espnow-uno-q/`.
 
 ---
 
-## 1. Sáu thiết bị trong một hộ
+## 1. Six devices in one household
 
-| Thiết bị | `node_type` | Đường về | Có cảm biến? | Nối MQTT? |
+| Device | `node_type` | Uplink | Has a sensor? | MQTT session? |
 |---|---|---|---|---|
-| 4× ESP32-C3-DevKitM-1 | `room` | ESP-NOW → gateway | DHT22 | không |
-| 1× QR Box Advance (WROOM-32) | `indoor` | WiFi + MQTT | **không** | có (master) |
-| 1× ESP32 DevKit V1 | `outdoor` | ESP-NOW → gateway | DHT22 | không |
-| 1× Arduino UNO Q | — | **Bluetooth GATT** → gateway | không | **không** |
+| 4× ESP32-C3-DevKitM-1 | `room` | ESP-NOW → gateway | DHT22 | no |
+| 1× QR Box Advance (WROOM-32) | `indoor` | WiFi + MQTT | **no** | yes (master) |
+| 1× ESP32 DevKit V1 | `outdoor` | ESP-NOW → gateway | DHT22 | no |
+| 1× Arduino UNO Q | — | **Bluetooth GATT** → gateway | no | **no** |
 
-**Chỉ gateway có phiên MQTT.** Mọi thứ khác — bốn góc phòng, node ngoài trời, và cả
-UNO Q — đều câm với cloud. Bốn node cảm biến được gateway đứng tên publish hộ, nên chúng
-không cần credential riêng, không cần WiFi của khách, và đổi mật khẩu WiFi không làm
-chúng chết. UNO Q thì cố ý không có đường lên cloud nào cả: xem §5.
+**Only the gateway has an MQTT session.** Everything else — the four room corners, the outdoor
+node, and the UNO Q — is mute to the cloud. The four sensor nodes are published on behalf of by
+the gateway, so they need no credentials of their own, no access to the customer's WiFi, and
+changing the WiFi password does not kill them. The UNO Q deliberately has no uplink to the cloud
+at all: see §5.
 
 ---
 
-## 2. Ba quyết định định hình toàn bộ phần còn lại
+## 2. Three decisions that shape everything else
 
-### 2.1 Nhiệt độ "trong nhà" là TRUNG VỊ của nhiều cảm biến
+### 2.1 The "indoor" temperature is the MEDIAN of several sensors
 
-Một cảm biến treo tường đo được **cái tường đó**, không phải căn phòng. Bốn góc chênh
-3–4 °C là bình thường.
+A single wall-mounted sensor measures **that wall**, not the room. Four corners differing by
+3–4 °C is normal.
 
-**Trung vị chứ không trung bình cộng:** trung bình cho phép một góc lạc (nắng cửa sổ,
-miệng gió) kéo nhiệt độ đặt đi vĩnh viễn, và triệu chứng duy nhất là "ở trong nhà thấy
-sai sai" — không log, không cảnh báo, không cách nào truy. Trung vị bỏ qua hẳn một điểm
-lạc miễn là ba góc còn lại đồng ý.
+**Median, not mean:** a mean lets one stray corner (window sun, air outlet) drag the setpoint
+away permanently, and the only symptom is "it just feels wrong in here" — no log, no alert, no way
+to trace it. A median ignores a single outlier entirely as long as the other three corners agree.
 
-Quy tắc này tồn tại ở **ba nơi** và cả ba **phải cho cùng một số**:
+This rule exists in **three places** and all three **must produce the same number**:
 
-| Nơi | File |
+| Location | File |
 |---|---|
-| Backend (nguồn chân lý) | `src/app/comfort/room_aggregate.py` |
-| Gateway (màn tại chỗ + gói gửi UNO Q) | `FirmWare/esp32-s3-panel/src/room-registry.cpp` |
-| Edge AI | import lại chính file backend, qua `edge-ai/edge_ai/comfort_bridge.py` |
+| Backend (source of truth) | `src/app/comfort/room_aggregate.py` |
+| Gateway (local screen + the packet sent to the UNO Q) | `FirmWare/esp32-s3-panel/src/room-registry.cpp` |
+| Edge AI | re-imports the backend file itself, via `edge-ai/edge_ai/comfort_bridge.py` |
 
-Bản C++ là bản sao **bắt buộc phải có** (firmware không import được Python) — đổi luật ở
-một bên thì đổi cả hai, nếu không màn treo tường và app nói hai nhiệt độ khác nhau về cùng
-một phòng và không bên nào sai rõ ràng để mà sửa.
+The C++ version is a copy that **has to exist** (firmware cannot import Python) — change the rule
+on one side and you must change both, otherwise the wall panel and the app report two different
+temperatures for the same room and neither one is obviously wrong enough to fix.
 
-**Và có một cái chốt cho đúng việc đó:** edge AI tự tính lại trung vị bằng bản Python rồi
-so với con số gateway gửi sang. Lệch quá 0.05 °C là nó ghi một dòng WARNING nêu đích danh
-hai file đã trôi khỏi nhau (`controller._MEDIAN_DRIFT_C`). Không có chốt này thì kiểu lệch
-đó không có triệu chứng nào cả.
+**And there is a guard for exactly that:** the edge AI recomputes the median with the Python
+version and compares it against the number the gateway sent. A discrepancy over 0.05 °C writes a
+WARNING naming the two files that have drifted apart (`controller._MEDIAN_DRIFT_C`). Without that
+guard this kind of drift has no symptom at all.
 
-### 2.2 Comfort engine KHÔNG biết có bao nhiêu cảm biến
+### 2.2 The comfort engine does NOT know how many sensors there are
 
-`comfort_engine.compute()` vẫn nhận đúng một cặp `(tin, hin)` như thời hai node. Việc gộp
-xảy ra **trước** nó, trong `telemetry_handler`, rồi ghi vào `state:indoor` — cùng cái khoá
-Redis mà bản cũ dùng.
+`comfort_engine.compute()` still takes exactly one `(tin, hin)` pair, as it did in the two-node
+era. Aggregation happens **before** it, in `telemetry_handler`, and is written to `state:indoor` —
+the same Redis key the old version used.
 
-Nhờ vậy chuyển từ 1 lên 4 cảm biến **không sửa một dòng nào** trong `comfort/` ngoài việc
-thêm một module thuần hàm mới. Thuật toán là phần rủi ro nhất của dự án (audit §1: chưa có
-test, thiết bị đã ở nhà khách) — giữ nó bất động là có chủ đích.
+As a result, going from 1 to 4 sensors changed **not a single line** inside `comfort/` beyond
+adding one new pure-function module. The algorithm is the riskiest part of the project (audit §1:
+no tests, hardware already in customers' homes) — keeping it frozen is deliberate.
 
-### 2.3 Đích của lệnh điều khiển là một LOOKUP, không phải suy luận
+### 2.3 The target of a control command is a LOOKUP, not an inference
 
-Trước đây "node nào nhận lệnh IR" suy ra được từ node vừa gửi số đo, vì chỉ có một node
-trong nhà. Nay phần lớn telemetry đến từ node **không có phần cứng IR**.
+It used to be possible to infer "which node receives the IR command" from whichever node had just
+sent telemetry, because there was only one node indoors. Now most telemetry comes from nodes with
+**no IR hardware**.
 
-`telemetry_service.get_gateway_device()` là nơi duy nhất trả lời câu đó: `role=master`
-trước (và **từ chối** node `room`), rồi mới rơi về `node_type=indoor` cũ nhất. Chọn nhầm
-là lệnh publish thành công, không ai thi hành, và không có nack nào — node đó thậm chí
-không subscribe.
-
----
-
-## 3. Ba đường vô tuyến, một ăng-ten
-
-Gateway chạy đồng thời WiFi (MQTT), ESP-NOW và BLE trên một khối radio 2.4 GHz. Bộ đồng
-tồn tại của IDF chia thời gian, và thứ tự ưu tiên được cài vào thiết kế:
-
-- **Gateway KHÔNG quét BLE.** Nó chỉ quảng bá và giữ **một** kết nối GATT với UNO Q —
-  quét mới là thứ ăn sóng liên tục. Vai trò NimBLE bị cắt xuống còn peripheral +
-  broadcaster ngay ở `platformio.ini`.
-- **Số đo cảm biến đi ESP-NOW**, vốn dùng chung radio WiFi sẵn có chứ không mở thêm đường.
-- **MQTT được nhường trước** — nó là đường **duy nhất** để lệnh máy lạnh đi xuống.
-
-### Vì sao mọi cảm biến đi ESP-NOW
-
-Gói ESP-NOW chở 250 byte nên mỗi node mang thẳng `device_uuid` 32 ký tự của chính nó. Hệ
-quả là **gateway không giữ bảng tra nào**: thêm hay bớt một góc chỉ cần nạp bo mới.
-
-Gói BLE advertising cổ điển chỉ có 31 byte — chở không nổi uuid. Đi đường đó thì gateway
-buộc phải giữ một mảng `uuid[]` theo thứ tự và nạp lại mỗi lần đổi node; lệch một ô là số
-đo của góc A nộp lên cloud dưới tên góc B, biểu đồ vẫn có số và không lỗi ở đâu cả.
-
-Cái giá của ESP-NOW: mọi bên **bắt buộc cùng kênh WiFi**, nên node phải quét tìm SSID của
-nhà để biết router đang ở kênh nào. Đó là cái bẫy hỏng-câm số một của cả hệ — xem §7.
-
-### Vì sao Bluetooth chỉ dành cho UNO Q
-
-Đường này **hai chiều** (UNO Q phải ra lệnh ngược) và cần chở một ảnh chụp cả bốn góc.
-Advertising không làm được cả hai; GATT thì thương lượng MTU lên hàng trăm byte và có kênh
-ghi ngược sẵn.
-
-Vai: **gateway = peripheral, UNO Q = central**. UNO Q chạy Debian + BlueZ, một central đầy
-đủ và dễ lập trình; ESP32 làm peripheral là khuôn mẫu nhẹ nhất cho nó. Và nếu đảo vai thì
-gateway phải đi *quét* mỗi lần UNO Q khởi động lại — đúng thứ vừa nói là phải tránh.
-
-### Trần 39 byte và cái bẫy MTU
-
-Ảnh chụp là 39 byte, nhưng **MTU mặc định của BLE là 23** (tức 20 byte dữ liệu). Notify
-vượt MTU bị **cắt cụt trong im lặng** — không lỗi ở cả hai bên, chỉ là mấy góc cuối biến
-mất. Nên: gateway xin MTU 247 ngay khi khởi tạo, kiểm lại lúc kết nối và in cảnh báo to
-nếu hụt; phía Python kiểm độ dài trước khi giải mã và nói thẳng "gần như chắc chắn MTU quá
-nhỏ nên gói bị cắt cụt".
-
-Kích thước gói được chốt bằng `static_assert` bên C và `assert` lúc import bên Python.
-Thêm một trường ở một bên mà quên bên kia thì gói vẫn "giải mã thành công", chỉ là mọi
-trường sau chỗ chèn đều lệch — CRC không cứu được, vì nó tính trên đúng số byte mà bên gửi
-*nghĩ* là đúng.
+`telemetry_service.get_gateway_device()` is the single place that answers that question:
+`role=master` first (and it **refuses** `room` nodes), only then falling back to the oldest
+`node_type=indoor`. Picking wrong means the command publishes successfully, nobody executes it,
+and there is no nack — that node does not even subscribe.
 
 ---
 
-## 4. Luồng dữ liệu một chu kỳ
+## 3. Three radio links, one antenna
+
+The gateway runs WiFi (MQTT), ESP-NOW and BLE simultaneously on a single 2.4 GHz radio. The IDF
+coexistence layer time-slices them, and the priority order is baked into the design:
+
+- **The gateway does NOT scan for BLE.** It only advertises and holds **one** GATT connection to
+  the UNO Q — scanning is the thing that eats airtime continuously. The NimBLE role is cut down to
+  peripheral + broadcaster right in `platformio.ini`.
+- **Sensor readings go over ESP-NOW**, which reuses the existing WiFi radio rather than opening
+  another link.
+- **MQTT gets priority** — it is the **only** path by which AC commands come down.
+
+### Why every sensor uses ESP-NOW
+
+An ESP-NOW frame carries 250 bytes, so each node carries its own 32-character `device_uuid`
+directly. The consequence is that **the gateway keeps no lookup table**: adding or removing a
+corner only means flashing a new board.
+
+A classic BLE advertising packet is only 31 bytes — not enough for the uuid. Going that route
+would force the gateway to keep an ordered `uuid[]` array and be reflashed every time a node
+changes; one slot out of place and corner A's readings land in the cloud under corner B's name,
+the charts still show numbers and nothing anywhere reports an error.
+
+The cost of ESP-NOW: every party **must be on the same WiFi channel**, so each node has to scan
+for the household SSID to learn which channel the router is on. That is silent-failure number one
+for the whole system — see §7.
+
+### Why Bluetooth is reserved for the UNO Q
+
+This link is **bidirectional** (the UNO Q has to send commands back) and has to carry a snapshot
+of all four corners. Advertising can do neither; GATT negotiates an MTU of several hundred bytes
+and has a write-back channel built in.
+
+Roles: **gateway = peripheral, UNO Q = central**. The UNO Q runs Debian + BlueZ, a full and easily
+programmed central; making the ESP32 the peripheral is the lightest pattern for it. And reversing
+the roles would force the gateway to *scan* every time the UNO Q restarts — exactly what was just
+ruled out.
+
+### The 39-byte ceiling and the MTU trap
+
+A snapshot is 39 bytes, but the **BLE default MTU is 23** (i.e. 20 bytes of payload). A notify
+larger than the MTU is **silently truncated** — no error on either side, the last few corners
+simply vanish. So: the gateway requests MTU 247 at initialisation, re-checks it on connect and
+prints a loud warning if it fell short; the Python side checks the length before decoding and says
+outright "almost certainly the MTU is too small and the packet was truncated".
+
+The packet size is pinned by a `static_assert` on the C side and an `assert` at import time on the
+Python side. Add a field on one side and forget the other and the packet still "decodes
+successfully", except every field after the insertion point is shifted — CRC does not save you,
+because it is computed over exactly the number of bytes the sender *thought* was right.
+
+---
+
+## 4. One cycle of data flow
 
 ```
-4 node góc phòng ─NOW─┐
-                      │
-node ngoài trời ──NOW─┴─► gateway ─MQTT──► telemetry_handler
+4 room-corner nodes ──NOW─┐
+                          │
+outdoor node ────────NOW──┴─► gateway ─MQTT──► telemetry_handler
                              ▲ │
               Bluetooth GATT │ ▼
                           Arduino UNO Q (edge AI)
                                                 │
                              ┌──────────────────┼──────────────────┐
                         node_type=room     =outdoor            =indoor
-                             │                  │             (firmware cũ)
+                             │                  │           (legacy firmware)
                     set_room_state()     set_outdoor_state()       │
                              │                  │                  │
                     aggregate_rooms()           │                  │
-                        (trung vị)              │                  │
+                         (median)               │                  │
                              └────────► state:indoor ◄─────────────┘
                                                 │
                                        comfort_engine.compute()
                                                 │
-                                    get_gateway_device()  ← lookup, không suy luận
+                                    get_gateway_device()  ← lookup, not inference
                                                 │
-                                        command_publisher ─MQTT─► gateway ─IR─► máy lạnh
+                                        command_publisher ─MQTT─► gateway ─IR─► air conditioner
 ```
 
-Chỉ tick của node **outdoor** được phép đẩy `tout_ema` (`is_outdoor_tick`). Bốn node phòng
-tick dày gấp bội; để chúng đẩy EMA thì nhiệt độ đặt sẽ bám theo chính hơi lạnh máy đang
-thổi ra thay vì bám thời tiết.
+Only ticks from the **outdoor** node are allowed to advance `tout_ema` (`is_outdoor_tick`). The
+four room nodes tick many times more often; letting them drive the EMA would make the setpoint
+track the cold air the unit is currently blowing rather than the weather.
 
 ---
 
-## 5. Edge AI: ai cầm lái
+## 5. Edge AI: who is in control
 
-Cloud và UNO Q cùng ra lệnh là máy lạnh nhận hai lệnh trái nhau — và triệu chứng (nhiệt độ
-đặt tự nhảy) trông y hệt lỗi thuật toán, đẩy người truy lỗi sang đúng nửa sai của hệ thống.
-Nên luật **bất đối xứng có chủ đích**:
+If the cloud and the UNO Q both issue commands, the AC receives two contradictory orders — and the
+symptom (a setpoint that jumps on its own) looks exactly like an algorithm bug, sending whoever is
+debugging into the wrong half of the system. Hence the **deliberately asymmetric** rule:
 
-| | điều kiện | vì sao |
+| | condition | why |
 |---|---|---|
-| Giành lái | gateway báo cloud im ≥ 300 s (20 nhịp telemetry) | giành muộn chỉ mất vài phút không thích ứng |
-| Nhả lái | **ngay** nhịp ảnh chụp đầu tiên báo cloud đã lên tiếng | nhả muộn là hai bên giành máy nén |
+| Take control | the gateway reports the cloud silent for ≥ 300 s (20 telemetry ticks) | taking over late only costs a few minutes without adaptation |
+| Release control | on the **very first** snapshot reporting the cloud has spoken | releasing late means both sides fight over the compressor |
 
-**Đề xuất ≠ lệnh.** Mọi gói UNO Q gửi đều mang `kind`, và gateway **chỉ bắn hồng ngoại khi
-nhận `COMMAND`**. Bình thường nó gửi `ADVICE` — gateway ghi vào nhật ký trên màn và không
-làm gì. Gộp hai cái nghĩa là mọi phép thử trên UNO Q đều chạy thẳng vào máy nén.
+**Advice ≠ command.** Every packet the UNO Q sends carries a `kind`, and the gateway **only fires
+IR on `COMMAND`**. Normally it sends `ADVICE` — the gateway writes it to the on-screen log and does
+nothing. Merging the two would mean every experiment on the UNO Q goes straight to the compressor.
 
-**Ai đếm sự im lặng.** Gateway, không phải UNO Q — nó giữ phiên MQTT nên biết chắc chắn
-hơn, và nó chỉ đếm lệnh của **máy chủ**. Điều đó xoá sạch một lớp lỗi mà bản MQTT trước đó
-có: dịch vụ subscribe đúng topic nó publish, nên lệnh giành lái của chính nó vọng về, bị
-đọc thành "cloud sống lại", và nó nhả lái một nhịp sau khi giành — mãi mãi, 30 giây một lần.
+**Who counts the silence.** The gateway, not the UNO Q — it holds the MQTT session so it knows more
+reliably, and it only counts commands from the **server**. That erases an entire class of bug the
+earlier MQTT version had: the service subscribed to the same topic it published on, so its own
+takeover command echoed back, was read as "the cloud is alive again", and it released control one
+tick after taking it — forever, every 30 seconds.
 
-**Lệnh của UNO Q không đi qua đường ghi đè.** Gateway có sẵn `runPanelCommand()` làm gần
-đúng việc cần, nhưng đường đó đặt cờ ghi đè và xin máy chủ mở cổng override. Ghi đè là để
-*người dùng* giành quyền **khỏi** máy chủ; UNO Q thì đang **đứng thay** máy chủ. Đi nhầm
-đường đó thì lúc mạng về, máy chủ bị khoá ngoài suốt `override_hours` bởi chính lớp dự
-phòng vừa cứu nó — và màn hiện "GHI ĐÈ" trong khi không ai bấm gì.
+**UNO Q commands do not go through the override path.** The gateway already has
+`runPanelCommand()`, which does almost the right thing, but that path sets the override flag and
+asks the server to open an override window. Override exists so a *user* can take control **away
+from** the server; the UNO Q is **standing in for** the server. Taking that path means that when
+the network comes back, the server is locked out for `override_hours` by the very fallback layer
+that just rescued it — and the screen shows "GHI ĐÈ" while nobody pressed anything.
 
-**Vì sao BLE chứ không MQTT.** Lớp dự phòng phải sống sót đúng cái sự cố nó sinh ra để
-chịu đựng. Đi qua broker nghĩa là khi mất mạng — đúng lúc cần nó nhất — nó cũng mất luôn
-đường tới gateway. BLE là liên kết trực tiếp giữa hai thiết bị cùng phòng.
+**Why BLE and not MQTT.** A fallback layer has to survive exactly the failure it was built for.
+Going through a broker means that when the network drops — exactly when it is needed most — it also
+loses its path to the gateway. BLE is a direct link between two devices in the same room.
 
-Edge **import** thuật toán từ `src/app/comfort/` chứ không chép: hai bản sẽ lệch dần theo
-mỗi lần sửa backend, và hậu quả của việc lệch là một cái máy lạnh chạy sai nhiệt độ trong
-nhà người ta. Ngoại lệ duy nhất là 11 hằng số cấu hình (import chúng kéo theo cả SQLAlchemy).
+The edge **imports** the algorithm from `src/app/comfort/` rather than copying it: two copies drift
+apart with every backend change, and the consequence of that drift is an air conditioner running at
+the wrong temperature in someone's home. The single exception is the 11 configuration constants
+(importing them would pull in all of SQLAlchemy).
 
 ---
 
-## 6. Định danh và bảo mật ở tầng thiết bị
+## 6. Identity and security at the device layer
 
-| Lớp | Cơ chế | Chống được gì | KHÔNG chống được gì |
+| Layer | Mechanism | Protects against | Does NOT protect against |
 |---|---|---|---|
-| ESP-NOW | `magic`/`version` + uuid tự khai | gói rác khác hệ trên cùng kênh | thiết bị trong tầm sóng tự xưng uuid |
-| BLE (UNO Q) | `link_key` = FNV-1a(ORG_ID) + CRC8 + chống lặp `seq` | UNO Q của hộ khác trong chung cư; đồ chơi BLE ghi bừa | kẻ cố ý — khoá nằm trong config.h và đi trần trên sóng |
-| MQTT | user/pass mỗi device | thiết bị không có credential | publish sang topic hộ khác (cần ACL broker — audit §6) |
-| Backend | `get_device_for_topic` khớp org | **gõ nhầm ORG_ID** trong `config.h` | kẻ cố ý có credential hợp lệ |
+| ESP-NOW | `magic`/`version` + self-declared uuid | junk frames from other systems on the same channel | a device in radio range declaring a uuid |
+| BLE (UNO Q) | `link_key` = FNV-1a(ORG_ID) + CRC8 + `seq` replay guard | another household's UNO Q in an apartment block; BLE toys writing at random | a deliberate attacker — the key is in config.h and travels in the clear |
+| MQTT | per-device user/pass | devices with no credentials | publishing into another household's topic (needs broker ACLs — audit §6) |
+| Backend | `get_device_for_topic` matches org | **a mistyped ORG_ID** in `config.h` | a deliberate attacker holding valid credentials |
 
-Siết BLE thật khi cần: bật bonding + passkey tĩnh của NimBLE rồi ghép đôi một lần lúc
-lắp. Chưa làm vì nó thêm một bước lắp đặt có thể sai, và mối đe doạ ở đây (ai đó trong
-tầm 10 m muốn chỉnh máy lạnh nhà bạn) không tương xứng.
+Hardening BLE for real, when needed: enable NimBLE bonding + a static passkey and pair once during
+installation. Not done, because it adds an installation step that can go wrong, and the threat here
+(someone within 10 m who wants to adjust your air conditioning) does not justify it.
 
-Lưu ý ngược lại: node cảm biến **không** có lớp lọc nào theo danh sách trắng, vì gói tự
-khai uuid. Một bo lạ tự xưng uuid hợp lệ sẽ được trung chuyển — nhưng backend từ chối
-uuid không có trong `devices`, nên nó chỉ tốn một dòng log.
+The reverse caveat: sensor nodes have **no** whitelist filtering, because the frame declares its own
+uuid. A foreign board declaring a valid uuid will be relayed — but the backend rejects uuids that are
+not in `devices`, so it only costs a log line.
 
 ---
 
-## 7. Những chỗ hỏng CÂM (không có lỗi nào được in ra)
+## 7. The SILENT failure modes (nothing is ever printed)
 
-Danh sách này là thứ đáng đọc nhất trong tài liệu — mỗi mục đều đã có chốt chặn trong mã,
-và chú thích tại chỗ giải thích chốt đó.
+This list is the most worthwhile thing in the document — every item already has a guard in the code,
+and a comment at the site explains the guard.
 
-| Triệu chứng | Nguyên nhân | Chốt chặn |
+| Symptom | Cause | Guard |
 |---|---|---|
-| Một góc không bao giờ lên | `WIFI_SSID` gõ sai / là băng 5 GHz -> node bám nhầm kênh | node in tên mạng nó đang tìm lúc boot; broadcast không có ACK nên đây là chốt duy nhất |
-| Node ngoài trời im sau khi nâng cấp gói | gateway chỉ nhận v2, bo cũ vẫn gửi v1 | `acEspNowParse()` nhận cả hai, v1 hiểu là outdoor |
-| Ảnh chụp tới UNO Q thiếu mấy góc cuối | MTU < 42, notify bị cắt cụt | gateway kiểm MTU lúc kết nối + Python kiểm độ dài trước khi giải mã |
-| Trường trong ảnh chụp lệch chỗ, nhiệt độ ra số rác | thêm trường một bên, quên bên kia | `static_assert` bên C + `assert` lúc import bên Python |
-| Máy chủ bị khoá ngoài 2 giờ sau khi mạng về | lệnh edge đi qua đường ghi đè của panel | `runUnoQIncoming()` có đường thi hành riêng |
-| Cùng một lệnh edge thi hành hai lần | UNO Q ghi lại sau khi kết nối lại | chống lặp theo `seq` trong `unoq-link.cpp` |
-| Màn tường và app nói hai nhiệt độ khác nhau | `room-registry.cpp` và `room_aggregate.py` trôi khỏi nhau | edge kiểm chéo trung vị, WARNING nếu lệch > 0.05 °C |
-| MAC gateway hiện "—" trên trang nạp firmware | gateway hết publish telemetry | MAC đi kèm gói `state` |
-| Vòng comfort đứng im, log chỉ nói "indoor state unknown" | gateway mất DHT22 mà backend chưa biết `room` | phase 01 — nhánh `room` trong `telemetry_handler` |
+| One corner never comes up | `WIFI_SSID` mistyped / is a 5 GHz band -> node locks onto the wrong channel | the node prints the network name it is searching for at boot; broadcast has no ACK, so this is the only guard |
+| Outdoor node goes quiet after a packet upgrade | the gateway only accepts v2, the old board still sends v1 | `acEspNowParse()` accepts both, and reads v1 as outdoor |
+| The snapshot reaching the UNO Q is missing its last corners | MTU < 42, the notify is truncated | the gateway checks MTU on connect + Python checks the length before decoding |
+| Fields in the snapshot are shifted, temperatures come out as garbage | a field was added on one side and forgotten on the other | `static_assert` on the C side + `assert` at import on the Python side |
+| The server is locked out for 2 hours after the network returns | edge commands went through the panel's override path | `runUnoQIncoming()` has its own execution path |
+| The same edge command executes twice | the UNO Q replays it after reconnecting | `seq`-based replay guard in `unoq-link.cpp` |
+| The wall panel and the app report different temperatures | `room-registry.cpp` and `room_aggregate.py` have drifted apart | the edge cross-checks the median and WARNs if it differs by > 0.05 °C |
+| The gateway MAC shows "—" on the firmware-flashing page | the gateway has stopped publishing telemetry | the MAC ships with the `state` packet |
+| The comfort loop stalls and the log only says "indoor state unknown" | the gateway lost its DHT22 and the backend does not yet know about `room` | phase 01 — the `room` branch in `telemetry_handler` |
 
 ---
 
-## 8. Còn nợ (theo audit `plans/reports/audit-260729-2217-*.md`)
+## 8. Outstanding debt (per audit `plans/reports/audit-260729-2217-*.md`)
 
-Chưa đóng: không có test tự động, không CI, firmware không có OTA, MQTT chạy plaintext
-1883, EMQX ACL cấp tay, telemetry không có retention. Kiến trúc mới **làm nặng thêm** mục
-retention: một hộ nay có 6 nguồn ghi thay vì 2.
+Still open: no automated tests, no CI, no OTA for the firmware, MQTT running plaintext on 1883,
+EMQX ACLs granted by hand, no telemetry retention. The new architecture **makes the retention item
+worse**: a household now has 6 writing sources instead of 2.

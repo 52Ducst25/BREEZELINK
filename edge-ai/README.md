@@ -1,125 +1,130 @@
 # Edge AI — Arduino UNO Q
 
-Dịch vụ Python chạy trên **nửa Linux** của Arduino UNO Q (Debian trên Qualcomm
-Dragonwing QRB2210). Nửa MCU (STM32U585) không tham gia luồng này — "edge AI" ở
-đây là một dịch vụ trên máy tính nhỏ, không phải một sketch trên vi điều khiển.
+A Python service running on the **Linux half** of the Arduino UNO Q (Debian on a Qualcomm
+Dragonwing QRB2210). The MCU half (STM32U585) takes no part in this flow — "edge AI" here
+is a service on a small computer, not a sketch on a microcontroller.
 
-## Nó làm gì
+## What it does
 
-1. Nối gateway qua **Bluetooth (GATT)** — UNO Q là *central*, gateway là *peripheral*.
-2. Nghe ảnh chụp gateway đẩy sang mỗi 5 giây: 4 góc phòng, ngoài trời, trạng thái máy
-   lạnh, và **máy chủ đã im lặng bao lâu**.
-3. Giữ lịch sử **từng góc** (30 phút), dự báo nhiệt độ 15 phút tới, phát hiện góc
-   bất thường.
-4. Tính nhiệt độ đặt bằng **chính thuật toán của backend** (`src/app/comfort/`).
-5. Bình thường: chỉ **đề xuất** (`kind=ADVICE`) — gateway ghi nhật ký, KHÔNG bắn IR.
-6. Gateway báo cloud im quá `EDGE_TAKEOVER_AFTER_SEC`: gửi `kind=COMMAND` → gateway bắn IR.
+1. Connects to the gateway over **Bluetooth (GATT)** — the UNO Q is *central*, the gateway is
+   *peripheral*.
+2. Listens to the snapshot the gateway pushes every 5 seconds: the 4 room corners, outdoor,
+   the AC state, and **how long the server has been silent**.
+3. Keeps **per-corner** history (30 minutes), forecasts the temperature 15 minutes ahead, and
+   detects outlier corners.
+4. Computes the setpoint using **the backend's own algorithm** (`src/app/comfort/`).
+5. Normally: **advice only** (`kind=ADVICE`) — the gateway logs it and does NOT fire IR.
+6. When the gateway reports the cloud has been silent longer than `EDGE_TAKEOVER_AFTER_SEC`:
+   it sends `kind=COMMAND` → the gateway fires IR.
 
-## Vì sao Bluetooth chứ không phải MQTT
+## Why Bluetooth and not MQTT
 
-**Lớp dự phòng phải sống sót đúng cái sự cố nó sinh ra để chịu đựng.** Bản đầu của dịch
-vụ này nói chuyện với hệ qua MQTT — nghĩa là khi mất mạng, đúng lúc cần nó nhất, nó cũng
-mất luôn đường tới gateway và không cứu được gì. BLE là liên kết trực tiếp giữa hai thiết
-bị đặt cùng phòng: không router, không internet, không broker.
+**A fallback layer has to survive exactly the failure it was built for.** The first version of
+this service talked to the system over MQTT — meaning that when the network went down, exactly
+when it was needed most, it also lost its path to the gateway and could not help at all. BLE is
+a direct link between two devices in the same room: no router, no internet, no broker.
 
-Đổi này còn xoá sạch một lớp lỗi. Bản MQTT subscribe đúng topic nó publish, nên lệnh
-giành lái của chính nó vọng về và bị đọc thành "cloud sống lại" → nhả lái một nhịp sau
-khi giành, mãi mãi, 30 giây một lần. Nay **gateway** đếm sự im lặng, và nó chỉ đếm lệnh
-của **máy chủ** — không còn tiếng vọng nào để nhầm.
+The change also erased an entire class of bug. The MQTT version subscribed to the same topic it
+published on, so its own takeover command echoed back and was read as "the cloud is alive
+again" → it released control one tick after taking it, forever, every 30 seconds. Now the
+**gateway** counts the silence, and it only counts commands from the **server** — there is no
+echo left to misread.
 
-Hệ quả phụ đáng giá: dịch vụ này **không cần credential MQTT nào cả**.
+A worthwhile side effect: this service needs **no MQTT credentials at all**.
 
-## Vì sao nó không tự lái ngay từ đầu
+## Why it does not take control immediately
 
-Cloud và UNO Q cùng ra lệnh là máy lạnh nhận hai lệnh trái nhau cách nhau một phút.
-Triệu chứng — nhiệt độ đặt tự nhảy — trông y hệt lỗi thuật toán, và nó đẩy người đi
-truy lỗi sang đúng nửa sai của hệ thống.
+If the cloud and the UNO Q both issue commands, the AC receives two contradictory orders a
+minute apart. The symptom — a setpoint that jumps on its own — looks exactly like an algorithm
+bug, and it sends whoever is debugging into the wrong half of the system.
 
-Nên luật là **bất đối xứng có chủ đích**:
+So the rule is **deliberately asymmetric**:
 
-| | điều kiện |
+| | condition |
 |---|---|
-| **Giành lái** | gateway báo cloud im lặng **rất lâu** (mặc định 300s ≈ 20 nhịp telemetry) |
-| **Nhả lái** | ngay ảnh chụp đầu tiên báo cloud đã lên tiếng |
+| **Take control** | the gateway reports the cloud has been silent for **a long time** (default 300s ≈ 20 telemetry ticks) |
+| **Release control** | on the very first snapshot reporting the cloud has spoken again |
 
-Và một ranh giới nữa, ở tầng giao thức: **`kind=ADVICE` là mặc định ở mọi đường**.
-Gateway chỉ bắn hồng ngoại khi nhận `kind=COMMAND`, nên mọi nhánh không đủ điều kiện đều
-rơi về "chỉ đề xuất" một cách an toàn thay vì phải nhớ chặn.
+And one more boundary, at the protocol level: **`kind=ADVICE` is the default on every path**.
+The gateway only fires IR when it receives `kind=COMMAND`, so every branch that does not meet
+the conditions falls back safely to "advice only" instead of relying on someone remembering to
+block it.
 
-Giành lái chậm thì mất vài phút không thích ứng. Nhả lái chậm thì hai bên giành
-máy nén. Hai cái giá đó không bằng nhau.
+Taking control late costs a few minutes without adaptation. Releasing control late means both
+sides fight over the compressor. Those two costs are not equal.
 
-## Vì sao nó không chép lại thuật toán comfort
+## Why it does not reimplement the comfort algorithm
 
-`src/app/comfort/` là mã **thuần hàm** — không DB, không Redis, không MQTT — nên
-import và chạy nguyên vẹn trên UNO Q ([`comfort_bridge.py`](edge_ai/comfort_bridge.py)).
-Viết lại ở đây sẽ tạo ra **hai câu trả lời** cho "nhà này nên bao nhiêu độ", lệch
-dần theo mỗi lần sửa backend, và triệu chứng của việc lệch đó là một cái máy lạnh
-chạy sai nhiệt độ trong nhà người ta.
+`src/app/comfort/` is **pure-function** code — no DB, no Redis, no MQTT — so it imports and runs
+unchanged on the UNO Q ([`comfort_bridge.py`](edge_ai/comfort_bridge.py)). Rewriting it here
+would create **two answers** to "what temperature should this house be", drifting apart with
+every backend change, and the symptom of that drift is an air conditioner running at the wrong
+temperature in someone's home.
 
-Ngoại lệ duy nhất là 11 hằng số cấu hình: import chúng sẽ kéo theo SQLAlchemy và
-toàn bộ ORM — quá nặng cho một thiết bị ngoài hiện trường. Chúng được chép vào
-`controller._FALLBACK_CFG` kèm chú thích trỏ về nguồn, và **hộ nào đã tinh chỉnh
-thuật toán trên web thì phải dán cấu hình thật vào `EDGE_COMFORT_CONFIG`** —
-không thì edge tính lệch với cloud mà không bên nào báo lỗi.
+The single exception is the 11 configuration constants: importing them would pull in SQLAlchemy
+and the whole ORM — far too heavy for a device out in the field. They are copied into
+`controller._FALLBACK_CFG` with a comment pointing at the source, and **any household that has
+tuned the algorithm on the web UI must have its real config pasted into `EDGE_COMFORT_CONFIG`** —
+otherwise the edge computes something different from the cloud and neither side reports an error.
 
-## Vì sao chỉ có hai phụ thuộc
+## Why only two dependencies
 
-`bleak` và `pydantic`. Đây là phần mềm chạy trên thiết bị ở nhà khách: mỗi gói thêm
-vào là một thứ nữa có thể vỡ lúc nâng cấp và một thứ nữa phải vá khi có CVE.
+`bleak` and `pydantic`. This is software running on a device in a customer's home: every extra
+package is one more thing that can break on upgrade and one more thing to patch when a CVE lands.
 
-`pydantic` không phải lựa chọn mà là hệ quả: `comfort_engine.compute()` trả về
-`app.schemas.comfort.ComfortResult`, và lớp đó là một pydantic model. Nó nằm ở phía
-backend nên rất dễ bị bỏ sót khi đếm phụ thuộc của thư mục này — bản đầu chỉ khai
-`bleak`, và trên máy dev thì không lộ ra vì backend đã cài pydantic sẵn. Trên một
-UNO Q sạch thì dịch vụ chết ngay ở lần import đầu tiên.
+`pydantic` is not a choice but a consequence: `comfort_engine.compute()` returns
+`app.schemas.comfort.ComfortResult`, and that class is a pydantic model. It lives on the backend
+side, so it is very easy to miss when counting this directory's dependencies — the first version
+only declared `bleak`, and on a dev machine it never showed up because the backend had already
+installed pydantic. On a clean UNO Q the service dies on the very first import.
 
-Bố cục gói BLE đọc bằng `struct` của thư viện chuẩn. Dự báo dùng hồi quy tuyến tính
-bình phương tối thiểu viết tay — nhiệt độ phòng trong 15-30 phút gần như tuyến tính, và
-một mô hình học sâu sẽ cần dữ liệu gán nhãn mà dự án không có, một quy trình huấn luyện
-không ai bảo trì, và khó giải thích hơn hẳn khi khách hỏi "sao nó lại bật máy nén".
+The BLE packet layout is parsed with the standard library's `struct`. Forecasting uses a
+hand-written least-squares linear regression — room temperature over 15–30 minutes is close to
+linear, and a deep learning model would need labelled data the project does not have, a training
+pipeline nobody maintains, and would be far harder to explain when a customer asks "why did it
+start the compressor".
 
-`predictor.py` cố ý để giao diện hẹp để sau này thay ruột bằng mô hình nặng hơn
-mà không phải đụng vào `controller.py`.
+`predictor.py` deliberately keeps a narrow interface so its internals can later be swapped for a
+heavier model without touching `controller.py`.
 
-## Vì sao KHÔNG chạy được trong Arduino App Lab
+## Why it does NOT run inside Arduino App Lab
 
-Đã thử và không được — ghi lại để người sau khỏi mất thời gian thử lại.
+Tried and failed — written down so the next person does not lose time retrying.
 
-App Lab đóng phần Python vào **container** (log khởi động: `Container
-breezelink-edge-ai-main-1 Started`). Đo từ bên trong container đó:
+App Lab packages the Python side into a **container** (startup log: `Container
+breezelink-edge-ai-main-1 Started`). Measured from inside that container:
 
 ```
 /.dockerenv                  True
-/run/dbus/system_bus_socket  khong co
-bluetoothctl                 khong co
-/sys/class/bluetooth         hci0        <- adapter CÓ thật
+/run/dbus/system_bus_socket  missing
+bluetoothctl                 missing
+/sys/class/bluetooth         hci0        <- the adapter IS there
 ```
 
-`bleak` nói chuyện với BlueZ **qua D-Bus**, mà socket D-Bus của hệ thống không
-được gắn vào container. Nên nó chết ngay lúc khởi tạo với một lỗi không hề nhắc
-tới Bluetooth: `[Errno 2] No such file or directory` — thứ không tìm thấy là một
-socket, không phải thiết bị. Danh sách Brick của App Lab cũng không có Bluetooth,
-nên không có cách nào xin quyền đó từ bên trong.
+`bleak` talks to BlueZ **over D-Bus**, and the system D-Bus socket is not mounted into the
+container. So it dies at initialisation with an error that never mentions Bluetooth at all:
+`[Errno 2] No such file or directory` — the thing not found is a socket, not a device. App Lab's
+Brick list has no Bluetooth entry either, so there is no way to request that access from inside.
 
-Kết luận: muốn giữ BLE thì phải chạy thẳng trên hệ điều hành của bo — xem dưới.
+Conclusion: keeping BLE means running directly on the board's OS — see below.
 
-## Cài đặt — systemd trên bo
+## Installation — systemd on the board
 
-Cần một adapter Bluetooth đang chạy (UNO Q có sẵn) và BlueZ. Đây là cách duy nhất
-chạy được BLE, vì lý do ở mục ngay trên.
+Requires a working Bluetooth adapter (the UNO Q has one) and BlueZ. This is the only way to get
+BLE working, for the reason in the section above.
 
-Cài SSH key một lần rồi chạy một lệnh từ máy dev:
+Install an SSH key once, then run a single command from the dev machine:
 
 ```bash
 AC_ORG_ID=<org-id> bash edge-ai/deploy/deploy-to-unoq.sh
 ```
 
-Script tự dò máy đích có `hci0` không (để không cài nhầm sang máy khác trong nhà),
-gói **lát cắt** backend, cài venv, kiểm import, rồi in ra bước cần `sudo` để dán vào
-terminal của bo. Mặc định `AC_UNOQ_HOST=192.168.1.7`, `AC_UNOQ_USER=arduino`.
+The script checks that the target machine actually has `hci0` (so it does not install onto the
+wrong machine in the house), packages a **slice** of the backend, creates a venv, verifies the
+imports, then prints the `sudo` step to paste into the board's terminal. Defaults are
+`AC_UNOQ_HOST=192.168.1.7`, `AC_UNOQ_USER=arduino`.
 
-**Không chép nguyên `src/` lên bo** — bản trước làm thế và nó hỏng:
+**Do not copy the whole `src/` tree onto the board** — an earlier version did, and it broke:
 
 ```
 File ".../src/app/models/__init__.py", line 7
@@ -127,62 +132,64 @@ File ".../src/app/models/__init__.py", line 7
 ModuleNotFoundError: No module named 'sqlalchemy'
 ```
 
-`comfort_bridge` chỉ cần `app.models.enums.AcMode`, nhưng Python chạy `__init__.py`
-của gói trước khi nạp module con, mà bản thật import cả 12 model ORM. Cài SQLAlchemy
-lên bo để lấy đúng một enum là sai hướng — nên script mang theo lát cắt và thay
-`__init__.py` bằng bản rỗng. Lát cắt định nghĩa ở `_BACKEND_FILES` trong
-`deploy/build-edge-payload.py` — sửa backend mà quên sửa chỗ đó thì build vẫn chạy,
-chỉ tới lúc import trên bo mới nổ, nên script tự dừng nếu thiếu file.
+`comfort_bridge` only needs `app.models.enums.AcMode`, but Python runs the package's
+`__init__.py` before loading the submodule, and the real one imports all 12 ORM models.
+Installing SQLAlchemy on the board just to get one enum is the wrong direction — so the script
+carries a slice and replaces `__init__.py` with an empty one. The slice is defined by
+`_BACKEND_FILES` in `deploy/build-edge-payload.py`; change the backend and forget that list and
+the build still succeeds, only blowing up at import time on the board, so the script aborts if a
+file is missing.
 
-Dịch vụ chạy bằng user `arduino` chứ không tạo user riêng: chính sách D-Bus của BlueZ
-cấp quyền **theo user**, và `arduino` đã nằm trong nhóm `bluetooth`. Một user mới toanh
-sẽ bị `org.bluez` từ chối, và triệu chứng là quét BLE rỗng mãi mãi chứ không phải một
-lỗi quyền rõ ràng.
+The service runs as the `arduino` user rather than a dedicated one: BlueZ's D-Bus policy grants
+access **per user**, and `arduino` is already in the `bluetooth` group. A brand-new user would be
+refused by `org.bluez`, and the symptom is a BLE scan that stays empty forever rather than a
+clear permission error.
 
-## Chạy thử trên máy dev
+## Running it on a dev machine
 
 ```bash
 cd edge-ai
 pip install -e .
-cp .env.example .env    # điền
+cp .env.example .env    # fill it in
 python -m edge_ai.main
 ```
 
-## Kiểm chứng hoạt động đúng
+## Verifying correct operation
 
-| Việc làm | Phải thấy |
+| Action | Expected result |
 |---|---|
-| Bật lên, cloud đang chạy | `Đã nối gateway … (MTU 247)`, rồi mỗi 30s một dòng `t_in=… máy chủ cầm lái`. KHÔNG có `ĐÃ RA LỆNH` |
-| Xem màn gateway, trang Thông tin | Chân trang hiện `UNO Q đã nối` |
-| Tắt worker cloud | Sau ~300s: `GIÀNH LÁI`, rồi `ĐÃ RA LỆNH (edge cầm lái)`; nhật ký trên màn gateway ghi `edge takeover` |
-| Bật lại worker cloud | `NHẢ LÁI` ngay nhịp kế tiếp, thôi ra lệnh |
-| Rút điện cả 4 node góc | `Gateway báo chưa có góc phòng nào còn tươi — không tính, không ra lệnh` |
-| Che một góc bằng đèn bàn | `Bất thường ở góc 3 (outlier): lệch +3.2°C…` |
-| Bấm THỦ CÔNG trên màn gateway | edge thôi ra lệnh dù đang cầm lái |
+| Start up with the cloud running | `Đã nối gateway … (MTU 247)`, then one `t_in=… máy chủ cầm lái` line every 30s. NO `ĐÃ RA LỆNH` |
+| Look at the gateway screen, Info page | The footer shows `UNO Q đã nối` |
+| Stop the cloud worker | After ~300s: `GIÀNH LÁI`, then `ĐÃ RA LỆNH (edge cầm lái)`; the gateway screen log records `edge takeover` |
+| Start the cloud worker again | `NHẢ LÁI` on the very next tick, commands stop |
+| Unplug all 4 corner nodes | `Gateway báo chưa có góc phòng nào còn tươi — không tính, không ra lệnh` |
+| Shine a desk lamp on one corner | `Bất thường ở góc 3 (outlier): lệch +3.2°C…` |
+| Press THỦ CÔNG on the gateway screen | The edge stops issuing commands even while holding control |
 
-## Những chỗ dễ sai
+## Easy things to get wrong
 
-- **`EDGE_ORG_ID` sai là hỏng câm một nửa.** Giá trị này băm thành `link_key`; sai thì
-  dịch vụ vẫn nối được gateway và vẫn **nghe** được số đo, nhưng mọi lệnh gửi đi bị
-  gateway lặng lẽ từ chối. Dấu hiệu duy nhất nằm ở log gateway:
-  `[unoq] tu choi goi sai link_key`.
-- **MTU.** Ảnh chụp là 39 byte còn MTU mặc định của BLE chỉ cho 20. Cả hai bên đều kiểm
-  và kêu to, nhưng nếu thấy `Bỏ ảnh chụp không hợp lệ: … cắt cụt` lặp lại thì đó là
-  BlueZ không thương lượng MTU lên được.
-- **Đổi khuôn gói phải đổi CẢ HAI bên** — `edge_ai/protocol.py` và
-  `FirmWare/shared/unoq-link-protocol.h`. Kích thước được chốt bằng `assert` lúc import
-  và `static_assert` lúc biên dịch, nên quên là nổ ngay chứ không âm thầm đọc lệch.
-- **UNO Q mất điện là mất lớp dự phòng.** Nó là lớp THÊM, không phải đường sống duy
-  nhất — hệ vẫn chạy y như trước khi có nó.
+- **A wrong `EDGE_ORG_ID` half-breaks the system silently.** This value is hashed into the
+  `link_key`; if it is wrong the service still connects to the gateway and still **receives**
+  readings, but every command it sends is silently refused by the gateway. The only sign is in
+  the gateway log: `[unoq] tu choi goi sai link_key`.
+- **MTU.** A snapshot is 39 bytes while the BLE default MTU only allows 20. Both sides check and
+  complain loudly, but if you see `Bỏ ảnh chụp không hợp lệ: … cắt cụt` repeating, that is BlueZ
+  failing to negotiate a larger MTU.
+- **Changing the packet layout means changing BOTH sides** — `edge_ai/protocol.py` and
+  `FirmWare/shared/unoq-link-protocol.h`. The sizes are pinned by an `assert` at import time and
+  a `static_assert` at compile time, so forgetting blows up immediately instead of quietly
+  misreading fields.
+- **If the UNO Q loses power, the fallback layer is gone.** It is an ADDITIONAL layer, not the
+  only lifeline — the system behaves exactly as it did before it existed.
 
-## Giới hạn đã biết
+## Known limitations
 
-- Edge chỉ biết hộ đã học những nhiệt độ nào bằng cách **quan sát trạng thái gateway
-  báo về**. Một hộ vừa lắp mà cloud chưa kịp ra lệnh COOL lần nào thì edge sẽ chỉ đề
-  xuất, không điều khiển — và nói ra điều đó trong log.
-- Lệnh do edge phát **không tạo hàng `commands`** nào bên server (server đang mất kết
-  nối — đó là lý do edge cầm lái). Gateway vẫn publish `state` nếu còn MQTT, nên web
-  thấy trạng thái mới nhưng không thấy lệnh nào sinh ra nó. Nhật ký trên màn gateway
-  ghi `edge takeover` — đó là chỗ duy nhất giải thích.
-- **Chưa chạy trên phần cứng thật.** Toàn bộ luồng quyết định đã kiểm bằng smoke test
-  với gói dựng đúng byte, nhưng kết nối BLE thật thì chưa.
+- The edge only learns which temperatures the household has IR codes for by **observing the
+  state the gateway reports**. A freshly installed household where the cloud has not yet issued
+  a single COOL command will get advice only, no control — and it says so in the log.
+- Commands issued by the edge **create no `commands` row** on the server (the server is
+  disconnected — that is why the edge took over). The gateway still publishes `state` if MQTT is
+  alive, so the web UI sees a new state but no command that produced it. The gateway screen log
+  records `edge takeover` — that is the only place it is explained.
+- **Not yet run on real hardware.** The whole decision path has been verified with smoke tests
+  using byte-accurate packets, but a real BLE connection has not been tested.

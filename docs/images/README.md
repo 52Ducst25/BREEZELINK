@@ -1,45 +1,46 @@
-# Ảnh của dự án
+# Project images
 
-Ảnh dùng trong tài liệu và bài thuyết trình: phần cứng lắp đặt, giao diện panel,
-màn hình app, sơ đồ đấu dây, biểu đồ kết quả đo.
+Images used in the documentation and in presentations: installed hardware, the panel
+UI, app screens, wiring diagrams, measurement charts.
 
-## Quy ước đặt tên
+## Naming convention
 
-Tiếng Việt không dấu, kebab-case, **tả nội dung chứ không tả thiết bị chụp**:
+English, kebab-case, **describe the content, not the camera that took it**:
 
 ```
-phan-cung-lap-dat.png        ✅  đọc tên là biết trong ảnh có gì
-panel-tab-may-tao-am.png     ✅
-app-man-dieu-khien.png       ✅
-20260727_104251.png          ❌  tên máy ảnh tự đặt, không nói gì
+hardware-installation.png    ✅  the name alone tells you what is in the shot
+panel-humidifier-tab.png     ✅
+app-control-screen.png       ✅
+20260727_104251.png          ❌  camera-generated name, says nothing
 IMG_1234.jpg                 ❌
 ```
 
-Lý do không phải thẩm mỹ: tài liệu nhúng ảnh bằng đường dẫn, và sáu tháng sau
-không ai nhớ `20260727_104251.png` là ảnh gì để mà thay đúng cái cần thay.
+The reason is not aesthetics: documents embed images by path, and six months from now
+nobody will remember what `20260727_104251.png` was a picture of, so nobody can replace
+the right one.
 
-## Nhúng vào tài liệu
+## Embedding in a document
 
-Đường dẫn tương đối từ file `.md` đang viết:
+Relative path from the `.md` file you are writing:
 
 ```markdown
-![Bộ sáu thiết bị sau khi lắp](images/phan-cung-lap-dat.png)
+![The six devices after installation](images/hardware-installation.png)
 ```
 
-## Cỡ ảnh
+## Image size
 
-Nén trước khi commit. Ảnh chụp điện thoại thường 2–5 MB mà hiển thị trong tài
-liệu chỉ cần ~1600 px chiều ngang. Repo này đã một lần phình lên vì file nhị phân
-không ai dùng tới, và git **không bao giờ quên** một file đã commit — xoá ở lần
-sau cũng không làm nhẹ lịch sử.
+Compress before committing. A phone photo is usually 2–5 MB, while a document only
+needs about 1600 px across. This repo has already ballooned once because of binary
+files nobody used, and git **never forgets** a file once it is committed — deleting it
+later does not make the history any lighter.
 
 ```bash
 # ImageMagick
-magick input.jpg -resize 1600x -quality 82 docs/images/ten-mo-ta.png
+magick input.jpg -resize 1600x -quality 82 docs/images/descriptive-name.png
 ```
 
-## Đang có
+## Current contents
 
-| File | Nội dung |
+| File | Contents |
 |---|---|
-| `phan-cung-lap-dat.png` | Ảnh chụp phần cứng lúc lắp đặt |
+| `hardware-installation.png` | Photo of the hardware during installation |
