@@ -744,17 +744,21 @@ static void connectWifi() {
   if (WiFi.status() == WL_CONNECTED) return;
   WiFi.mode(WIFI_STA);
 
-  // TỰ NỐI LẠI: TẮT. Không phải để tiết kiệm gì — để GIÀNH QUYỀN ĐIỀU ĐỘ RADIO.
-  //
-  // Ngăn xếp WiFi của Arduino tự gọi lại WiFi.begin() sau mỗi lần rớt, và cú
-  // begin() đó KHÔNG khai kênh nên nó quét khắp các kênh. Tức là ngay sau khi
-  // serviceNetwork() vừa ghim radio về kênh của node, một lần tự-nối-lại chạy
-  // sau lưng sẽ kéo nó đi mất — không có log nào của mình báo, vì không phải mình
-  // gọi. Tắt đi thì mọi lần radio rời kênh đều do đúng một chỗ quyết định.
-  WiFi.setAutoReconnect(false);
   // Đừng ghi cấu hình WiFi xuống NVS ở mỗi lần begin(): vòng thử lại có thể chạy
   // hàng trăm lần trong một đêm mất mạng, và flash thì có hạn ghi.
   WiFi.persistent(false);
+
+  // TỰ NỐI LẠI: BẬT trong lúc khởi động, TẮT ngay sau vòng thử bên dưới.
+  //
+  // ĐÃ ĐO ĐƯỢC CÁI GIÁ CỦA VIỆC TẮT SỚM: tắt trước vòng thử thì mỗi lượt 20 giây
+  // trở thành 20 giây NẰM IM — ngăn xếp không tự thử lại lần nào sau một cú bắt
+  // tay trượt, nên bo phải chờ hết lượt rồi mới begin() lại. Trên bo thật, ở
+  // RSSI -36 dBm (rất mạnh), khởi động mất tới "lan 3/3" ≈ 40 giây mới vào mạng.
+  //
+  // Ở đây để ngăn xếp tự lo là ĐÚNG: ESP-NOW chưa dựng (EspNowRelay::begin() nằm
+  // sau), nên nó có nhảy kênh cũng không cắt đường thu của ai cả — chính là điều
+  // KHÔNG còn đúng sau khi setup() xong.
+  WiFi.setAutoReconnect(true);
 
   for (uint8_t attempt = 1; attempt <= WIFI_BOOT_ATTEMPTS; attempt++) {
     Serial.printf("WiFi -> \"%s\" (lan %u/%u) ", WIFI_SSID, attempt, WIFI_BOOT_ATTEMPTS);
@@ -770,6 +774,16 @@ static void connectWifi() {
     // kéo gateway ra khỏi kênh của các node, và không một dòng log nào báo.
     if (attempt < WIFI_BOOT_ATTEMPTS) wifiDiagnose();
   }
+
+  // TỪ ĐÂY TRỞ ĐI, RADIO LÀ CỦA serviceNetwork(). Tắt tự-nối-lại.
+  //
+  // Không phải để tiết kiệm gì — để GIÀNH QUYỀN ĐIỀU ĐỘ RADIO. Cú begin() mà
+  // ngăn xếp tự gọi sau mỗi lần rớt KHÔNG khai kênh, nên nó quét khắp các kênh:
+  // ngay sau khi serviceNetwork() vừa ghim radio về kênh của node, một lần
+  // tự-nối-lại chạy sau lưng sẽ kéo nó đi mất — và không có log nào của mình
+  // báo, vì không phải mình gọi. Tắt đi thì mọi lần radio rời kênh đều do đúng
+  // một chỗ quyết định.
+  WiFi.setAutoReconnect(false);
 
   if (WiFi.status() != WL_CONNECTED) {
     Serial.printf("\nKHONG VAO DUOC WiFi sau %u lan — CHAY TIEP KHONG CO MANG.\n"
@@ -808,20 +822,36 @@ static bool mqttTryConnect() {
   return false;
 }
 
-/// Giãn dần nhịp thử nối WiFi theo số lần trượt LIÊN TIẾP (ms).
+/// WiFi phải mất LIÊN TỤC bao lâu mới được coi là mất thật (ms).
 ///
-/// KHÔNG CÒN MỘT SỐ CỐ ĐỊNH 15 GIÂY, và lý do không phải là tiết kiệm điện: mỗi
-/// lần thử là một lần radio có nguy cơ rời khỏi kênh của node. Mất mạng thì
-/// thường mất lâu (router hỏng, nhà cắt điện, ISP đứt), nên hỏi lại 4 lần/phút
-/// suốt nhiều giờ là trả giá bằng đúng thứ đang cố cứu — số đo của 4 góc phòng.
+/// THIẾU CÁI NÀY LÀ PANEL TỰ NGẮT MẠNG CỦA CHÍNH NÓ — lỗi đã đo được trên bo:
+/// RSSI -39 dBm (rất mạnh) mà log vẫn rớt/nối lại liên tục.
 ///
-/// Hai lần đầu vẫn nhanh: ca hay gặp nhất là router vừa khởi động lại, và khi đó
-/// mạng về trong vòng một phút.
-static uint32_t wifiRetryDelayMs(uint8_t misses) {
-  if (misses < 2) return 30000UL;
-  if (misses < 5) return 60000UL;
-  return 300000UL;
-}
+/// Vì sao: loop() chạy hàng trăm lần mỗi giây, còn `WiFi.status()` có lúc trả về
+/// một trị KHÔNG-CONNECTED chớp nhoáng (gia hạn DHCP, một sự kiện nội bộ) trong
+/// khi liên kết vẫn hoàn toàn khoẻ. Phản ứng ngay với MỘT lần đọc như vậy nghĩa
+/// là gọi `WiFi.begin()`, mà begin() thì THẬT SỰ phá liên kết đang tốt để dựng
+/// lại từ đầu. Một cái chớp mắt biến thành một lần mất mạng có thật, rồi lặp.
+///
+/// 5 giây: dài hơn mọi cái chớp, ngắn hơn nhiều so với thời gian người dùng kịp
+/// nhận ra mạng đã mất.
+static const uint32_t WIFI_DOWN_DEBOUNCE_MS = 5000UL;
+
+/// Nhịp thử nối lại khi đã mất thật (ms). CỐ ĐỊNH, không giãn dần nữa.
+///
+/// Bản trước giãn 30s -> 60s -> 300s để "đỡ quấy radio". Sai chỗ này: thứ thật
+/// sự kéo radio khỏi kênh của node là QUÉT, mà lần thử trên kênh đã nhớ thì
+/// không quét — nó đi thẳng tới đúng kênh node đang phát, gần như không tốn gì.
+/// Giãn cả những lần thử rẻ tiền đó lên 5 phút chỉ đổi lấy một điều: router có
+/// điện lại rồi mà panel im thêm 5 phút nữa, và người dùng đọc ra là "không tự
+/// nối lại được".
+///
+/// Nay: thử đều 30 giây, còn phần ĐẮT (quét) mới là phần được làm cho thưa.
+static const uint32_t WIFI_RETRY_MS = 30000UL;
+
+/// Cứ bao nhiêu lần thử thì cho phép MỘT lần quét đầy đủ (router đổi kênh thật).
+/// 6 × 30s = một lần quét mỗi ~3 phút.
+static const uint8_t WIFI_SCAN_EVERY = 6;
 
 /// Cùng ý đó cho MQTT. Tách riêng vì hai thứ hỏng độc lập nhau: WiFi tốt mà
 /// broker chết là chuyện thường, và khi đó không có lý do gì để đụng vào radio.
@@ -834,12 +864,6 @@ static uint32_t mqttRetryDelayMs(uint8_t misses) {
 /// Cho MỘT lần thử nối WiFi bao lâu trước khi bỏ cuộc và quay về đậu kênh (ms).
 static const uint32_t WIFI_ATTEMPT_WINDOW_MS = 12000UL;
 
-/// Thử bao nhiêu lần trên KÊNH ĐÃ NHỚ trước khi cho phép một lần quét đầy đủ.
-///
-/// Quét là thứ duy nhất thực sự kéo radio khỏi kênh của node, nên nó phải là
-/// phương án cuối chứ không phải mặc định. Ba lần trượt liên tiếp trên kênh cũ
-/// mới đáng nghi là router đã đổi kênh thật.
-static const uint8_t WIFI_PINNED_TRIES = 3;
 
 /// Giữ WiFi/MQTT sống mà KHÔNG CHẶN loop(). Gọi mỗi vòng.
 ///
@@ -875,6 +899,7 @@ static const uint8_t WIFI_PINNED_TRIES = 3;
 ///      kênh ngay sau đó (EspNowChannel::rescan lo việc này).
 static void serviceNetwork() {
   static uint32_t lastWifiTry = 0, attemptStartMs = 0, lastRescanMs = 0, lastMqttTry = 0;
+  static uint32_t downSinceMs = 0;   // 0 = đang có mạng
   static uint8_t  wifiMisses = 0, mqttMisses = 0;
   static bool     attempting = false;
   const uint32_t  now = millis();
@@ -883,13 +908,27 @@ static void serviceNetwork() {
   //  MẤT WiFi — ưu tiên số một là GIỮ RADIO ĐÚNG KÊNH, không phải nối lại nhanh
   // ==========================================================================
   if (WiFi.status() != WL_CONNECTED) {
+    if (downSinceMs == 0) downSinceMs = now;
+
+    // CHỜ XEM CÓ PHẢI MẤT THẬT KHÔNG trước khi động vào bất cứ thứ gì. Xem
+    // WIFI_DOWN_DEBOUNCE_MS: phản ứng với một lần đọc chớp nhoáng là tự tay phá
+    // một liên kết đang khoẻ. Bỏ qua chống dội khi ĐANG thử nối — lúc đó
+    // "không connected" là trạng thái đương nhiên, không phải tin tức.
+    if (!attempting && now - downSinceMs < WIFI_DOWN_DEBOUNCE_MS) return;
+
     // --- đang trong một lần thử ---
     if (attempting) {
-      const wl_status_t st = WiFi.status();
-      // Bỏ cuộc sớm khi ngăn xếp WiFi đã biết câu trả lời, khỏi ngồi hết cửa sổ
-      // 12 giây để nghe lại đúng điều đó.
-      const bool hopeless = (st == WL_NO_SSID_AVAIL || st == WL_CONNECT_FAILED);
-      if (!hopeless && now - attemptStartMs < WIFI_ATTEMPT_WINDOW_MS) return;
+      // CHỜ HẾT CỬA SỔ, KHÔNG BỎ CUỘC SỚM THEO WiFi.status().
+      //
+      // Bản trước có một nhánh "hopeless" bỏ cuộc ngay khi status là
+      // WL_NO_SSID_AVAIL / WL_CONNECT_FAILED. Nó đọc TRẠNG THÁI CŨ: ngay sau
+      // WiFi.begin(), tác vụ WiFi chưa kịp bắt đầu lần thử mới nên status vẫn
+      // còn kết quả của lần TRƯỚC. Vòng loop kế tiếp (~1ms sau) đọc phải trị cũ
+      // đó, kết luận "vô vọng", và huỷ lần thử vừa đặt ra trước khi nó kịp chạy.
+      //
+      // Hậu quả: mọi lần thử sau lần trượt đầu tiên đều chết trong 1ms, bộ đếm
+      // trượt tăng vọt, và panel không bao giờ nối lại được — đúng lỗi đã báo.
+      if (now - attemptStartMs < WIFI_ATTEMPT_WINDOW_MS) return;
 
       attempting = false;
       if (wifiMisses < 255) wifiMisses++;
@@ -919,12 +958,14 @@ static void serviceNetwork() {
       return;   // quét vừa ăn ~1 giây; để vòng sau hãy thử nối
     }
 
-    if (now - lastWifiTry < wifiRetryDelayMs(wifiMisses)) return;
+    if (now - lastWifiTry < WIFI_RETRY_MS) return;
     lastWifiTry    = now;
     attemptStartMs = now;
     attempting     = true;
 
-    if (wifiMisses < WIFI_PINNED_TRIES) {
+    // Quét là phần ĐẮT (kéo radio khỏi kênh node), nên nó thưa; thử trên kênh đã
+    // nhớ là phần RẺ, nên nó là mặc định.
+    if (wifiMisses == 0 || (wifiMisses % WIFI_SCAN_EVERY) != 0) {
       // KHAI KÊNH TRONG begin() — đây là mẹo làm cả bài toán này gần như biến mất.
       // Có kênh thì station đi THẲNG tới đó, KHÔNG quét, nên lần thử nối lại tự
       // nó đã nằm đúng kênh của node: panel vừa dò mạng vừa thu ESP-NOW bình
@@ -934,8 +975,8 @@ static void serviceNetwork() {
                     ch, (unsigned)(wifiMisses + 1));
       WiFi.begin(WIFI_SSID, WIFI_PASSWORD, ch);
     } else {
-      // Trượt mãi trên kênh cũ -> router có thể đã đổi kênh thật. Đành quét, và
-      // chấp nhận mất vài gói ESP-NOW trong cửa sổ này.
+      // Trượt nhiều lần trên kênh cũ -> router có thể đã đổi kênh thật. Đành
+      // quét, và chấp nhận mất vài gói ESP-NOW trong cửa sổ này.
       Serial.printf("[net] %u lan truot tren kenh %u — thu lai CO QUET\n",
                     (unsigned)wifiMisses, EspNowChannel::last());
       WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
@@ -946,6 +987,10 @@ static void serviceNetwork() {
   // ==========================================================================
   //  CÓ WiFi
   // ==========================================================================
+  // Xoá mốc chống dội NGAY, trước mọi nhánh: một cái chớp đã qua thì không được
+  // để lại dấu vết nào cộng dồn vào lần chớp sau.
+  downSinceMs = 0;
+
   // Vừa vào lại sau một đợt mất mạng: nhớ kênh, tắt modem sleep, thôi ghim.
   if (attempting || EspNowChannel::pinned()) {
     attempting   = false;
