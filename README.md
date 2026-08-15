@@ -387,8 +387,13 @@ cp .env.example .env
 
 docker compose -f docker/docker-compose.yml up -d --build
 
-# dữ liệu demo — scripts/ không nằm trong image nên đưa qua stdin:
-docker compose -f docker/docker-compose.yml exec -T api python - < scripts/seed_demo.py
+# dữ liệu demo — scripts/ không nằm trong image nên đưa qua stdin.
+# DEMO_PASSWORD là bắt buộc: script cố ý không có mật khẩu mặc định, vì một
+# cặp đăng nhập role=owner ghi cứng trong mã nguồn thì ai đọc repo cũng dùng được.
+# Token MQTT của hai thiết bị demo được sinh ngẫu nhiên và in ra một lần.
+docker compose -f docker/docker-compose.yml exec -T \
+  -e DEMO_PASSWORD='dat-mat-khau-cua-ban' \
+  api python - < scripts/seed_demo.py
 ```
 
 - Web quản trị: **http://localhost:8201/web/login**
