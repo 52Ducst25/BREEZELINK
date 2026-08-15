@@ -21,7 +21,7 @@ from pathlib import Path
 
 
 def _comfort_already_importable() -> bool:
-    """`app.comfort` đã nằm sẵn trên sys.path chưa."""
+    """Is `app.comfort` already importable from sys.path."""
     try:
         return importlib.util.find_spec("app.comfort") is not None
     except (ImportError, ValueError):
@@ -30,26 +30,27 @@ def _comfort_already_importable() -> bool:
 
 # HỎI TRÌNH NẠP MODULE TRƯỚC, ĐỪNG HỎI HỆ THỐNG TỆP.
 #
-# Bản trước bắt buộc `EDGE_BACKEND_SRC` phải là một THƯ MỤC THẬT chứa app/comfort.
-# Đúng cho bản cài bằng rsync cả `src/`, nhưng nó khoá chặt mọi cách triển khai
-# khác. Cách đang dùng thật là chở một LÁT CẮT `app/` nằm ngay cạnh `edge_ai/`
-# trong cùng một mục PYTHONPATH (deploy/build-edge-payload.py) — lúc đó
-# `app.comfort` nạp được nhưng KHÔNG có thư mục nào tên `src/` để mà kiểm, và
-# phép kiểm cũ chặn đúng cái nó không có lý do gì để chặn. Zipimport cũng vậy:
-# nạp được từ trong .zip, mà `Path.is_dir()` luôn trả False cho đường dẫn đó.
+# An earlier version required `EDGE_BACKEND_SRC` to be a REAL DIRECTORY containing
+# app/comfort. Correct for an install that rsyncs the whole `src/`, but it locked out
+# every other deployment style. The approach actually in use ships a SLICE of `app/`
+# sitting next to `edge_ai/` in the same PYTHONPATH entry
+# (deploy/build-edge-payload.py) -- in which case `app.comfort` imports fine but there
+# is NO directory called `src/` to check, and the old check blocked precisely what it
+# had no reason to block. Zipimport is the same: importable from inside a .zip, while
+# `Path.is_dir()` always returns False for that path.
 #
-# Nếu `app.comfort` đã nạp được rồi thì không cần biến môi trường nào cả. Chỉ khi
-# CHƯA nạp được mới đi tìm theo đường dẫn, và lúc đó phép kiểm thư mục vẫn còn
-# nguyên giá trị: nó biến một ModuleNotFoundError khó hiểu thành một câu nói rõ
-# phải sửa gì.
+# If `app.comfort` already imports, no environment variable is needed at all. Only
+# when it does NOT import do we go looking by path, and there the directory check
+# still earns its keep: it turns a baffling ModuleNotFoundError into a sentence saying
+# exactly what to fix.
 if not _comfort_already_importable():
     _DEFAULT_SRC = Path(__file__).resolve().parents[2] / "src"
     _BACKEND_SRC = Path(os.getenv("EDGE_BACKEND_SRC", str(_DEFAULT_SRC)))
 
     if not (_BACKEND_SRC / "app" / "comfort").is_dir():
         raise ImportError(
-            f"Không tìm thấy thuật toán comfort ở {_BACKEND_SRC}. "
-            "Đặt EDGE_BACKEND_SRC trỏ tới thư mục src/ của backend."
+            f"The comfort algorithm was not found at {_BACKEND_SRC}. "
+            "Set EDGE_BACKEND_SRC to point at the backend's src/ directory."
         )
     if str(_BACKEND_SRC) not in sys.path:
         sys.path.insert(0, str(_BACKEND_SRC))

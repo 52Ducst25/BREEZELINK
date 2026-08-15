@@ -44,8 +44,9 @@ class RoomStore:
     # -- ingest ---------------------------------------------------------------
 
     def ingest(self, snapshot: Snapshot, ts: float | None = None) -> None:
-        """Nạp một ảnh chụp. Ô nào không có số đo thì KHÔNG ghi gì cả — chèn một
-        mẫu rỗng vào lịch sử sẽ làm hồi quy tưởng nhiệt độ vừa nhảy về 0."""
+        """Ingest one snapshot. Slots with no reading record NOTHING -- inserting an
+        empty sample into the history would make the regression think the temperature
+        had just jumped to 0."""
         now = time.time() if ts is None else ts
         self._latest = snapshot
 
@@ -74,10 +75,11 @@ class RoomStore:
         return sorted(self._rooms)
 
     def label(self, slot: int) -> str:
-        """Nhãn người đọc được cho một ô — "góc 2" nếu node có khai, còn không
-        thì số ô. Không bịa ra một tên nghe có vẻ chính xác khi không biết."""
+        """A human-readable label for a slot -- "corner 2" if the node declared one,
+        otherwise the slot number. Do not invent a name that sounds precise when we do
+        not know."""
         corner = self._corner_label.get(slot)
-        return f"góc {corner + 1}" if corner is not None else f"ô {slot}"
+        return f"corner {corner + 1}" if corner is not None else f"slot {slot}"
 
     def history(self, slot: int) -> list[Sample]:
         return list(self._rooms.get(slot, ()))
@@ -89,12 +91,14 @@ class RoomStore:
         return {s: w[-1].temp for s, w in self._rooms.items() if w}
 
     def indoor_check(self):
-        """Tự tính lại trung vị từ số của từng góc trong ảnh chụp mới nhất.
+        """Recompute the median ourselves from the per-corner values in the latest
+        snapshot.
 
-        Dùng ĐÚNG hàm mà worker trên cloud dùng (comfort_bridge -> app.comfort),
-        nên nếu con số này lệch với `snapshot.t_in` mà gateway đang hiện trên
-        tường thì có hai bản luật đã trôi khỏi nhau — và biết được điều đó là lý
-        do tồn tại của hàm này. Trả None khi ảnh chụp không có góc nào.
+        It uses THE SAME function the cloud worker uses (comfort_bridge ->
+        app.comfort), so if this number differs from the `snapshot.t_in` the gateway is
+        showing on the wall, two copies of the rule have drifted apart -- and knowing
+        that is this function's entire reason for existing. Returns None when the
+        snapshot has no corners.
         """
         if self._latest is None:
             return None
@@ -105,7 +109,8 @@ class RoomStore:
         ]
         if not readings:
             return None
-        # age_sec = 0 cho mọi mẫu: gateway ĐÃ lọc góc quá hạn trước khi gửi (nó
-        # gửi INVALID cho góc mất kết nối), nên lọc tuổi lần nữa ở đây là áp hai
-        # lớp ngưỡng lên cùng một dữ liệu và ngưỡng chặt hơn sẽ âm thầm thắng.
+        # age_sec = 0 for every sample: the gateway has ALREADY filtered out stale
+        # corners before sending (it sends INVALID for a disconnected corner), so
+        # filtering by age again here would apply two thresholds to the same data and
+        # the stricter one would silently win.
         return aggregate_rooms(readings, max_age_sec=float("inf"))

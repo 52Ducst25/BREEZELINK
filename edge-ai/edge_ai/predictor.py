@@ -42,16 +42,18 @@ class Trend:
 # averages out instead of being read as a trend.
 _MIN_SAMPLES = 6
 
-# Và chúng phải trải ít nhất chừng này giây.
+# And they have to span at least this many seconds.
 #
-# ĐẾM SỐ MẪU LÀ CHƯA ĐỦ. Sau khi gateway kết nối lại, cả một loạt khung dồn ứ đổ
-# về gần như cùng lúc, nên ``RoomStore`` có đủ 6 mẫu nhưng chúng trải vài mili-
-# giây. Chia cho một phương sai bé xíu cho ra độ dốc hàng nghìn °C/phút, và
-# ``find_anomalies`` báo cả bốn góc "runaway — nghi lỗi cảm biến".
+# COUNTING SAMPLES IS NOT ENOUGH. After the gateway reconnects, a whole backlog of
+# frames arrives almost simultaneously, so ``RoomStore`` has its 6 samples but they
+# span a few milliseconds. Dividing by a tiny variance produces slopes of thousands of
+# °C/minute, and ``find_anomalies`` reports all four corners as "runaway - suspected
+# sensor fault".
 #
-# Phép kiểm ``var_x <= 1e-9`` bên dưới không cứu được: nó chỉ bắt trường hợp MỌI
-# mẫu cùng một mốc thời gian, còn "trải 5 mili-giây" thì vượt qua nó dễ dàng.
-# Đã thấy đúng hiện tượng này khi chạy thử Controller (−6759 °C/phút, cả 4 góc).
+# The ``var_x <= 1e-9`` check below does not save you: it only catches the case where
+# EVERY sample shares one timestamp, and "spanning 5 milliseconds" sails straight past
+# it. This exact phenomenon was observed while testing the Controller (-6759 °C/minute,
+# on all 4 corners).
 _MIN_SPAN_SEC = 60.0
 
 
@@ -120,11 +122,11 @@ def find_anomalies(
         delta = temp - median_temp
         if abs(delta) >= _OUTLIER_DELTA_C:
             found.append(
-                Anomaly(uuid, "outlier", f"lệch {delta:+.1f}°C so với trung vị {median_temp:.1f}°C")
+                Anomaly(uuid, "outlier", f"{delta:+.1f}°C from the {median_temp:.1f}°C median")
             )
         trend = trends.get(uuid)
         if trend and abs(trend.slope_per_min) >= _IMPLAUSIBLE_SLOPE_C_PER_MIN:
             found.append(
-                Anomaly(uuid, "runaway", f"đổi {trend.slope_per_min:+.2f}°C/phút — nghi lỗi cảm biến")
+                Anomaly(uuid, "runaway", f"changing {trend.slope_per_min:+.2f}°C/min - suspected sensor fault")
             )
     return found

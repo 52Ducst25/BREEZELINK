@@ -35,17 +35,17 @@ class CloudWatch:
         self._takeover_after = takeover_after_sec
         self._driving = False
         self._silence: float | None = 0.0
-        # Mốc thời gian dịch vụ này bắt đầu quan sát. Xem nhánh "chưa từng ra
-        # lệnh" trong update() cho lý do phải có nó.
+        # When this service started observing. See the "never commanded" branch in
+        # update() for why it is needed.
         self._watching_since = time.monotonic()
 
     def update(self, silence_sec: int | None) -> None:
-        """Nạp `cloud_silence_sec` từ ảnh chụp mới nhất.
+        """Feed in `cloud_silence_sec` from the latest snapshot.
 
-        None nghĩa là máy chủ CHƯA TỪNG ra lệnh cho hộ này — khác hẳn "vừa ra
-        lệnh xong". Coi nó là im lặng vô hạn: một hộ vừa lắp mà cloud chưa bao
-        giờ chạm tới thì không có ai để mà nhường, và đó đúng là ca lớp dự phòng
-        nên làm việc.
+        None means the server has NEVER commanded this household -- quite different
+        from "it just commanded". Treat it as infinite silence: in a freshly installed
+        household the cloud has never touched, there is nobody to defer to, and that
+        is exactly the case where the fallback layer should be working.
         """
         previously = self._driving
         self._silence = None if silence_sec is None else float(silence_sec)
@@ -53,24 +53,26 @@ class CloudWatch:
         if self._silence is not None and self._silence < self._takeover_after:
             self._driving = False
             if previously:
-                logger.info("NHẢ LÁI — máy chủ đã lên tiếng trở lại (%.0fs trước)", self._silence)
+                logger.info("RELEASING CONTROL - the server has spoken again (%.0fs ago)", self._silence)
             return
 
-        # "CHƯA TỪNG RA LỆNH" KHÔNG ĐƯỢC GIÀNH LÁI NGAY LÚC VỪA BẬT.
+        # "NEVER COMMANDED" MUST NOT TAKE CONTROL THE INSTANT WE BOOT.
         #
-        # Bản trước coi None là im lặng vô hạn và giành lái tức khắc — đo trên bo
-        # thật thì nó giành sau ĐÚNG 4 GIÂY kể từ lúc dịch vụ khởi động, trong khi
-        # phiên MQTT của gateway đang khoẻ mạnh. Đó chính là ca "hai bên cùng cầm
-        # lái" mà cả file này viết ra để tránh.
+        # An earlier version treated None as infinite silence and took over
+        # immediately -- measured on real hardware it took control EXACTLY 4 SECONDS
+        # after the service started, while the gateway's MQTT session was perfectly
+        # healthy. That is precisely the "both sides driving" case this entire file
+        # was written to avoid.
         #
-        # Lý do bản trước sai: None là câu "máy chủ chưa ra lệnh lần nào KỂ TỪ KHI
-        # GATEWAY KHỞI ĐỘNG" — nó không phân biệt được "cloud chết" với "cloud
-        # chưa có việc gì để ra lệnh". Vừa cắm điện cả nhà thì hai thứ đó trông y
-        # hệt nhau, và chỉ có thời gian mới tách được chúng.
+        # Why the earlier version was wrong: None says "the server has not commanded
+        # SINCE THE GATEWAY BOOTED" -- it cannot distinguish "the cloud is dead" from
+        # "the cloud has had nothing to command". Right after the whole house is
+        # powered on those two look identical, and only time separates them.
         #
-        # Nên: phải TỰ QUAN SÁT đủ lâu bằng đúng ngưỡng đó rồi mới được kết luận.
-        # Đúng theo nguyên tắc bất đối xứng ở đầu file — giành lái chậm thì mất vài
-        # phút không thích ứng, giành nhầm thì hai bên tranh máy nén.
+        # So: we have to OBSERVE FOR OURSELVES for that same threshold before drawing
+        # a conclusion. Exactly the asymmetry principle at the top of this file --
+        # taking over late costs a few minutes without adaptation, taking over wrongly
+        # means both sides fight over the compressor.
         if self._silence is None:
             watched = time.monotonic() - self._watching_since
             if watched < self._takeover_after:
@@ -80,10 +82,10 @@ class CloudWatch:
         self._driving = True
         if not previously:
             logger.warning(
-                "GIÀNH LÁI — máy chủ im lặng %s (ngưỡng %.0fs)",
-                "chưa từng ra lệnh, và đã tự theo dõi đủ ngưỡng"
+                "TAKING CONTROL - the server has been silent %s (threshold %.0fs)",
+                "and has never commanded; we have now observed for the full threshold"
                 if self._silence is None
-                else f"{self._silence:.0f}s",
+                else f"for {self._silence:.0f}s",
                 self._takeover_after,
             )
 

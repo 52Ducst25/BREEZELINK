@@ -3,11 +3,12 @@ name = "breezelink-edge-ai"
 version = "1.0.0"
 description = "Edge comfort inference + cloud-outage failover, runs on the Linux half of an Arduino UNO Q"
 requires-python = ">=3.11"
-# MỘT phụ thuộc duy nhất, có chủ đích. Đây là phần mềm chạy trên thiết bị ở nhà
-# khách, nơi mỗi gói thêm vào là một thứ nữa có thể vỡ lúc nâng cấp và một thứ
-# nữa phải vá khi có CVE. Thuật toán comfort lấy từ src/ của backend (thuần
-# Python, không phụ thuộc gì); hồi quy tuyến tính không cần numpy; và bố cục gói
-# BLE đọc bằng `struct` của thư viện chuẩn.
+# A DELIBERATELY MINIMAL dependency list. This is software running on a device in a
+# customer's home, where every extra package is one more thing that can break on
+# upgrade and one more thing to patch when a CVE lands. The comfort algorithm comes
+# from the backend's src/ (pure Python, no dependencies); the linear regression does
+# not need numpy; and the BLE packet layout is parsed with the standard library's
+# `struct`.
 #
 # pyserial THAY CHO bleak: duong toi gateway da chuyen tu Bluetooth sang UART.
 # Ly do day du o Firmware/shared/unoq-link-protocol.h — tom tat: bat Bluetooth
@@ -15,11 +16,12 @@ requires-python = ">=3.11"
 # Doi lai, pyserial khong can BlueZ, khong can D-Bus — nho vay dich vu chay duoc
 # CA trong container cua Arduino App Lab, thu ma ban BLE khong lam duoc.
 #
-# pydantic KHÔNG PHẢI lựa chọn, mà là hệ quả: comfort_engine.compute() trả về
-# `app.schemas.comfort.ComfortResult`, và lớp đó là một pydantic BaseModel. Nó
-# nằm ở phía backend nên dễ bị bỏ sót khi đếm phụ thuộc của thư mục này — bản
-# trước chỉ khai bleak, và trên máy dev thì không lộ ra vì backend đã cài
-# pydantic sẵn. Trên UNO Q sạch thì dịch vụ chết ngay ở lần import đầu tiên.
+# pydantic is NOT a choice but a consequence: comfort_engine.compute() returns
+# `app.schemas.comfort.ComfortResult`, and that class is a pydantic BaseModel. It lives
+# on the backend side so it is easy to miss when counting this directory's
+# dependencies — an earlier version only declared bleak, and on a dev machine it never
+# showed because the backend had already installed pydantic. On a clean UNO Q the
+# service dies on the very first import.
 #
 # numpy CHO MO HINH NHIET (thermal_model.py). Day la phu thuoc thu ba, va no da
 # duoc can nhac ky vi file nay von tu hao chi co mot:

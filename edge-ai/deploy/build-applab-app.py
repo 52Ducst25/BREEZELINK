@@ -1,29 +1,30 @@
-"""Dựng thư mục App của Arduino App Lab từ mã nguồn trong repo.
+"""Build the Arduino App Lab App directory from the source in the repo.
 
     python edge-ai/deploy/build-applab-app.py
 
-Kết quả nằm ở ``edge-ai/applab/BreezeLink/`` — đẩy lên bo bằng:
+The result lands in ``edge-ai/applab/BreezeLink/`` — push it to the board with:
 
     bash scripts/push-unoq-app.sh edge-ai/applab/BreezeLink
 
-VÌ SAO PHẢI DỰNG CHỨ KHÔNG COMMIT SẴN: App Lab đòi cả cây mã nguồn nằm gọn
-trong thư mục app (nó đóng gói nguyên thư mục rồi mới chạy), nhưng ``edge_ai``,
-lát cắt ``app/`` của backend và header giao thức đều đã có chủ ở nơi khác trong
-repo. Chép tay vào đây là tạo bản sao thứ hai, và bản sao sẽ trôi khỏi bản gốc —
-đúng thứ mà chính ``comfort_bridge.py`` được viết ra để tránh.
+WHY IT IS BUILT RATHER THAN COMMITTED READY-MADE: App Lab requires the whole source
+tree to sit inside the app directory (it packages the entire directory before running
+it), but ``edge_ai``, the backend's ``app/`` slice and the protocol header all already
+have an owner elsewhere in the repo. Copying them in by hand creates a second copy, and
+a copy drifts from the original — exactly what ``comfort_bridge.py`` itself was written
+to avoid.
 
-CÁI GÌ LÀ MÃ NGUỒN, CÁI GÌ LÀ SẢN PHẨM (xem edge-ai/applab/.gitignore):
+WHAT IS SOURCE AND WHAT IS PRODUCT (see edge-ai/applab/.gitignore):
 
     BreezeLink/
-    ├── app.yaml                      nguồn
-    ├── sketch/sketch.ino             nguồn
-    ├── sketch/sketch.yaml            nguồn
-    ├── sketch/unoq-link-protocol.h   SINH RA  <- Firmware/shared/
-    ├── python/main.py                nguồn
-    ├── python/requirements.txt       nguồn
-    ├── python/.env                   cấu hình của hộ, KHÔNG vào git, KHÔNG bị xoá
-    ├── python/edge_ai/               SINH RA  <- edge-ai/edge_ai/
-    └── python/app/                   SINH RA  <- src/app/ (lát cắt comfort)
+    ├── app.yaml                      source
+    ├── sketch/sketch.ino             source
+    ├── sketch/sketch.yaml            source
+    ├── sketch/unoq-link-protocol.h   GENERATED  <- Firmware/shared/
+    ├── python/main.py                source
+    ├── python/requirements.txt       source
+    ├── python/.env                   the household's config, NOT in git, NEVER deleted
+    ├── python/edge_ai/               GENERATED  <- edge-ai/edge_ai/
+    └── python/app/                   GENERATED  <- src/app/ (the comfort slice)
 """
 
 import importlib.util
@@ -34,34 +35,34 @@ from pathlib import Path
 
 
 def _load(path: Path):
-    """Nạp một file .py có gạch ngang trong tên (không import thẳng được)."""
+    """Load a .py file whose name contains a hyphen (so it cannot be imported directly)."""
     spec = importlib.util.spec_from_file_location(path.stem.replace("-", "_"), path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-# Dùng lại đúng bộ dựng của bản systemd. Hai bản triển khai PHẢI mang cùng một
-# lát cắt: một danh sách file thứ hai ở đây là chỗ để chúng lệch nhau, và triệu
-# chứng sẽ là "chạy được bằng systemd mà không chạy được trong App Lab".
+# Reuse the systemd build's own builder. Both deployments MUST carry the same slice: a
+# second file list here would be the place for them to diverge, and the symptom would be
+# "it works under systemd but not inside App Lab".
 _payload = _load(Path(__file__).resolve().parent / "build-edge-payload.py")
 
 REPO = Path(__file__).resolve().parents[2]
 APP = REPO / "edge-ai" / "applab" / "BreezeLink"
 SHARED_HEADER = REPO / "Firmware" / "shared" / "unoq-link-protocol.h"
 
-# Chỉ những thư mục này bị xoá và dựng lại. KHÔNG xoá cả python/: ở đó có
-# main.py, requirements.txt và — quan trọng nhất — .env chứa ORG_ID của hộ, thứ
-# không có bản nào khác để khôi phục.
+# Only these directories are wiped and rebuilt. Do NOT wipe all of python/: it holds
+# main.py, requirements.txt and — most importantly — .env with the household's ORG_ID,
+# which has no other copy to restore from.
 _GENERATED = ["python/edge_ai", "python/app"]
 
 
 def build() -> int:
     if not APP.is_dir():
-        print(f"THIEU {APP} — day la ma nguon, khong phai san pham.", file=sys.stderr)
+        print(f"MISSING {APP} - this is source, not a build product.", file=sys.stderr)
         return 1
     if not SHARED_HEADER.is_file():
-        print(f"THIEU {SHARED_HEADER}", file=sys.stderr)
+        print(f"MISSING {SHARED_HEADER}", file=sys.stderr)
         return 1
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -76,12 +77,13 @@ def build() -> int:
                 shutil.rmtree(dst)
             shutil.copytree(staging / Path(rel).name, dst)
 
-    # Sketch cần header giao thức nằm CẠNH nó: arduino-cli chỉ biên dịch những gì
-    # trong thư mục sketch, không có đường include nào trỏ ra ngoài repo bo.
+    # The sketch needs the protocol header sitting NEXT TO it: arduino-cli only compiles
+    # what is inside the sketch directory, with no include path reaching outside the
+    # board repo.
     shutil.copy2(SHARED_HEADER, APP / "sketch" / SHARED_HEADER.name)
 
     n = sum(1 for _ in APP.rglob("*") if _.is_file())
-    print(f"{APP}: {n} file")
+    print(f"{APP}: {n} files")
 
     if not (APP / "python" / ".env").is_file():
         print(

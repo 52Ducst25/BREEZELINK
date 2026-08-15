@@ -158,12 +158,12 @@ python -m edge_ai.main
 
 | Action | Expected result |
 |---|---|
-| Start up with the cloud running | `Đã nối gateway … (MTU 247)`, then one `t_in=… máy chủ cầm lái` line every 30s. NO `ĐÃ RA LỆNH` |
+| Start up with the cloud running | `Opened /dev/ttyUSB0 @115200`, then one `t_in=… server in control` line every 30s. NO `COMMAND ISSUED` |
 | Look at the gateway screen, Info page | The footer shows `UNO Q đã nối` |
-| Stop the cloud worker | After ~300s: `GIÀNH LÁI`, then `ĐÃ RA LỆNH (edge cầm lái)`; the gateway screen log records `edge takeover` |
-| Start the cloud worker again | `NHẢ LÁI` on the very next tick, commands stop |
-| Unplug all 4 corner nodes | `Gateway báo chưa có góc phòng nào còn tươi — không tính, không ra lệnh` |
-| Shine a desk lamp on one corner | `Bất thường ở góc 3 (outlier): lệch +3.2°C…` |
+| Stop the cloud worker | After ~300s: `TAKING CONTROL`, then `COMMAND ISSUED (edge in control)`; the gateway screen log records `edge takeover` |
+| Start the cloud worker again | `RELEASING CONTROL` on the very next tick, commands stop |
+| Unplug all 4 corner nodes | `The gateway reports no fresh room corner - not computing, not commanding` |
+| Shine a desk lamp on one corner | `Anomaly at corner 3 (outlier): +3.2°C from the … median` |
 | Press THỦ CÔNG on the gateway screen | The edge stops issuing commands even while holding control |
 
 ## Easy things to get wrong
@@ -171,10 +171,10 @@ python -m edge_ai.main
 - **A wrong `EDGE_ORG_ID` half-breaks the system silently.** This value is hashed into the
   `link_key`; if it is wrong the service still connects to the gateway and still **receives**
   readings, but every command it sends is silently refused by the gateway. The only sign is in
-  the gateway log: `[unoq] tu choi goi sai link_key`.
+  the gateway log: `[unoq] rejected packet with wrong link_key`.
 - **MTU.** A snapshot is 39 bytes while the BLE default MTU only allows 20. Both sides check and
-  complain loudly, but if you see `Bỏ ảnh chụp không hợp lệ: … cắt cụt` repeating, that is BlueZ
-  failing to negotiate a larger MTU.
+  complain loudly, but if you see `Snapshot is N bytes, 39 are needed … truncated` repeating,
+  that is BlueZ failing to negotiate a larger MTU.
 - **Changing the packet layout means changing BOTH sides** — `edge_ai/protocol.py` and
   `Firmware/shared/unoq-link-protocol.h`. The sizes are pinned by an `assert` at import time and
   a `static_assert` at compile time, so forgetting blows up immediately instead of quietly

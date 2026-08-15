@@ -1,47 +1,48 @@
 [Unit]
-Description=BreezeLink Edge AI (comfort tại chỗ + dự phòng khi mất cloud)
+Description=BreezeLink Edge AI (local comfort + fallback when the cloud is gone)
 Documentation=file:///home/arduino/breezelink/edge-ai/README.md
-# Chỉ CHỜ mạng, không YÊU CẦU: broker có thể nằm trong LAN và bật sau, còn dịch
-# vụ này tự nối lại theo backoff. Đặt Requires= sẽ biến một broker khởi động
-# chậm thành một dịch vụ không bao giờ chạy.
+# WANT the network, do not REQUIRE it: the broker may be on the LAN and come up later,
+# and this service reconnects with backoff by itself. Using Requires= would turn a
+# slow-starting broker into a service that never runs.
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-# CHẠY BẰNG `arduino`, KHÔNG TẠO USER RIÊNG — và đây là lý do kỹ thuật, không
-# phải lười: dịch vụ nói chuyện với BlueZ qua D-Bus, mà chính sách D-Bus của
-# BlueZ cấp quyền theo user. `arduino` là user sẵn có của bo UNO Q và đã nằm
-# trong nhóm bluetooth. Một user mới toanh sẽ bị org.bluez từ chối, và triệu
-# chứng là quét BLE trả về rỗng mãi mãi chứ không phải một lỗi quyền rõ ràng.
+# RUNS AS `arduino`, WITH NO DEDICATED USER — and this is a technical reason, not
+# laziness: the service talks to BlueZ over D-Bus, and BlueZ's D-Bus policy grants
+# access per user. `arduino` is the UNO Q board's existing user and is already in the
+# bluetooth group. A brand-new user would be refused by org.bluez, and the symptom
+# would be a BLE scan returning empty forever rather than a clear permission error.
 User=arduino
 Group=arduino
-# NAM TRONG /home/arduino CHU KHONG PHAI /opt — vi sudo tren bo NAY doi mat khau.
-# Dat o /opt thi moi lan cap nhat deu can mot lan sudo de ghi, tuc khong the trien
-# khai tu xa duoc nua. Trong home thi user `arduino` tu ghi duoc, va sudo chi con
-# can DUNG MOT LAN de dat unit nay vao /etc/systemd/system.
+# IT LIVES IN /home/arduino AND NOT /opt — because sudo on THIS board asks for a
+# password. Under /opt every update would need a sudo to write, i.e. remote deployment
+# would become impossible. In the home directory the `arduino` user can write it
+# itself, and sudo is only needed ONCE, to place this unit into /etc/systemd/system.
 WorkingDirectory=/home/arduino/breezelink
 Environment=PYTHONUNBUFFERED=1
-# payload/ chua CA `edge_ai/` lan lat cat `app/` cua backend — mot muc PYTHONPATH
-# duy nhat lam ca hai import duoc, nen khong can EDGE_BACKEND_SRC.
+# payload/ contains BOTH `edge_ai/` and the backend's `app/` slice — a single PYTHONPATH
+# entry makes both importable, so EDGE_BACKEND_SRC is unnecessary.
 Environment=PYTHONPATH=/home/arduino/breezelink/payload
 EnvironmentFile=/home/arduino/breezelink/.env
 ExecStart=/home/arduino/breezelink/.venv/bin/python -m edge_ai.main
 
-# Restart=always chứ không on-failure: dịch vụ thoát 0 khi nhận SIGTERM, và một
-# lần dừng ngoài ý muốn vẫn phải quay lại. Ngoại lệ là lỗi cấu hình — nó thoát 1
-# và RestartSec=10 giữ nhịp thử lại đủ thưa để dòng log giải thích không bị trôi.
+# Restart=always rather than on-failure: the service exits 0 on SIGTERM, and an
+# unintended stop still has to come back. The exception is a configuration error — it
+# exits 1, and RestartSec=10 keeps the retry rate sparse enough that the log line
+# explaining it does not scroll away.
 Restart=always
 RestartSec=10
 
-# Siết quyền: dịch vụ này chỉ cần đọc mã nguồn của chính nó và mở một socket
-# MQTT. Nó KHÔNG cần ghi vào bất cứ đâu.
+# Tighten permissions: this service only needs to read its own source and open an MQTT
+# socket. It does NOT need to write anywhere.
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-# ProtectHome=false BAT BUOC vi ma nguon nam trong /home/arduino/breezelink —
-# bat len la systemd che khuat /home va dich vu khong tim thay chinh no.
-# Bu lai bang ReadOnlyPaths ngay duoi: doc duoc, khong ghi duoc.
+# ProtectHome=false IS MANDATORY because the source lives in /home/arduino/breezelink —
+# enabling it makes systemd hide /home and the service cannot find itself.
+# Compensated by the ReadOnlyPaths just below: readable, not writable.
 ProtectHome=false
 ReadOnlyPaths=/home/arduino/breezelink
 

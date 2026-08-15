@@ -74,9 +74,10 @@ _FALLBACK_CFG = {
 # still change what you would do now.
 _FORECAST_MIN = 15.0
 
-# Trung vị của edge và của gateway lệch quá mức này thì hai bản luật đã trôi
-# khỏi nhau. 0.05 °C là dưới mức làm tròn của chính giao thức (số đo đi trên dây
-# ở đơn vị 0.01 °C), nên bất cứ thứ gì lớn hơn đều là lệch thật, không phải nhiễu.
+# If the edge's median and the gateway's differ by more than this, the two copies of
+# the rule have drifted apart. 0.05 °C is below the protocol's own rounding (readings
+# travel on the wire in units of 0.01 °C), so anything larger is a real divergence
+# rather than noise.
 _MEDIAN_DRIFT_C = 0.05
 
 
@@ -88,9 +89,10 @@ class Controller:
         self._cloud = CloudWatch(settings.takeover_after_sec)
         self._cfg = self._load_cfg()
 
-        # --- C: lịch sử cục bộ, --- A: mô hình nhiệt, --- B: dự báo thời tiết.
-        # Thứ tự khởi tạo không tuỳ tiện: mô hình khớp mẻ NGAY từ lịch sử đã có,
-        # nên sau một lần khởi động lại nó dùng được luôn thay vì học lại từ đầu.
+        # --- C: local history, --- A: the thermal model, --- B: the weather forecast.
+        # The initialisation order is not arbitrary: the model batch-fits IMMEDIATELY
+        # from the existing history, so after a restart it is usable at once rather
+        # than relearning from scratch.
         self._history = HistoryStore(settings.history_db, settings.history_days)
         self._model = ThermalModel()
         self._model.load_history(self._history.recent(hours=settings.history_days * 24))
@@ -104,23 +106,24 @@ class Controller:
                 cache_path=Path(settings.history_db).with_name("weather-cache.json"),
             )
         else:
-            logger.info("EDGE_LAT/EDGE_LON chưa đặt — không có dự báo, mô hình sẽ "
-                        "giả định nhiệt độ ngoài trời đứng yên khi nhìn xa")
+            logger.info("EDGE_LAT/EDGE_LON are not set - no forecast, so the model will "
+                        "assume the outdoor temperature stands still at longer horizons")
 
-        # Trang theo dõi cổng 7000. Tự tắt nếu không chạy trong App Lab.
+        # The monitoring page on port 7000. Disables itself when not running in App Lab.
         self._dash = Dashboard(self._history)
         self._dash.start()
 
-        # Trạng thái mà bản MQTT trước phải tự dựng bằng cách nghe lén cả bốn
-        # loại topic. Nay gateway gửi thẳng trong mỗi ảnh chụp — nó là bên THẬT
-        # SỰ biết máy lạnh đang ở chế độ nào, vì chính nó bắn khung IR ra.
+        # State that the earlier MQTT version had to reconstruct by eavesdropping on
+        # all four topic types. The gateway now sends it directly in every snapshot --
+        # it is the side that ACTUALLY knows what mode the air conditioner is in,
+        # because it is the one transmitting the IR frames.
         self._prev_mode = Mode.OFF
         self._prev_setpoint: int | None = None
         self._last_switch_ts = 0.0
         self._tout_ema: float | None = None
 
-        # Nhiệt độ quan sát được từ ảnh chụp. CHỈ dùng khi EDGE_IR_TEMPS trống —
-        # xem _available_temps() cho lý do không trộn hai nguồn.
+        # Temperatures observed from the snapshots. ONLY used when EDGE_IR_TEMPS is
+        # empty -- see _available_temps() for why the two sources are not mixed.
         self._seen_temps: set[int] = set()
         self._narrow_warned = False
         self._log_countdown = 1
@@ -131,8 +134,9 @@ class Controller:
         raw = os.getenv("EDGE_COMFORT_CONFIG", "").strip()
         if not raw:
             logger.warning(
-                "EDGE_COMFORT_CONFIG chưa đặt — dùng cấu hình mặc định. Nếu hộ này "
-                "đã tinh chỉnh thuật toán trên web, edge sẽ tính LỆCH với máy chủ."
+                "EDGE_COMFORT_CONFIG is not set - using the default configuration. If this "
+                "household has tuned the algorithm on the web UI, the edge will compute "
+                "something DIFFERENT from the server."
             )
             return ComfortConfig.from_dict(_FALLBACK_CFG)
         return ComfortConfig.from_dict({**_FALLBACK_CFG, **json.loads(raw)})
@@ -140,44 +144,47 @@ class Controller:
     # -- ingest ---------------------------------------------------------------
 
     def on_snapshot(self, snapshot: Snapshot) -> None:
-        """Gọi từ tác vụ BLE mỗi lần gateway notify. Chỉ ghi nhận, không quyết
-        định gì — quyết định nằm ở tick(), chạy theo nhịp riêng."""
+        """Called from the BLE task on every gateway notify. It only records; it
+        decides nothing -- decisions live in tick(), which runs on its own cadence."""
         self._store.ingest(snapshot)
         self._cloud.update(snapshot.cloud_silence_sec)
 
-        # Ghi xuống đĩa theo nhịp 60s (tự giới hạn bên trong), rồi nạp CHÍNH mẫu
-        # đó vào mô hình. Một nguồn, một nhịp — không có đường thứ hai để lệch.
+        # Write to disk at the 60s cadence (rate-limited internally), then feed THAT
+        # SAME sample into the model. One source, one cadence -- no second path to
+        # diverge.
         row = self._history.ingest(snapshot)
         if row is not None:
             self._model.observe(row)
 
-        # Trạng thái máy lạnh: lấy từ gateway, không tự suy. Chỉ một MODE thật sự
-        # đổi mới khởi động lại đồng hồ dwell của máy nén; đổi riêng nhiệt độ đặt
-        # thì không, nếu không việc chuyển chế độ sẽ bị đóng băng.
+        # Air conditioner state: taken from the gateway, never inferred. Only a real
+        # MODE change restarts the compressor dwell timer; a setpoint-only change does
+        # not, otherwise mode switching would be frozen out.
         if snapshot.ac_mode is not Mode.UNKNOWN and snapshot.ac_mode != self._prev_mode:
             self._prev_mode = snapshot.ac_mode
             self._last_switch_ts = time.time()
         if snapshot.ac_setpoint is not None:
             self._prev_setpoint = snapshot.ac_setpoint
-            # Máy chủ chỉ ra lệnh những tổ hợp nó có mã, nên mỗi setpoint gateway
-            # báo đã thi hành là một bằng chứng "hộ này có mã cho nhiệt độ đó".
+            # The server only commands combinations it has codes for, so every
+            # setpoint the gateway reports as executed is evidence that "this
+            # household has a code for that temperature".
             if snapshot.ac_mode is Mode.COOL:
                 self._seen_temps.add(snapshot.ac_setpoint)
 
-    # -- những nhiệt độ ra lệnh được ------------------------------------------
+    # -- which temperatures can be commanded -----------------------------------
 
     def _available_temps(self) -> list[int]:
-        """Các mức COOL hộ này có mã IR.
+        """The COOL levels this household has IR codes for.
 
-        ƯU TIÊN DANH SÁCH KHAI TAY, và khi có nó thì KHÔNG trộn thêm mức quan sát
-        được. Trộn nghe có vẻ rộng lượng nhưng sai: mức quan sát được đến từ
-        `snapshot.ac_setpoint`, tức là trạng thái gateway đang hiện — mà người
-        dùng bấm điều khiển tay cũng làm đổi số đó. Trộn vào là biến một lần bấm
-        tay thành "hộ này có mã cho mức đó", trong khi có thể không.
+        THE HAND-DECLARED LIST WINS, and when it exists the observed levels are NOT
+        mixed in. Mixing sounds generous but is wrong: observed levels come from
+        `snapshot.ac_setpoint`, i.e. the state the gateway is currently showing -- and
+        a user pressing the remote by hand changes that number too. Mixing turns one
+        manual press into "this household has a code for that level", when it may not.
 
-        Không khai thì rơi về tự học, và lúc đó phải kêu to: xem chú thích
-        EDGE_IR_TEMPS trong config.py — danh sách lấp một nửa khiến
-        nearest_captured_temp() lặng lẽ ép mục tiêu về mức duy nhất nó biết.
+        With nothing declared it falls back to self-learning, and then it has to
+        complain loudly: see the EDGE_IR_TEMPS note in config.py -- a half-filled list
+        makes nearest_captured_temp() silently force every target to the one level it
+        knows.
         """
         if self._s.ir_temps:
             return list(self._s.ir_temps)
@@ -185,14 +192,16 @@ class Controller:
         observed = sorted(self._seen_temps)
         if not observed:
             logger.info(
-                "Chưa biết hộ này học những mức nào (EDGE_IR_TEMPS trống, chưa "
-                "thấy máy chủ ra lệnh COOL) — chỉ đề xuất, không ra lệnh"
+                "Do not yet know which levels this household has learned (EDGE_IR_TEMPS "
+                "is empty and no COOL command from the server has been seen) - advising "
+                "only, not commanding"
             )
         elif len(observed) < 3 and not self._narrow_warned:
             self._narrow_warned = True
             logger.warning(
-                "CHỈ BIẾT %d mức (%s) vì đang tự học bằng quan sát. Mọi mục tiêu "
-                "sẽ bị ép về những mức này — đặt EDGE_IR_TEMPS để hết đoán:\n"
+                "ONLY %d levels known (%s) because we are self-learning by observation. "
+                "Every target will be forced onto these levels - set EDGE_IR_TEMPS to stop "
+                "the guessing:\n"
                 "    SELECT DISTINCT temp FROM ir_codes WHERE mode='COOL' ORDER BY temp;",
                 len(observed), ", ".join(f"{t}°C" for t in observed),
             )
@@ -206,31 +215,33 @@ class Controller:
         try:
             await self._tick()
         except Exception:  # noqa: BLE001
-            logger.exception("Vòng điều khiển lỗi — bỏ nhịp này")
+            logger.exception("Control loop error - skipping this tick")
 
     async def _tick(self) -> None:
         snapshot = self._store.latest
         if snapshot is None:
-            logger.info("Chưa nhận được ảnh chụp nào từ gateway — không tính")
+            logger.info("No snapshot received from the gateway yet - not computing")
             return
 
         if snapshot.t_in is None or snapshot.h_in is None:
-            logger.info("Gateway báo chưa có góc phòng nào còn tươi — không tính, không ra lệnh")
+            logger.info("The gateway reports no fresh room corner - not computing, not commanding")
             return
 
-        # Kiểm chéo: tự tính lại trung vị bằng đúng hàm của backend. Lệch nghĩa
-        # là bản C++ trên gateway và bản Python trên cloud đã trôi khỏi nhau, và
-        # đó là loại lỗi không có triệu chứng nào khác ngoài dòng log này.
+        # Cross-check: recompute the median with the backend's own function. A
+        # discrepancy means the C++ version on the gateway and the Python version in
+        # the cloud have drifted apart, and that is a class of bug with no symptom
+        # other than this log line.
         mine = self._store.indoor_check()
         if mine is not None and abs(mine.temp - snapshot.t_in) > _MEDIAN_DRIFT_C:
             logger.warning(
-                "TRUNG VỊ LỆCH: gateway %.2f°C, edge tính %.2f°C từ %d góc — "
-                "luật gộp ở room-registry.cpp và room_aggregate.py đã trôi khỏi nhau",
+                "MEDIAN MISMATCH: the gateway says %.2f°C, the edge computes %.2f°C from %d "
+                "corners - the aggregation rules in room-registry.cpp and room_aggregate.py "
+                "have drifted apart",
                 snapshot.t_in, mine.temp, mine.used,
             )
 
         if snapshot.t_out is None and self._tout_ema is None:
-            logger.info("Chưa có số đo ngoài trời — không tính")
+            logger.info("No outdoor reading yet - not computing")
             return
         tout = snapshot.t_out if snapshot.t_out is not None else self._tout_ema
 
@@ -239,11 +250,11 @@ class Controller:
         latest = self._store.latest_per_room()
         anomalies = find_anomalies(latest, snapshot.t_in, trends)
         for a in anomalies:
-            logger.warning("Bất thường ở %s (%s): %s",
+            logger.warning("Anomaly at %s (%s): %s",
                            self._store.label(int(a.device_uuid)), a.kind, a.detail)
 
-        # Chấm dự báo đã tới hạn TRƯỚC khi đặt dự báo mới, để không tự chấm chính
-        # mình bằng con số vừa sinh ra trong cùng một nhịp.
+        # Settle due forecasts BEFORE placing a new one, so we never score ourselves
+        # against a number produced in the same tick.
         self._score.settle(time.time(), snapshot.t_in)
         self._refresh_weather_if_due()
         forecast = self._forecast(snapshot, tout, trends)
@@ -266,15 +277,16 @@ class Controller:
                         now=datetime.now(timezone.utc),
                         override_active=False,
                         available_ir_temps=available,
-                        # Node ngoài trời còn nhịp tim thì số này là số ngoài trời
-                        # thật, nên được phép đẩy trung bình trượt. Mất nhịp thì
-                        # dùng lại EMA cũ mà KHÔNG trộn thêm — đúng cổng
-                        # `is_outdoor_tick` của comfort_engine.
+                        # While the outdoor node still has a heartbeat this really is
+                        # an outdoor reading, so it is allowed to advance the running
+                        # mean. With the heartbeat lost, reuse the old EMA and do NOT
+                        # mix anything in -- exactly comfort_engine's
+                        # `is_outdoor_tick` gate.
                         is_outdoor_tick=snapshot.outdoor_online and snapshot.t_out is not None,
                     )
                 )
             except NoIrCodesError:
-                logger.warning("Hộ này chưa học mã IR nào — không điều khiển được")
+                logger.warning("This household has learned no IR codes - cannot control anything")
 
         if result is not None and snapshot.outdoor_online and snapshot.t_out is not None:
             self._tout_ema = result.new_ema
@@ -289,18 +301,19 @@ class Controller:
             ))
         await self._act(snapshot, result, forecast, len(anomalies))
 
-    # -- dự báo ---------------------------------------------------------------
+    # -- forecasting -----------------------------------------------------------
 
     def _forecast(self, snapshot: Snapshot, tout: float, trends) -> float | None:
-        """Nhiệt độ trong nhà sau 15 phút.
+        """The indoor temperature 15 minutes from now.
 
-        HAI NGUỒN, ưu tiên mô hình nhiệt và rơi về ngoại suy độ dốc khi mô hình
-        chưa chín. Không trộn hai con số: trung bình của một ước lượng tốt và một
-        ước lượng thô cho ra thứ không giải thích được, và khi nó sai thì không
-        biết phải sửa bên nào.
+        TWO SOURCES, preferring the thermal model and falling back to slope
+        extrapolation while the model is immature. The two numbers are not blended:
+        averaging a good estimate with a crude one produces something inexplicable,
+        and when it is wrong there is no way to tell which half to fix.
 
-        MỌI DỰ BÁO ĐỀU ĐƯỢC GHI LẠI ĐỂ CHẤM, kể cả loại thô — nhờ vậy câu "mô
-        hình có hơn cách cũ không" trở thành một con số chứ không phải một ý kiến.
+        EVERY FORECAST IS RECORDED FOR SCORING, the crude ones included -- which turns
+        "is the model better than the old approach" into a number rather than an
+        opinion.
         """
         model_value = self._model.predict(
             minutes=_FORECAST_MIN,
@@ -320,12 +333,12 @@ class Controller:
         return model_value
 
     def _refresh_weather_if_due(self) -> None:
-        """Gọi lại dự báo nếu tới hạn. KHÔNG chờ kết quả.
+        """Re-fetch the forecast if it is due. Does NOT wait for the result.
 
-        Việc lấy dự báo là thứ chỉ-tốt-nếu-có, mà một lần gọi mạng có thể treo
-        tới 15 giây. Chờ nó trong vòng điều khiển nghĩa là mất mạng sẽ làm nhịp
-        điều khiển giãn ra gấp đôi — đúng lúc node này đáng lẽ phải làm việc
-        chăm chỉ nhất.
+        Fetching a forecast is a nice-to-have, while a single network call can hang
+        for up to 15 seconds. Waiting for it inside the control loop would mean a
+        network outage doubles the control interval -- exactly when this node should
+        be working hardest.
         """
         if self._weather is None or self._weather_busy or not self._weather.due():
             return
@@ -340,24 +353,25 @@ class Controller:
         asyncio.create_task(run())
 
     def _log_model(self) -> None:
-        """Báo cáo mô hình mỗi 10 nhịp (~5 phút).
+        """Report on the model every 10 ticks (~5 minutes).
 
-        Thưa hơn dòng điều khiển có chủ đích: τ và sai số dự báo đổi theo giờ,
-        không theo phút, và in mỗi nhịp sẽ đẩy dòng thật sự cần đọc trôi đi.
+        Deliberately sparser than the control line: τ and the forecast error change by
+        the hour, not by the minute, and printing every tick would scroll away the
+        line you actually need to read.
         """
         self._log_countdown -= 1
         if self._log_countdown > 0:
             return
         self._log_countdown = 10
 
-        parts = [f"mô hình: {self._model.describe()}", f"dự báo: {self._score.describe()}"]
+        parts = [f"model: {self._model.describe()}", f"forecast: {self._score.describe()}"]
         if self._weather is not None:
             peak = self._weather.peak_within(12.0)
             parts.append(
-                "thời tiết: chưa có" if peak is None
-                else f"thời tiết: đỉnh 12h tới {peak[0]:.1f}°C"
+                "weather: none yet" if peak is None
+                else f"weather: next-12h peak {peak[0]:.1f}°C"
             )
-        parts.append(f"lịch sử: {self._history.count()} mẫu / {self._history.span_hours():.0f}h")
+        parts.append(f"history: {self._history.count()} samples / {self._history.span_hours():.0f}h")
         logger.info(" · ".join(parts))
 
     # -- act ------------------------------------------------------------------
@@ -368,60 +382,60 @@ class Controller:
         rooms = f"{snapshot.room_count}/{sum(1 for r in snapshot.rooms if r.corner is not None)}"
 
         if result is None:
-            logger.info("t_in=%.1f (%s góc) t_out=%s · %s · chưa có quyết định",
+            logger.info("t_in=%.1f (%s corners) t_out=%s · %s · no decision yet",
                         snapshot.t_in, rooms,
                         "—" if snapshot.t_out is None else f"{snapshot.t_out:.1f}",
-                        "EDGE CẦM LÁI" if driving else "máy chủ cầm lái")
+                        "EDGE IN CONTROL" if driving else "server in control")
             return
 
         logger.info(
-            "t_in=%.1f (%s góc) t_out=%s · dự báo 15' %s · %s -> %s %d°C · %s%s",
+            "t_in=%.1f (%s corners) t_out=%s · 15min forecast %s · %s -> %s %d°C · %s%s",
             snapshot.t_in, rooms,
             "—" if snapshot.t_out is None else f"{snapshot.t_out:.1f}",
             "—" if forecast is None else f"{forecast:.1f}",
             self._prev_mode.name_str, result.mode.value, result.t_set,
-            "EDGE CẦM LÁI" if driving else f"máy chủ cầm lái (im {silence:.0f}s)"
-            if silence is not None else "máy chủ chưa từng ra lệnh",
-            f" · {anomaly_count} bất thường" if anomaly_count else "",
+            "EDGE IN CONTROL" if driving else f"server in control (silent {silence:.0f}s)"
+            if silence is not None else "the server has never issued a command",
+            f" · {anomaly_count} anomalies" if anomaly_count else "",
         )
 
         mode = Mode[result.mode.value]
 
-        # ĐỀ XUẤT là mặc định, ở mọi đường. Gateway chỉ bắn hồng ngoại khi nhận
-        # KIND_COMMAND, nên mọi nhánh không đủ điều kiện đều rơi về đây một cách
-        # an toàn thay vì phải nhớ chặn.
+        # ADVICE is the default on every path. The gateway only fires infrared on
+        # KIND_COMMAND, so every branch that does not qualify falls back here safely
+        # rather than relying on someone remembering to block it.
         kind = KIND_ADVICE
         reason = None
 
         if not driving:
-            reason = None                       # bình thường: cloud đang lo
+            reason = None                       # normal: the cloud is handling it
         elif self._s.advisory_only:
-            reason = "EDGE_ADVISORY_ONLY đang bật"
+            reason = "EDGE_ADVISORY_ONLY is enabled"
         elif snapshot.override_active:
-            reason = "người dùng đang giữ quyền điều khiển"
+            reason = "the user is holding control"
         elif result.mode.value == self._prev_mode.name_str and result.t_set == self._prev_setpoint:
-            reason = "quyết định không đổi"      # cùng luật với cloud: chỉ gửi khi đổi
+            reason = "the decision is unchanged"  # the same rule as the cloud: only send on a change
         else:
             kind = KIND_COMMAND
 
         if kind == KIND_COMMAND:
             sent = await self._link.send(kind=KIND_COMMAND, mode=mode, setpoint=result.t_set)
             if sent:
-                logger.warning("ĐÃ RA LỆNH (edge cầm lái): %s %d°C", result.mode.value, result.t_set)
+                logger.warning("COMMAND ISSUED (edge in control): %s %d°C", result.mode.value, result.t_set)
                 self._prev_mode = mode
                 self._prev_setpoint = result.t_set
             else:
-                logger.warning("Muốn ra lệnh %s %d nhưng chưa nối được gateway",
+                logger.warning("Wanted to command %s %d but the gateway is not connected yet",
                                result.mode.value, result.t_set)
             return
 
         if driving and reason:
-            logger.info("Đang cầm lái nhưng không ra lệnh: %s", reason)
+            logger.info("In control but not commanding: %s", reason)
         await self._link.send(kind=KIND_ADVICE, mode=mode, setpoint=result.t_set)
 
 
 def _to_ac_mode(mode: Mode):
-    """Mode trên dây -> AcMode của backend (comfort_engine nhận kiểu đó)."""
+    """Wire Mode -> the backend's AcMode (which is what comfort_engine accepts)."""
     from edge_ai.comfort_bridge import AcMode
 
     try:

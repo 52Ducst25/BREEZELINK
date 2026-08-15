@@ -1,31 +1,32 @@
-"""Đường tới gateway đi QUA STM32, không qua cổng USB của Linux.
+"""The link to the gateway THROUGH the STM32, not through a Linux USB port.
 
-THAY CHO uart_client.py KHI CHẠY TRONG ARDUINO APP LAB. Hai module cùng một giao
-diện (``run`` / ``send`` / ``connected``) nên ``Controller`` không biết mình đang
-nói chuyện qua đường nào — chọn ở ``main.py``.
+REPLACES uart_client.py WHEN RUNNING INSIDE ARDUINO APP LAB. Both modules share one
+interface (``run`` / ``send`` / ``connected``) so ``Controller`` has no idea which
+path it is talking over -- the choice is made in ``main.py``.
 
-VÌ SAO PHẢI CÓ BẢN NÀY: dây từ ESP32-S3 cắm vào D0/D1, tức là USART1 của con
-STM32U585, KHÔNG phải một cổng USB-serial của nửa Linux. Nửa Linux không nhìn
-thấy chân đó — không có /dev/tty* nào tương ứng, nên pyserial không có gì để mở.
-Người trung gian là ``arduino-router``: sketch nói RPC với nó qua /dev/ttyHS1,
-Python nói RPC với nó qua /var/run/arduino-router.sock.
+WHY THIS VERSION IS NEEDED: the cable from the ESP32-S3 goes into D0/D1, i.e. USART1
+of the STM32U585, NOT a USB-serial port on the Linux half. The Linux half cannot see
+those pins -- there is no corresponding /dev/tty*, so pyserial has nothing to open.
+The intermediary is ``arduino-router``: the sketch speaks RPC to it over /dev/ttyHS1,
+and Python speaks RPC to it over /var/run/arduino-router.sock.
 
     ESP32-S3 ──UART D0/D1──► STM32 (sketch) ──RPC──► router ──sock──► Python
 
-CHỌN CÁCH NÀY THAY VÌ NỐI USB-TTL VÀO NỬA LINUX: bớt một sợi dây và một con chip
-cầu, và quan trọng hơn là mọi thứ hiện trong App Lab — bấm Run là thấy cả log
-sketch lẫn log Python trong cùng một chỗ.
+CHOSEN OVER WIRING A USB-TTL INTO THE LINUX HALF: one less cable and one less bridge
+chip, and more importantly everything shows up inside App Lab -- press Run and you see
+both the sketch log and the Python log in one place.
 
-CHỞ HEX CHỨ KHÔNG CHỞ TỪNG TRƯỜNG. Sketch không giải mã gói: nó kiểm khung
-(magic + version + CRC) rồi đẩy nguyên 39 byte sang đây dưới dạng 78 ký tự hex.
-Nhờ vậy bố cục gói chỉ nằm ở HAI chỗ đã chốt sẵn với nhau — struct C và
-``protocol.py`` — chứ không phát sinh chỗ thứ ba trong sketch phải nhớ sửa theo.
-Chiều ngược lại cũng vậy: ``protocol.build_command()`` đóng gói và ký CRC ở đây,
-sketch chỉ giải hex rồi ghi thẳng ra dây.
+IT CARRIES HEX, NOT INDIVIDUAL FIELDS. The sketch does not decode the packet: it
+validates the framing (magic + version + CRC) and forwards all 39 bytes across as 78
+hex characters. That keeps the packet layout in only TWO places already pinned to each
+other -- the C struct and ``protocol.py`` -- rather than creating a third place inside
+the sketch that has to be remembered. The reverse direction works the same way:
+``protocol.build_command()`` packs and signs the CRC here, and the sketch only decodes
+the hex and writes it straight out to the wire.
 
-  Hệ quả tốt kèm theo: ORG_ID không cần có mặt trong sketch. ``link_key`` băm từ
-  nó được tính ở Python, nên thư mục app đem đi đâu cũng không mang theo định
-  danh của hộ nào.
+  A welcome side effect: ORG_ID does not need to appear in the sketch at all. The
+  ``link_key`` hashed from it is computed in Python, so the app directory can be moved
+  anywhere without carrying any household's identity with it.
 """
 
 import asyncio
@@ -40,20 +41,22 @@ logger = logging.getLogger("edge.bridge")
 
 SnapshotHandler = Callable[[Snapshot], None]
 
-# Tên phương thức RPC. PHẢI KHỚP sketch — sai tên thì router định tuyến vào hư
-# không và KHÔNG BÁO LỖI: bên gửi notify là fire-and-forget, bên nhận chỉ đơn
-# giản không bao giờ được gọi. Triệu chứng y hệt đứt dây.
+# The RPC method names. They MUST MATCH the sketch -- a wrong name makes the router
+# route into the void and REPORT NOTHING: the sending side's notify is
+# fire-and-forget, and the receiving side simply never gets called. The symptom looks
+# exactly like a broken cable.
 RPC_SNAPSHOT = "gw/snapshot"
 RPC_COMMAND = "gw/command"
 
-# Gateway đẩy ảnh chụp mỗi 5 giây. 30 giây = lỡ sáu nhịp liền mới coi là đứt —
-# đủ rộng để một lần biên dịch lại sketch (STM32 khởi động lại) không bị đọc
-# thành mất kết nối, đủ hẹp để không ra lệnh dựa trên số đo cũ cả phút.
+# The gateway pushes a snapshot every 5 seconds. 30 seconds = six consecutive misses
+# before we call it broken -- wide enough that recompiling the sketch (which restarts
+# the STM32) is not read as a disconnection, narrow enough that we never command based
+# on a reading a full minute old.
 STALE_AFTER_SEC = 30.0
 
 
 class GatewayLink:
-    """Nói chuyện với gateway qua RouterBridge. Cùng giao diện với bản pyserial."""
+    """Talks to the gateway over RouterBridge. The same interface as the pyserial version."""
 
     def __init__(self, settings) -> None:
         self._s = settings
@@ -67,29 +70,30 @@ class GatewayLink:
 
     @property
     def connected(self) -> bool:
-        """Có nghe thấy gateway gần đây không.
+        """Has the gateway been heard recently.
 
-        KHÔNG hỏi trạng thái socket: socket tới router luôn mở kể cả khi ESP32-S3
-        đã rút dây, nên nó trả lời "có kết nối" cho một đường đã chết. Thứ duy
-        nhất chứng minh cả chuỗi còn sống là một khung hợp lệ vừa tới.
+        It does NOT ask the socket's state: the socket to the router stays open even
+        when the ESP32-S3 has been unplugged, so it would report "connected" for a dead
+        path. The only thing that proves the whole chain is alive is a valid frame
+        having just arrived.
         """
         return self._last_rx > 0.0 and (time.monotonic() - self._last_rx) < STALE_AFTER_SEC
 
     async def run(self, on_snapshot: SnapshotHandler) -> None:
-        """Đăng ký nơi nhận rồi đỗ ở đây. Không bao giờ trả về.
+        """Register the receiver and park here. Never returns.
 
-        Khác bản pyserial ở chỗ KHÔNG có vòng mở-lại: router tự lo việc kết nối
-        lại, và ``provide`` giữ nguyên đăng ký qua các lần sketch khởi động lại.
-        Vòng lặp dưới đây chỉ để báo cáo, không để sửa chữa gì.
+        Unlike the pyserial version there is NO reopen loop: the router handles
+        reconnection itself, and ``provide`` keeps the registration across sketch
+        restarts. The loop below exists to report, not to repair.
         """
         self._loop = asyncio.get_running_loop()
         self._on_snapshot = on_snapshot
 
-        from arduino.app_utils import Bridge  # chỉ có trong container của App Lab
+        from arduino.app_utils import Bridge  # only exists inside App Lab's container
 
         self._bridge = Bridge
         Bridge.provide(RPC_SNAPSHOT, self._on_frame)
-        logger.info("Đã đăng ký %s — chờ sketch đẩy ảnh chụp sang", RPC_SNAPSHOT)
+        logger.info("Registered %s - waiting for the sketch to push snapshots", RPC_SNAPSHOT)
 
         warned = False
         while True:
@@ -101,28 +105,28 @@ class GatewayLink:
                 continue
             warned = True
             logger.warning(
-                "Không có ảnh chụp nào trong %.0fs. Kiểm theo thứ tự này:\n"
-                "  1. Tab Sketch trong App Lab có dòng [rx] không? Không có nghĩa là\n"
-                "     UART chết — kiểm ESP32-S3 GPIO18 -> D0, GPIO17 -> D1, và GND chung.\n"
-                "  2. Có [rx] mà không có dòng này nghĩa là RPC chết — tên phương thức\n"
-                "     hai bên phải cùng là %r.",
+                "No snapshot in %.0fs. Check in this order:\n"
+                "  1. Does the Sketch tab in App Lab show [rx] lines? If not, the UART\n"
+                "     is dead - check ESP32-S3 GPIO18 -> D0, GPIO17 -> D1, and a common GND.\n"
+                "  2. [rx] present but this line missing means RPC is dead - the method\n"
+                "     name must be %r on both sides.",
                 STALE_AFTER_SEC, RPC_SNAPSHOT,
             )
 
-    # -- nhận ------------------------------------------------------------------
+    # -- receiving -------------------------------------------------------------
 
     def _on_frame(self, hex_frame: str) -> None:
-        """Sketch gọi hàm này. CHẠY TRÊN LUỒNG CỦA BRIDGE, không phải luồng asyncio.
+        """The sketch calls this. IT RUNS ON THE BRIDGE'S THREAD, not the asyncio thread.
 
-        Nên nó không được đụng vào bất cứ trạng thái nào của ``Controller`` —
-        ``RoomStore`` và ``tick()`` đều không có khoá, và sửa cửa sổ lịch sử giữa
-        lúc vòng điều khiển đang duyệt nó là loại lỗi chỉ hiện ra lúc chạy lâu.
-        ``call_soon_threadsafe`` đẩy việc về đúng luồng rồi mới gọi.
+        So it must not touch any of ``Controller``'s state -- neither ``RoomStore`` nor
+        ``tick()`` has a lock, and mutating the history window while the control loop
+        is iterating over it is the kind of bug that only appears after a long run.
+        ``call_soon_threadsafe`` hands the work back to the right thread before calling.
         """
         try:
             raw = bytes.fromhex(hex_frame)
         except (ValueError, TypeError):
-            self._note_bad("hex hỏng")
+            self._note_bad("malformed hex")
             return
 
         try:
@@ -137,20 +141,21 @@ class GatewayLink:
             self._loop.call_soon_threadsafe(self._on_snapshot, snap)
 
     def _note_bad(self, why: str) -> None:
-        """Sketch đã kiểm CRC rồi, nên hỏng ở đây là hỏng SAU khi qua RPC.
+        """The sketch has already checked the CRC, so a failure here is a failure AFTER
+        the RPC hop.
 
-        Chỉ kêu ở lần đầu của mỗi chuỗi: một gói lệch phiên bản sẽ lặp lại mỗi 5
-        giây mãi mãi, và log kín đặc một dòng lặp là cách chắc chắn nhất để không
-        ai đọc nó nữa.
+        Only complain on the first of each streak: a version-mismatched packet would
+        repeat every 5 seconds forever, and a log packed with one repeating line is the
+        surest way to make sure nobody reads it any more.
         """
         self._bad += 1
         if self._bad == 1:
-            logger.warning("Gói qua được sketch nhưng hỏng ở đây: %s", why)
+            logger.warning("The packet passed the sketch but failed here: %s", why)
 
-    # -- gửi -------------------------------------------------------------------
+    # -- sending ---------------------------------------------------------------
 
     async def send(self, *, kind: int, mode: protocol.Mode, setpoint: int | None) -> bool:
-        """Gửi đề xuất hoặc lệnh. Trả False nếu chuỗi đang đứt ở đâu đó."""
+        """Send an advice or a command. Returns False if the chain is broken somewhere."""
         if self._bridge is None or not self.connected:
             return False
 
@@ -159,11 +164,11 @@ class GatewayLink:
             kind=kind, mode=mode, setpoint=setpoint, seq=self._seq, link_key=self._link_key
         )
         try:
-            # notify chứ không call: sketch ghi ra dây rồi thôi, không có gì để
-            # trả lời, và một `call` sẽ chặn vòng điều khiển 10 giây mỗi lần
-            # sketch bận đọc UART.
+            # notify rather than call: the sketch writes to the wire and that is all,
+            # there is nothing to answer with, and a `call` would block the control loop
+            # for 10 seconds every time the sketch is busy reading the UART.
             self._bridge.notify(RPC_COMMAND, frame.hex())
             return True
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Gửi lệnh qua bridge không được: %s", exc)
+            logger.warning("Could not send the command over the bridge: %s", exc)
             return False

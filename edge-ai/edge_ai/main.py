@@ -19,11 +19,12 @@ from edge_ai.controller import Controller
 
 
 def _make_link(settings):
-    """Dựng đường tới gateway theo cấu hình.
+    """Build the link to the gateway according to the configuration.
 
-    Import MUỘN, không import cả hai ở đầu file: bản `serial` cần pyserial, bản
-    `bridge` cần gói `arduino` của App Lab, và không môi trường nào có đủ cả hai.
-    Import ở đầu file thì bên nào chạy cũng chết vì thiếu thư viện của bên kia.
+    Imported LATE rather than importing both at the top of the file: the `serial`
+    version needs pyserial, the `bridge` version needs App Lab's `arduino` package,
+    and no environment has both. Importing at the top would make whichever one is
+    running die for want of the other one's library.
     """
     if settings.link == "bridge":
         from edge_ai.bridge_client import GatewayLink
@@ -56,9 +57,10 @@ async def _control_loop(controller: Controller, tick_sec: float, stop: asyncio.E
     while not stop.is_set():
         await controller.tick()
         try:
-            # Chờ CÓ THỂ NGẮT thay vì sleep thẳng: SIGTERM được đáp ứng ngay
-            # thay vì phải chờ hết nhịp 30s, và systemd sẽ giết cứng nếu chờ lâu
-            # — giết cứng giữa lúc đang ghi một lệnh UART là một lệnh gửi dở.
+            # An INTERRUPTIBLE wait rather than a plain sleep: SIGTERM is honoured
+            # immediately instead of waiting out the 30s tick, and systemd hard-kills
+            # anything that takes too long -- a hard kill in the middle of writing a
+            # UART command leaves a half-sent command.
             await asyncio.wait_for(stop.wait(), timeout=tick_sec)
         except asyncio.TimeoutError:
             pass
@@ -75,17 +77,17 @@ async def _run(settings) -> int:
         try:
             loop.add_signal_handler(sig, stop.set)
         except NotImplementedError:
-            # Windows không có add_signal_handler cho SIGTERM. Chạy thật là trên
-            # Debian của UNO Q; trên máy dev thì Ctrl-C vẫn ném KeyboardInterrupt.
+            # Windows has no add_signal_handler for SIGTERM. Production runs on the
+            # UNO Q's Debian; on a dev machine Ctrl-C still raises KeyboardInterrupt.
             pass
 
     log.info(
-        "Edge AI chạy · org=%s · đường=%s · nhịp %.0fs · giành lái sau %.0fs%s",
+        "Edge AI running · org=%s · link=%s · tick %.0fs · take over after %.0fs%s",
         settings.org_id,
-        "bridge (qua sketch STM32)" if settings.link == "bridge"
-        else f"serial {settings.uart_port or '(tự dò)'}",
+        "bridge (via the STM32 sketch)" if settings.link == "bridge"
+        else f"serial {settings.uart_port or '(auto-detect)'}",
         settings.tick_sec, settings.takeover_after_sec,
-        " · CHỈ ĐỀ XUẤT" if settings.advisory_only else "",
+        " · ADVISORY ONLY" if settings.advisory_only else "",
     )
 
     link_task = asyncio.create_task(link.run(controller.on_snapshot))
@@ -95,7 +97,7 @@ async def _run(settings) -> int:
     link_task.cancel()
     ctl_task.cancel()
     await asyncio.gather(link_task, ctl_task, return_exceptions=True)
-    log.info("Đã dừng")
+    log.info("Stopped")
     return 0
 
 

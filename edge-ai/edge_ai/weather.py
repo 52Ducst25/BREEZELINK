@@ -1,24 +1,25 @@
-"""Dự báo nhiệt độ ngoài trời theo giờ — để hệ thống nhìn tới trước, không chỉ nhìn lại.
+"""Hourly outdoor temperature forecast -- so the system looks forward, not only back.
 
-VẤN ĐỀ NÓ GIẢI: ``T_rm`` trong thuật toán comfort là EMA của nhiệt độ ngoài trời
-ĐÃ QUA. Nghĩa là mọi quyết định đều là phản ứng sau. Biết trước 14h sẽ 36 °C thì
-làm mát sớm từ 13h, lúc chênh lệch trong/ngoài còn nhỏ nên máy nén chạy hiệu suất
-cao hơn — cùng một độ mát, ít điện hơn.
+THE PROBLEM IT SOLVES: ``T_rm`` in the comfort algorithm is an EMA of PAST outdoor
+temperatures. That makes every decision a reaction. Knowing that 2pm will be 36 °C
+lets you cool early from 1pm, while the indoor/outdoor difference is still small and
+the compressor runs more efficiently -- the same coolness for less electricity.
 
-VÌ SAO KHÔNG DÙNG BRICK ``weather_forecast`` CỦA ARDUINO:
-  Đã đọc mã nguồn của nó trên bo. Nó chỉ gọi open-meteo với ``daily=weather_code``
-  rồi trả về một chuỗi phân loại ("sunny" / "rainy"). KHÔNG CÓ NHIỆT ĐỘ — mà nhiệt
-  độ là thứ duy nhất ở đây có ích. Nó cũng nằm trong ``arduino.app_bricks``, tức
-  là chỉ tồn tại trong container App Lab, còn dịch vụ này phải chạy được cả dưới
-  systemd.
+WHY NOT ARDUINO'S ``weather_forecast`` BRICK:
+  Its source on the board has been read. It only calls open-meteo with
+  ``daily=weather_code`` and returns a classification string ("sunny" / "rainy").
+  THERE IS NO TEMPERATURE -- and temperature is the only thing useful here. It also
+  lives in ``arduino.app_bricks``, i.e. it only exists inside the App Lab container,
+  while this service has to run under systemd too.
 
-  Gọi thẳng open-meteo thì lấy được ``hourly=temperature_2m``, không cần khoá API,
-  và chỉ dùng ``urllib`` của thư viện chuẩn — không thêm phụ thuộc nào.
+  Calling open-meteo directly gets ``hourly=temperature_2m``, needs no API key, and
+  uses only the standard library's ``urllib`` -- no added dependency.
 
-MẤT MẠNG LÀ CHUYỆN THƯỜNG, KHÔNG PHẢI NGOẠI LỆ. Cả node này sinh ra để chạy khi
-mất mạng, nên một dự báo cũ vẫn được dùng tiếp (nhiệt độ ngoài trời hôm nay giống
-hôm qua hơn là giống một con số bịa), nhưng có hạn: quá ``MAX_AGE_SEC`` thì trả
-None và bên gọi phải tự xoay xở, chứ không lặng lẽ lái theo số của ba ngày trước.
+LOSING THE NETWORK IS ROUTINE, NOT EXCEPTIONAL. This whole node exists to run when
+the network is gone, so a stale forecast keeps being used (today's outdoor
+temperature resembles yesterday's more than it resembles a made-up number) -- but with
+a limit: past ``MAX_AGE_SEC`` it returns None and the caller has to cope, rather than
+quietly steering by a figure from three days ago.
 """
 
 import json
@@ -34,29 +35,32 @@ logger = logging.getLogger("edge.weather")
 
 _API = "https://api.open-meteo.com/v1/forecast"
 
-# Open-meteo cập nhật mỗi giờ. 30 phút là đủ dày mà vẫn lịch sự với một dịch vụ
-# miễn phí — và dự báo nhiệt độ không đổi ý mỗi 5 phút.
+# Open-meteo updates hourly. 30 minutes is frequent enough while still being polite
+# to a free service -- and a temperature forecast does not change its mind every 5
+# minutes.
 REFRESH_SEC = 1800.0
 
-# Dự báo cũ hơn mức này thì bỏ. 6 giờ: đủ để sống qua một lần mất mạng buổi
-# chiều, không đủ để lái máy lạnh bằng thời tiết hôm kia.
+# Discard a forecast older than this. 6 hours: enough to survive an afternoon network
+# outage, not enough to drive an air conditioner from the day before yesterday's
+# weather.
 MAX_AGE_SEC = 6 * 3600.0
 
-# Lấy 2 ngày. Điều khiển dự báo chỉ nhìn trước 1-2 giờ, nhưng 2 ngày về cùng một
-# lần gọi thì qua nửa đêm không bị hụt, mà tải thêm chỉ vài KB.
+# Fetch 2 days. Forecast-driven control only looks 1-2 hours ahead, but getting 2 days
+# in the same call means midnight does not leave a gap, and the extra download is only
+# a few KB.
 FORECAST_DAYS = 2
 
 _TIMEOUT_SEC = 15.0
 
 
 class WeatherForecast:
-    """Nhiệt độ ngoài trời dự báo theo giờ, có nội suy tuyến tính giữa hai mốc."""
+    """Hourly forecast outdoor temperature, linearly interpolated between points."""
 
     def __init__(self, lat: float, lon: float, cache_path: Path | None = None) -> None:
         self._lat = lat
         self._lon = lon
         self._cache = cache_path
-        self._times: list[float] = []       # epoch giây, tăng dần
+        self._times: list[float] = []       # epoch seconds, ascending
         self._temps: list[float] = []
         self._fetched_at = 0.0
         self._fail_streak = 0
@@ -64,7 +68,7 @@ class WeatherForecast:
         if cache_path is not None:
             self._load_cache()
 
-    # -- trạng thái ------------------------------------------------------------
+    # -- state -----------------------------------------------------------------
 
     @property
     def fresh(self) -> bool:
@@ -79,17 +83,19 @@ class WeatherForecast:
     def due(self) -> bool:
         return (time.time() - self._fetched_at) >= REFRESH_SEC
 
-    # -- tra cứu ---------------------------------------------------------------
+    # -- lookup ----------------------------------------------------------------
 
     def temp_at(self, ts: float) -> float | None:
-        """Nhiệt độ ngoài trời dự báo tại thời điểm ``ts`` (epoch giây).
+        """The forecast outdoor temperature at time ``ts`` (epoch seconds).
 
-        NỘI SUY chứ không lấy mốc gần nhất: dự báo cách nhau một giờ, mà máy lạnh
-        quyết định mỗi 30 giây. Nhảy bậc mỗi đầu giờ sẽ hiện ra thành một cú giật
-        trong nhiệt độ đặt mà phòng không hề có.
+        INTERPOLATED rather than nearest-point: the forecast points are an hour apart
+        while the air conditioner decides every 30 seconds. Stepping at each hour
+        boundary would surface as a jolt in the setpoint that the room never
+        experienced.
 
-        KHÔNG NGOẠI SUY ra ngoài khoảng đã có: trả None. Ngoại suy nhiệt độ ngoài
-        trời bằng đường thẳng là cách chắc chắn để "dự báo" 45 °C lúc rạng sáng.
+        NO EXTRAPOLATION beyond the available range: it returns None. Extrapolating an
+        outdoor temperature with a straight line is a reliable way to "forecast" 45 °C
+        at dawn.
         """
         if not self.fresh:
             return None
@@ -104,7 +110,7 @@ class WeatherForecast:
         return v0 + (v1 - v0) * (ts - t0) / (t1 - t0)
 
     def peak_within(self, hours: float) -> tuple[float, float] | None:
-        """(nhiệt độ, epoch) cao nhất trong ``hours`` giờ tới. None nếu chưa có."""
+        """The highest (temperature, epoch) within the next ``hours``. None if unavailable."""
         if not self.fresh:
             return None
         now = time.time()
@@ -112,20 +118,20 @@ class WeatherForecast:
                   if now <= t <= now + hours * 3600.0]
         return max(window) if window else None
 
-    # -- nạp -------------------------------------------------------------------
+    # -- fetching --------------------------------------------------------------
 
     def refresh(self) -> bool:
-        """Gọi API. CHẶN — bên gọi phải đẩy vào luồng khác.
+        """Call the API. BLOCKING -- the caller must push it onto another thread.
 
-        Không bao giờ ném: mất mạng là trạng thái bình thường của thiết bị này,
-        và một ngoại lệ ở đây sẽ giết vòng điều khiển vì một thứ chỉ-tốt-nếu-có.
+        It never raises: losing the network is a normal state for this device, and an
+        exception here would kill the control loop over a nice-to-have.
         """
         url = f"{_API}?" + urllib.parse.urlencode({
             "latitude": f"{self._lat:.4f}",
             "longitude": f"{self._lon:.4f}",
             "hourly": "temperature_2m",
             "forecast_days": FORECAST_DAYS,
-            # unixtime: khỏi phân tích chuỗi ISO và khỏi mọi rắc rối múi giờ.
+            # unixtime: no ISO string parsing and no timezone trouble at all.
             "timeformat": "unixtime",
         })
         try:
@@ -135,32 +141,33 @@ class WeatherForecast:
             temps = [float(v) for v in data["hourly"]["temperature_2m"]]
         except (urllib.error.URLError, OSError, ValueError, KeyError, TypeError) as exc:
             self._fail_streak += 1
-            # Chỉ kêu ở lần đầu của mỗi chuỗi hỏng: mất mạng cả đêm sẽ sinh ra
-            # 16 dòng giống hệt nhau, và log kín đặc là log không ai đọc.
+            # Only complain on the first failure of each streak: an overnight outage
+            # would otherwise produce 16 identical lines, and a log full of noise is a
+            # log nobody reads.
             if self._fail_streak == 1:
-                logger.warning("Không lấy được dự báo (%s) — dùng tiếp bản cũ nếu còn hạn", exc)
+                logger.warning("Could not fetch the forecast (%s) - reusing the cached one if still valid", exc)
             return False
 
         if len(times) != len(temps) or not times:
-            logger.warning("Dự báo trả về rỗng hoặc lệch độ dài — bỏ")
+            logger.warning("The forecast came back empty or with mismatched lengths - discarded")
             return False
 
         self._times, self._temps = times, temps
         self._fetched_at = time.time()
         if self._fail_streak:
-            logger.info("Đã lấy lại được dự báo sau %d lần hỏng", self._fail_streak)
+            logger.info("Forecast recovered after %d failures", self._fail_streak)
         self._fail_streak = 0
         self._save_cache()
 
         peak = self.peak_within(12.0)
-        logger.info("Dự báo %d mốc giờ%s", len(times),
-                    "" if peak is None else f" · đỉnh 12h tới {peak[0]:.1f}°C")
+        logger.info("Forecast has %d hourly points%s", len(times),
+                    "" if peak is None else f" · next-12h peak {peak[0]:.1f}°C")
         return True
 
-    # -- nhớ qua lần khởi động lại ---------------------------------------------
+    # -- surviving a restart ---------------------------------------------------
 
     def _load_cache(self) -> None:
-        """Dự báo cũ còn hơn không có gì lúc vừa bật mà chưa kịp gọi mạng."""
+        """A stale forecast beats nothing at all just after boot, before the first call."""
         try:
             raw = json.loads(self._cache.read_text(encoding="utf-8"))
             self._times = [float(t) for t in raw["times"]]
@@ -169,7 +176,7 @@ class WeatherForecast:
         except (OSError, ValueError, KeyError, TypeError):
             return
         if self.fresh:
-            logger.info("Dùng lại dự báo đã lưu (%.0f phút trước)", self.age_min or 0.0)
+            logger.info("Reusing the cached forecast (%.0f minutes old)", self.age_min or 0.0)
 
     def _save_cache(self) -> None:
         if self._cache is None:
@@ -182,4 +189,4 @@ class WeatherForecast:
                 encoding="utf-8",
             )
         except OSError as exc:
-            logger.warning("Không ghi được bộ nhớ đệm dự báo: %s", exc)
+            logger.warning("Could not write the forecast cache: %s", exc)

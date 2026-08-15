@@ -1,19 +1,20 @@
-"""Trang theo dõi trên cổng 7000 — nhìn thấy mô hình đang nghĩ gì.
+"""The monitoring page on port 7000 -- seeing what the model is thinking.
 
-VÌ SAO CẦN: mọi thứ node này tính ra hiện chỉ nằm trong log. Muốn biết τ đang là
-bao nhiêu, dự báo có chuẩn không, góc nào đang hỏng thì phải mở tab Python rồi
-đọc chữ. Với một thiết bị treo tường thì đó không phải là cách trả lời câu "nhà
-đang thế nào".
+WHY IT IS NEEDED: everything this node computes currently lives only in the log. To
+find out what τ is, whether the forecast is accurate, or which corner is faulty, you
+have to open the Python tab and read text. For a wall-mounted device that is not how
+you answer the question "how is the house doing".
 
-DÙNG REST + HỎI LẠI MỖI VÀI GIÂY, KHÔNG DÙNG WEBSOCKET, dù brick có sẵn cả hai.
-Kênh WebSocket của nó chạy trên Socket.IO, mà Socket.IO cần thư viện JavaScript
-riêng ở phía trình duyệt — thư viện đó bình thường tải từ CDN, và đây là thiết bị
-phải chạy được khi mất mạng. Dữ liệu chỉ đổi mỗi 30 giây nên hỏi lại mỗi 3 giây
-là quá đủ; đổi lấy một trang không phụ thuộc gì bên ngoài.
+REST WITH A FEW-SECOND POLL, NOT WEBSOCKET, even though the brick offers both. Its
+WebSocket channel runs on Socket.IO, and Socket.IO needs its own JavaScript library in
+the browser -- that library is normally loaded from a CDN, and this is a device that
+has to work with no network. The data only changes every 30 seconds so a 3-second poll
+is more than enough; the trade buys a page that depends on nothing external.
 
-TẮT ĐƯỢC VÀ TỰ TẮT: brick ``web_ui`` chỉ tồn tại trong container của App Lab.
-Chạy dưới systemd thì import hỏng, và lúc đó dịch vụ vẫn phải chạy bình thường —
-trang theo dõi là thứ chỉ-tốt-nếu-có, không phải điều kiện để điều khiển máy lạnh.
+DISABLEABLE AND SELF-DISABLING: the ``web_ui`` brick only exists inside App Lab's
+container. Under systemd the import fails, and the service still has to run normally
+then -- the monitoring page is a nice-to-have, not a precondition for controlling an
+air conditioner.
 """
 
 import logging
@@ -23,13 +24,14 @@ from typing import Any
 
 logger = logging.getLogger("edge.web")
 
-# Số điểm tối đa trả về cho biểu đồ. 240 điểm trên một khung 1000px là mỗi điểm
-# hơn 4px — vẽ dày hơn thì trình duyệt bận hơn mà mắt không thấy khác.
+# The maximum number of points returned for the chart. 240 points across a 1000px
+# frame is over 4px per point -- drawing denser only makes the browser work harder
+# without the eye seeing any difference.
 MAX_CHART_POINTS = 240
 
 
 class Dashboard:
-    """Máy chủ web nhỏ phục vụ trang theo dõi. Không có nó dịch vụ vẫn chạy."""
+    """A small web server for the monitoring page. The service runs fine without it."""
 
     def __init__(self, history) -> None:
         self._history = history
@@ -41,11 +43,11 @@ class Dashboard:
         return self._web is not None
 
     def start(self) -> None:
-        """Dựng máy chủ. Nuốt mọi lỗi — xem chú thích đầu file."""
+        """Bring up the server. Swallows every error -- see the note at the top of the file."""
         try:
             from arduino.app_bricks.web_ui import WebUI
         except ImportError:
-            logger.info("Không có brick web_ui (không chạy trong App Lab) — bỏ trang theo dõi")
+            logger.info("No web_ui brick (not running inside App Lab) - skipping the monitoring page")
             return
 
         try:
@@ -54,47 +56,48 @@ class Dashboard:
             web.expose_api("GET", "/api/history", self._history_json)
             web.start()
         except Exception as exc:  # noqa: BLE001
-            # RuntimeError nếu thiếu assets/index.html, OSError nếu cổng đã bận.
-            logger.warning("Không dựng được trang theo dõi: %s", exc)
+            # RuntimeError if assets/index.html is missing, OSError if the port is busy.
+            logger.warning("Could not bring up the monitoring page: %s", exc)
             return
 
-        # `start()` MỚI CHỈ CHUẨN BỊ — vòng phục vụ nằm ở `execute()`.
+        # `start()` ONLY PREPARES -- the serving loop lives in `execute()`.
         #
-        # Ứng dụng Arduino bình thường gọi `App.run()`, và AppController tự tìm
-        # các phương thức tên `execute`/`loop` của mọi brick rồi chạy mỗi cái
-        # trong một luồng. Dịch vụ này có vòng đời asyncio riêng nên không dùng
-        # `App.run()`, và hệ quả là không ai chạy `execute()` hộ.
+        # A normal Arduino application calls `App.run()`, and AppController finds every
+        # brick's `execute`/`loop` methods and runs each one in a thread. This service
+        # has its own asyncio lifecycle so it does not use `App.run()`, and the
+        # consequence is that nobody runs `execute()` on its behalf.
         #
-        # Triệu chứng lúc quên: `start()` trả về êm đẹp, không lỗi, không cảnh
-        # báo — chỉ là không có gì lắng nghe ở cổng 7000. Đã dính đúng một lần.
+        # The symptom when forgotten: `start()` returns cleanly, no error, no warning --
+        # there is simply nothing listening on port 7000. This has bitten us exactly
+        # once.
         #
-        # Luồng nền (daemon): nó phải chết theo tiến trình. Không thì nút Stop
-        # của App Lab gửi SIGTERM, phần asyncio thoát sạch, còn uvicorn giữ tiến
-        # trình sống mãi và App Lab phải giết cứng.
+        # A daemon thread: it has to die with the process. Otherwise App Lab's Stop
+        # button sends SIGTERM, the asyncio side exits cleanly, and uvicorn keeps the
+        # process alive forever until App Lab hard-kills it.
         #
-        # GÁN self._web TRƯỚC khi mở luồng: luồng đọc thuộc tính đó, và mở trước
-        # là một cuộc đua mà phần lớn thời gian ta thắng — loại lỗi tệ nhất.
+        # ASSIGN self._web BEFORE starting the thread: the thread reads that attribute,
+        # and starting first is a race we win most of the time -- the worst kind of bug.
         self._web = web
         threading.Thread(target=self._serve, name="web-ui", daemon=True).start()
-        logger.info("Trang theo dõi: %s", getattr(web, "url", "http://<ip-bo>:7000"))
+        logger.info("Monitoring page: %s", getattr(web, "url", "http://<board-ip>:7000"))
 
     def _serve(self) -> None:
         try:
             self._web.execute()
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Trang theo dõi dừng: %s", exc)
+            logger.warning("The monitoring page stopped: %s", exc)
 
     def publish(self, state: dict[str, Any]) -> None:
-        """Thay ảnh chụp trạng thái mà trang sẽ đọc ở lần hỏi kế tiếp.
+        """Replace the state snapshot the page will read on its next poll.
 
-        GÁN NGUYÊN MỘT DICT MỚI chứ không sửa tại chỗ: hàm phục vụ HTTP chạy trên
-        luồng khác, và sửa tại chỗ có thể để nó bắt gặp một trạng thái nửa vời.
-        Gán một tham chiếu thì nguyên tử.
+        ASSIGN A WHOLE NEW DICT rather than mutating in place: the HTTP handler runs on
+        another thread, and mutating in place could let it catch a half-updated state.
+        Assigning a reference is atomic.
         """
         self._state = state
 
     def _history_json(self) -> dict[str, Any]:
-        """6 giờ gần nhất cho biểu đồ, đã lấy thưa."""
+        """The last 6 hours for the chart, already decimated."""
         rows = self._history.recent(hours=6.0)
         if not rows:
             return {"points": []}
@@ -111,11 +114,11 @@ class Dashboard:
 
 def build_state(*, snapshot, store, model, score, weather, cloud, settings,
                 result, forecast, anomalies) -> dict[str, Any]:
-    """Gom mọi thứ trang cần thành một dict thuần JSON.
+    """Gather everything the page needs into a plain JSON dict.
 
-    HÀM THUẦN, tách khỏi Controller có chủ đích: phần trình bày đổi thường xuyên
-    hơn phần điều khiển rất nhiều, và trộn chúng lại thì mỗi lần sửa màu chữ đều
-    phải đọc lại đoạn mã ra lệnh cho máy nén.
+    A PURE FUNCTION, deliberately separate from Controller: the presentation layer
+    changes far more often than the control layer, and mixing them would mean every
+    text-colour tweak requires rereading the code that commands the compressor.
     """
     now = time.time()
     peak = weather.peak_within(12.0) if weather is not None else None
@@ -159,7 +162,7 @@ def build_state(*, snapshot, store, model, score, weather, cloud, settings,
             "age_min": weather.age_min if weather is not None else None,
             "peak_t": None if peak is None else peak[0],
             "peak_ts": None if peak is None else peak[1],
-            # Đường dự báo 12 giờ tới, mỗi giờ một điểm — đủ để thấy hình dáng.
+            # The next 12 hours of forecast, one point per hour -- enough to see the shape.
             "hours": [] if weather is None else [
                 {"ts": now + h * 3600, "t": weather.temp_at(now + h * 3600)}
                 for h in range(13)
