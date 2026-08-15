@@ -39,23 +39,23 @@
 [env:ss1]
 extends = room_base
 build_flags = ${room_base.build_flags}
-    -D DEVICE_UUID='"DEVICE_UUID_GOC_1"'
+    -D DEVICE_UUID='"DAN_DEVICE_UUID_GOC_1"'
     -D ROOM_CORNER=0
 
 [env:ss2]
 extends = room_base
 build_flags = ${room_base.build_flags}
-    -D DEVICE_UUID='"DEVICE_UUID_GOC_2"'
+    -D DEVICE_UUID='"DAN_DEVICE_UUID_GOC_2"'
     -D ROOM_CORNER=1
 
 [env:ss3]
 extends = room_base
 build_flags = ${room_base.build_flags}
-    -D DEVICE_UUID='"DEVICE_UUID_GOC_3"'
+    -D DEVICE_UUID='"DAN_DEVICE_UUID_GOC_3"'
     -D ROOM_CORNER=2
 
 [env:ss4]
 extends = room_base
 build_flags = ${room_base.build_flags}
-    -D DEVICE_UUID='"DAN_UUIDDEVICE_UUID_GOC_4_GOC_3"'
+    -D DEVICE_UUID='"DAN_DEVICE_UUID_GOC_4"'
     -D ROOM_CORNER=3

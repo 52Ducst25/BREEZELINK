@@ -17,23 +17,28 @@ pio device monitor -p COM5 -b 115200                    # xem log
 
 ---
 
-## 1. Thư mục này không có mã nguồn — và đó là chủ ý
+## 1. Mã nguồn panel nằm ở đây — bản duy nhất
 
-Nó biên dịch thẳng `../esp32-indoor/src/`, tức **đúng** mã mà bo QR Box chạy, kể cả `ui/`.
+`src/` trong thư mục này là bản thật, kể cả `ui/`.
 
-Chép mã sang đây cho "gọn" là tạo ra **hai panel**. Logic thi hành lệnh, chống trùng
-`req_id`, xin lại mã IR, ranh giới đề xuất/lệnh của UNO Q — toàn những chỗ tinh vi mà
-mỗi cái đều đã trả giá một lần để viết cho đúng. Hai bản sao lệch nhau ngay lần sửa
+Từng có thêm hai env dùng chung đúng `src/` này — `esp32-qrbox` (bo QR Box cũ) và
+`esp32-s3-gateway` (bo gỡ lỗi không màn) — **đã gỡ khỏi repo ngày 15/08/2026**. Cần
+xem lại thì `git log --diff-filter=D -- FirmWare/esp32-qrbox`.
+
+Chép mã sang thư mục khác cho "gọn" là tạo ra **hai panel**. Logic thi hành lệnh, chống
+trùng `req_id`, xin lại mã IR, ranh giới đề xuất/lệnh của UNO Q — toàn những chỗ tinh vi
+mà mỗi cái đều đã trả giá một lần để viết cho đúng. Hai bản sao lệch nhau ngay lần sửa
 thứ nhất, và triệu chứng là bo này chạy đúng còn bo kia thì không, không có cách nào
 biết bên nào mới là bản thật.
 
-Chỗ nào thật sự khác nhau giữa hai bo thì nằm ở
-[`../esp32-indoor/src/board-pins.h`](../esp32-indoor/src/board-pins.h), chọn bằng cờ
-`-D BOARD_S3_PANEL`. **Không rải `#ifdef` vào mã.**
+Chỗ khác nhau giữa các bo nằm ở [`src/board-pins.h`](src/board-pins.h), chọn bằng cờ
+`-D BOARD_S3_PANEL`. **Không rải `#ifdef` vào mã.** Luật này giữ nguyên dù giờ chỉ còn
+một bo — nó là thứ khiến thêm bo thứ hai sau này không phải chép mã.
 
-Cấu hình (WiFi, token MQTT, `DEVICE_UUID`) dùng chung `../esp32-indoor/src/config.h` —
-bo này thay thế node indoor nên phải dùng **đúng** hàng `devices` đó trên web.
-Thư mục này tuyệt đối không được có `config.h` riêng.
+Cấu hình (WiFi, token MQTT, `DEVICE_UUID`) ở [`src/config.h`](src/config.h.example),
+**bị gitignore** vì chứa mật khẩu thật; bản được commit là `src/config.h.example`.
+File đó kết thúc bằng `#include "board-pins.h"` — thiếu dòng ấy là đứt build ở
+`I2C_SDA_PIN was not declared`.
 
 ---
 
@@ -182,7 +187,7 @@ nguồn nhìn như màn hình lỗi chứ không phải màn khởi động.
 
 ### Bước 4 — trục cảm ứng
 
-Ba cờ trong [`board-pins.h`](../esp32-indoor/src/board-pins.h) đang để y bo cũ, chưa đo.
+Ba cờ trong [`board-pins.h`](src/board-pins.h) đang để y bo cũ, chưa đo.
 Chạm góc **trên-trái** rồi xem con trỏ chạy đâu:
 
 | Triệu chứng | Đổi cờ |
@@ -243,7 +248,7 @@ Chấp nhận được — nhịp vẽ 200 ms và vùng bẩn thường nhỏ h�
 
 ## 6. Liên quan
 
-- [`../esp32-indoor/`](../esp32-indoor/) — **mã nguồn thật**, và bo QR Box cũ
-- [`../esp32-indoor/src/board-pins.h`](../esp32-indoor/src/board-pins.h) — sơ đồ chân hai bo
-- [`../esp32-s3-gateway/`](../esp32-s3-gateway/) — bo gỡ lỗi không màn, in mọi gói ra serial
+- [`src/board-pins.h`](src/board-pins.h) — sơ đồ chân theo bo, chọn bằng cờ `-D BOARD_*`
 - [`../shared/unoq-link-protocol.h`](../shared/unoq-link-protocol.h) — khung gói UART sang UNO Q
+- [`../shared/espnow-message.h`](../shared/espnow-message.h) — khuôn gói 4 góc phòng + ngoài trời
+- [`../Interface/README.md`](../Interface/README.md) — wireframe, toạ độ, lý do từng quyết định bố cục

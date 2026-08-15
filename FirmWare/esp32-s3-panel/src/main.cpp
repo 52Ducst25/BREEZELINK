@@ -845,7 +845,7 @@ static void serviceNetwork() {
 /// MỘT nút nguồn: bấm lúc đang tắt thì bật, bấm lúc đang chạy thì tắt. Hộ như vậy
 /// chỉ học được ô BẬT, nên chiều TẮT rơi về đúng khung đó.
 ///
-/// BẢN Ở BO esp32-humidity DÙNG MỘT CỜ BIÊN DỊCH (`DIFFUSER_IR_TOGGLE`) cho việc
+/// BO THỬ TRƯỚC ĐÂY DÙNG MỘT CỜ BIÊN DỊCH (`DIFFUSER_IR_TOGGLE`) cho việc
 /// này, và cờ đó là thứ chỉ sai được ngoài hiện trường: khai 0 trong khi cả hai ô
 /// đều học nút bập bênh thì mã "TẮT" thật ra cũng đảo trạng thái, và bo BẬT máy
 /// đúng lúc nó tưởng mình đang tắt. Ở đây không có gì để khai — "ô TẮT có mã hay

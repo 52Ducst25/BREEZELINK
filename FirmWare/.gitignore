@@ -5,3 +5,6 @@
 # Thư mục build của PlatformIO
 .pio/
 */.pio/
+
+# IDE — cuc bo tung may, khong thuoc ve repo
+.vscode/

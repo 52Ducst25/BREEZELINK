@@ -356,8 +356,6 @@ AirConditioner/
 │   │   │   ├── board-pins.h #      Sơ đồ chân THEO BO, chọn bằng cờ -D BOARD_*
 │   │   │   └── room-registry.*  #  Bảng 4 góc + trung vị
 │   │   └── tools/         #     Sinh font VLW / ảnh LVGL, đọc serial
-│   ├── esp32-qrbox/      #   Bo QR Box cũ — chỉ cấu hình build, trỏ về src/ ở trên
-│   ├── esp32-s3-gateway/  #   Bo GỠ LỖI không màn (ESP32-S3): in mọi gói ra serial
 │   ├── esp32-room/        #   4 NODE GÓC PHÒNG (env ss1..ss4, mỗi node một UUID)
 │   ├── esp32-outdoor/     #   Node NGOÀI TRỜI (+ bản WiFi dự phòng)
 │   ├── shared/            #   Khuôn gói ESP-NOW + radio slave + giao thức UART với UNO Q
@@ -424,10 +422,8 @@ chỉ lộ ra lúc đóng gói.
 trị ở web quản trị → *Khách hàng* → mở node → **"Nạp firmware"**.
 
 ```bash
-# GATEWAY / PANEL — cùng một mã nguồn (FirmWare/esp32-s3-panel/src/), chọn MỘT bo:
-cd FirmWare/esp32-s3-panel    && pio run -e esp32s3-panel   -t upload # CHÍNH THỨC (có màn)
-cd FirmWare/esp32-qrbox      && pio run -e qrbox-touch     -t upload # bo QR Box cũ
-cd FirmWare/esp32-s3-gateway  && pio run -e esp32s3-gateway -t upload # bo gỡ lỗi, không màn
+# GATEWAY / PANEL treo tường
+cd FirmWare/esp32-s3-panel && pio run -e esp32s3-panel -t upload
 
 # 4 NODE GÓC PHÒNG — nodes.ini khai từng bo, nạp lần lượt
 cd FirmWare/esp32-room

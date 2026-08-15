@@ -15,8 +15,8 @@ uint8_t g_fails = 0;
 }  // namespace
 
 void begin(uint8_t pin) {
-  // DHTesp CHỨ KHÔNG PHẢI thư viện DHT của Adafruit — cùng lý do đã ghi dài
-  // trong esp32-qrbox/platformio.ini: bản Adafruit tắt ngắt hơn một giây khi
+  // DHTesp CHỨ KHÔNG PHẢI thư viện DHT của Adafruit — cùng lý do đã ghi trong
+  // lib_deps của platformio.ini: bản Adafruit tắt ngắt hơn một giây khi
   // chưa cắm cảm biến và làm panic cả lõi. Trên ESP32-C3 (một lõi duy nhất, và
   // ngăn xếp BLE chạy ngay trên đó) hậu quả nặng hơn hẳn ESP32 hai lõi: mất
   // ngắt một giây là ngăn xếp BLE lỡ nhịp và kết nối/quét đứt đoạn.

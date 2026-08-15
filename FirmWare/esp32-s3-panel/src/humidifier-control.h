@@ -4,21 +4,23 @@
 // ============================================================================
 //  Máy tạo độ ẩm: quyết định BẬT / TẮT, chạy ngay trên panel.
 // ----------------------------------------------------------------------------
-//  BẢN PORT CỦA ../esp32-humidity/src/diffuser-control.cpp — cùng sáu nhánh ưu
-//  tiên, cùng ba lớp chống dao động, cùng nguyên tắc "nghi ngờ thì TẮT". Sửa lỗi
-//  logic ở một bên thì ngó sang bên kia.
+//  NGUỒN GỐC: bản port của bo thử `esp32-humidity` (đã gỡ khỏi repo ở lần dọn
+//  15/08/2026 — bo đó chỉ dùng để thử logic trước khi nạp lên bo thật, và giờ
+//  bản chạy thật là chính file này). Muốn xem bản gốc thì:
+//      git log --diff-filter=D -- FirmWare/esp32-humidity/src/diffuser-control.cpp
 //
-//  BA CHỖ KHÁC, và cả ba đều do panel có thứ mà bo kia không có:
+//  Giữ nguyên sáu nhánh ưu tiên, ba lớp chống dao động, và nguyên tắc "nghi ngờ
+//  thì TẮT". BA CHỖ ĐÃ ĐỔI so với bản gốc, cả ba do panel có thứ bo kia không có:
 //
 //   1. ĐỘ ẨM LÀ TRUNG VỊ BỐN GÓC PHÒNG, không phải một con DHT gắn trên bo.
-//      Bo esp32-humidity đo bằng cảm biến của chính nó, nên nó phải tắt WiFi để
-//      khỏi tự sinh nhiệt làm sai số đo (README §6 của bo đó). Panel không có
-//      cảm biến nào cả — số vào đây do RoomRegistry::median() dựng từ các node
-//      góc phòng, cách xa panel — nên ràng buộc đó biến mất.
+//      Bo thử đo bằng cảm biến của chính nó nên phải tắt WiFi để khỏi tự sinh
+//      nhiệt làm sai số đo. Panel không có cảm biến nào cả — số vào đây do
+//      RoomRegistry::median() dựng từ các node góc phòng, cách xa panel — nên
+//      ràng buộc đó biến mất.
 //
 //   2. MÃ IR HỌC TỪ APP, nằm trong kho chung của panel dưới hai bí danh
 //      "HUMID_ON" / "HUMID_OFF" (xem ir_action_service.KNOWN_ACTIONS). Không có
-//      ir-slots.cpp riêng nữa.
+//      kho hai-ô riêng nữa.
 //
 //   3. REMOTE BẬP BÊNH TỰ NHẬN RA, không còn cờ biên dịch DIFFUSER_IR_TOGGLE.
 //      Hộ nào remote chỉ có một nút nguồn thì học cùng một khung vào cả hai ô,
@@ -38,9 +40,9 @@
 namespace HumidifierControl {
 
 // --- Ngưỡng và thời gian ------------------------------------------------------
-//  CHÉP ĐÚNG SỐ TỪ ../esp32-humidity/src/settings.h §2-§4, kể cả lý do. Hai bo
-//  điều khiển cùng một loại máy trong cùng một căn phòng; để chúng lệch số là
-//  tạo ra hai hành vi khác nhau cho cùng một sản phẩm.
+//  Chép nguyên số (kể cả lý do) từ bo thử trước khi nó bị gỡ khỏi repo. Đây là
+//  bản duy nhất còn lại, nên sửa ở đây là sửa cho cả sản phẩm — không còn bản
+//  thứ hai để mà lệch.
 //
 //  KHÔNG ĐƯA VÀO config.h: file đó bị gitignore vì chứa mật khẩu, nên mọi giá
 //  trị mặc định đặt trong đó sẽ biến mất khỏi repo và người tiếp theo không biết
@@ -151,7 +153,7 @@ void backToAuto(uint32_t nowMs);
 Status status(uint32_t nowMs);
 
 /// Câu mô tả ngắn của [r] — tiếng Việt CÓ DẤU (hiện lên màn LVGL, font ui/fonts
-/// có đủ dải). Bản ở bo esp32-humidity không dấu vì nó chỉ đi ra serial.
+/// có đủ dải). Log serial thì dùng reasonAscii() — xem chú thích ở .cpp.
 const char *reasonText(Reason r);
 
 }  // namespace HumidifierControl

@@ -1,27 +1,25 @@
 # BreezeLink — Firmware node
 
-Sáu thiết bị cho **1 nhà** (khách hàng *Khách hàng*):
+Sáu thiết bị cho **một nhà**, ba thư mục firmware:
 
 | Thư mục | Bo | Loại node | Hiện trên app/web |
 |---|---|---|---|
-| `esp32-s3-panel/` | **Bo 2.8" ESP32‑S3** (ILI9341V + FT6336G) | **Gateway / panel treo tường CHÍNH THỨC** — thu ESP‑NOW, IR, màn cảm ứng, UART tới UNO Q, **không cảm biến**. Giữ **mã nguồn** của cả ba env | "Gateway trong nhà" |
-| `esp32-qrbox/` | QR Box Advance Touch Screen (ESP32‑WROOM‑32E‑N8 + màn 2.8") | Bo cũ (hỏng mạch nạp) — chỉ còn cấu hình build | — |
+| `esp32-s3-panel/` | **Bo 2.8" ESP32‑S3** (ILI9341V + FT6336G) | **Gateway / panel treo tường** — thu ESP‑NOW, phát IR, màn cảm ứng, UART tới UNO Q, **không cảm biến** | "Gateway trong nhà" |
 | `esp32-room/` | 4× **ESP32‑C3‑DevKitM‑1** + DHT22 | **Cảm biến phòng** — slave ESP‑NOW | "Cảm biến trong phòng" |
 | `esp32-outdoor/` | ESP32 DevKit V1 | **Ngoài trời** — slave ESP‑NOW | "Nút ngoài trời" |
-| `esp32-s3-gateway/` | ESP32‑S3‑DevKitC‑1 | **Bo gỡ lỗi** — cùng mã, không màn, in mọi gói vào/ra ra serial | — |
+| `shared/` | — | Khuôn gói dùng chung: ESP‑NOW, radio slave, giao thức UART với UNO Q. **Cả ba node trên đều `-I../shared`** | — |
 | (không ở đây) | Arduino UNO Q | Edge AI — nối gateway qua **UART**, xem [`../edge-ai/`](../edge-ai/) | — |
 
-> **PANEL CHÍNH THỨC LÀ `esp32-s3-panel/`.** Bo QR Box Advance hỏng mạch nạp — esptool
-> dò được chip nhưng mọi lần ghi khối dữ liệu đều đứt giữa chừng, cả hai chiều, không
-> phụ thuộc baud.
+> **Mã nguồn panel nằm ở `esp32-s3-panel/src/` — đúng MỘT bản.** Chỗ nào khác nhau
+> giữa các bo thì để ở `esp32-s3-panel/src/board-pins.h`, chọn bằng `-D BOARD_*`,
+> **không rải `#ifdef` vào mã**.
 >
-> **Mã nguồn panel nằm ở `esp32-s3-panel/src/` — đúng MỘT bản.** Hai thư mục
-> `esp32-qrbox/` và `esp32-s3-gateway/` không có mã riêng, chúng trỏ ngược về đó
-> (`src_dir` / `build_src_filter`), chỉ khác cờ build. Chép mã ra là tạo ra hai panel
-> lệch nhau ngay lần sửa đầu tiên. Chỗ nào khác nhau giữa các bo thì để ở
-> `esp32-s3-panel/src/board-pins.h`, chọn bằng `-D BOARD_*`.
+> Lần dọn 15/08/2026 đã gỡ ba thư mục: `esp32-qrbox/` (bo QR Box cũ, hỏng mạch nạp),
+> `esp32-s3-gateway/` (bo gỡ lỗi không màn) — cả hai chỉ là cấu hình build trỏ về
+> `esp32-s3-panel/src/` — và `esp32-humidity/` (bo thử máy tạo ẩm, logic đã port vào
+> panel). Cần xem lại: `git log --diff-filter=D -- FirmWare/esp32-qrbox`.
 >
-> Sơ đồ chân và trình tự bring-up bo mới: [`esp32-s3-panel/README.md`](esp32-s3-panel/README.md).
+> Sơ đồ chân và trình tự bring-up: [`esp32-s3-panel/README.md`](esp32-s3-panel/README.md).
 
 > **GATEWAY KHÔNG CÒN ĐO NHIỆT ĐỘ.** Cả DHT22 lẫn SHT3x đã bỏ khỏi firmware của nó:
 > một cảm biến treo tường chỉ đo được *cái tường đó*, còn bốn góc phòng chênh nhau
@@ -106,11 +104,6 @@ cd esp32-s3-panel
 cp src/config.h.example src/config.h      # điền như §2 — DÙNG CHUNG cho mọi bo panel
 pio run -e esp32s3-panel -t upload --upload-port COMx
 pio device monitor -p COMx -b 115200      # xem log
-
-# Bo QR Box cũ — USB-TTL cắm vào cổng P3. Không có src/ riêng, dùng chung
-# esp32-s3-panel/src/ ở trên, nên KHÔNG phải điền config.h lần nữa.
-cd esp32-qrbox
-pio run -e qrbox-touch -t upload --upload-port COMx
 
 # 4 node góc phòng — nạp LẦN LƯỢT, đổi DEVICE_UUID giữa mỗi lần
 cd esp32-room
@@ -229,9 +222,8 @@ Muốn xa hơn phải tự thêm transistor + LED công suất. Mắt thu để 
 ### 6.3 Nạp
 
 ```bash
-# config.h nằm ở esp32-s3-panel/src/ — dùng chung cho mọi bo panel (§3)
-cd esp32-qrbox
-pio run -e qrbox-touch -t upload --upload-port COMx
+cd esp32-s3-panel
+pio run -e esp32s3-panel -t upload --upload-port COMx
 pio device monitor -p COMx -b 115200
 ```
 
