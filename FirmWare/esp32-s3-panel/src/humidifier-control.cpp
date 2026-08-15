@@ -11,12 +11,12 @@ Emitter g_emit = nullptr;
 bool   g_on = false;
 Reason g_reason = Reason::BOOT;
 
-float    g_rh = NAN;           ///< độ ẩm đã làm mượt
-uint32_t g_lastGoodMs = 0;     ///< lần cuối có số đo hợp lệ (0 = chưa lần nào)
+float    g_rh = NAN;           ///< the smoothed humidity
+uint32_t g_lastGoodMs = 0;     ///< last time there was a valid reading (0 = never)
 
-uint32_t g_lastSwitchMs = 0;   ///< lần cuối trạng thái ĐỔI THÀNH CÔNG
-uint32_t g_lastTryMs = 0;      ///< lần cuối THỬ bắn IR, kể cả khi trượt
-uint32_t g_onSinceMs = 0;      ///< lần cuối máy được bật
+uint32_t g_lastSwitchMs = 0;   ///< last time the state CHANGED SUCCESSFULLY
+uint32_t g_lastTryMs = 0;      ///< last IR transmit ATTEMPT, including failures
+uint32_t g_onSinceMs = 0;      ///< last time the unit was switched on
 
 bool     g_override = false;
 uint32_t g_overrideStartMs = 0;
@@ -24,17 +24,20 @@ uint32_t g_overrideStartMs = 0;
 bool     g_lockout = false;
 uint32_t g_lockoutStartMs = 0;
 
-// Niềm tin trạng thái, giữ qua mất điện.
+// Our belief about the state, preserved across power cuts.
 //
-// PHẢI CÓ VÌ REMOTE BẬP BÊNH: hộ nào máy tạo ẩm chỉ có một nút nguồn thì panel
-// không đo được máy đang bật hay tắt — nó chỉ NHỚ lần cuối nó bắn gì. Quên mất
-// niềm tin đó sau mỗi lần mất điện nghĩa là mọi lệnh sau đều có 50% cơ hội đi
-// ngược. Với remote có hai nút rời thì trường này gần như vô hại: bắn lại không
-// đổi gì, nên niềm tin sai tự sửa ở lần quyết định kế tiếp.
+// REQUIRED BECAUSE OF TOGGLE REMOTES: for a household whose humidifier has only one
+// power button, the panel cannot measure whether the unit is on or off -- it only
+// REMEMBERS what it last transmitted. Forgetting that belief on every power cut
+// would give every subsequent command a 50% chance of going the wrong way. With a
+// remote that has two separate buttons this field is nearly harmless:
+// retransmitting changes nothing, so a wrong belief corrects itself on the next
+// decision.
 //
-// NAMESPACE RIÊNG, không dùng chung "aircon-ir" của IrStore: kho mã IR có lúc
-// bị wipe() để ép backend gửi lại toàn bộ, và cuốn theo niềm tin trạng thái là
-// tác dụng phụ không ai đoán được từ tên hàm đó.
+// ITS OWN NAMESPACE, not sharing IrStore's "aircon-ir": the IR store is sometimes
+// wipe()d to force the backend to resend everything, and taking the state belief
+// down with it would be a side effect nobody could predict from that function's
+// name.
 Preferences g_nvs;
 bool        g_nvsReady = false;
 const char *const NVS_NS  = "bl-humid";
@@ -44,53 +47,59 @@ void rememberOn(bool on) {
   if (g_nvsReady) g_nvs.putBool(NVS_KEY, on);
 }
 
-/// Cùng nội dung với reasonText() nhưng KHÔNG DẤU, dành cho serial.
+/// The same content as reasonText() but in English, for the serial log.
 ///
-/// HAI BẢN CHỮ CHO MỘT DANH SÁCH LÀ CÓ CHỦ ĐÍCH, không phải quên gộp. Hai nơi đọc
-/// khác nhau và luật của chúng ngược nhau:
-///   màn LVGL -> tiếng Việt CÓ DẤU; font ui/fonts/ có đủ dải, và mọi nhãn khác
-///               trên panel đều có dấu nên riêng dòng này không dấu sẽ lạc lõng.
-///   serial   -> KHÔNG DẤU, theo lệ của mọi log trong dự án: nhiều cửa sổ serial
-///               monitor không dựng nổi UTF-8 và biến chữ có dấu thành rác — mà
-///               log là thứ người ta đọc đúng lúc đang bí.
-/// Gộp làm một thì phải hy sinh một trong hai, và cả hai đều không đáng hy sinh.
+/// TWO SETS OF STRINGS FOR ONE LIST IS DELIBERATE, not a failure to merge them. The
+/// two readers are different and their rules point in opposite directions:
+///   LVGL screen -> ACCENTED Vietnamese; the ui/fonts/ cover the full range, and
+///                  every other label on the panel is accented, so an unaccented
+///                  line here would look out of place.
+///   serial      -> English, following the convention of every log in this project:
+///                  many serial monitor windows cannot render UTF-8 and turn
+///                  accented text into garbage -- and the log is what people read at
+///                  exactly the moment they are stuck.
+/// Merging them means sacrificing one of the two, and neither is worth sacrificing.
 const char *reasonAscii(Reason r) {
   switch (r) {
-    case Reason::AUTO_DRY:    return "phong kho hon nguong bat";
-    case Reason::AUTO_WET:    return "phong am hon nguong tat";
-    case Reason::DEADBAND:    return "trong vung tre - giu nguyen";
-    case Reason::DWELL_HOLD:  return "cho du thoi gian giu toi thieu";
-    case Reason::MANUAL:      return "dang ghi de bang tay";
-    case Reason::MAX_RUN:     return "chay qua lau - da cat";
-    case Reason::LOCKOUT:     return "khoa cho do nuoc";
-    case Reason::SENSOR_LOST: return "mat so do do am";
-    case Reason::NO_CODE:     return "chua hoc ma - vao app de hoc";
-    case Reason::BOOT:        return "vua khoi dong";
+    case Reason::AUTO_DRY:    return "room drier than the on threshold";
+    case Reason::AUTO_WET:    return "room wetter than the off threshold";
+    case Reason::DEADBAND:    return "inside the hysteresis band - unchanged";
+    case Reason::DWELL_HOLD:  return "waiting out the minimum hold time";
+    case Reason::MANUAL:      return "manually overridden";
+    case Reason::MAX_RUN:     return "ran too long - cut off";
+    case Reason::LOCKOUT:     return "refill lockout";
+    case Reason::SENSOR_LOST: return "lost the humidity reading";
+    case Reason::NO_CODE:     return "no code learned - use the app to learn it";
+    case Reason::BOOT:        return "just started";
   }
   return "?";
 }
 
-/// Số giây đã trôi kể từ [sinceMs]. Trừ số học CÓ DẤU để vẫn đúng khi millis()
-/// tràn ở ~49 ngày. Panel treo tường chạy liên tục nên mốc đó sẽ tới thật; dùng
-/// phép trừ không dấu thì đúng ngày thứ 49 mọi bộ đếm giờ nhảy vọt và máy bị cắt
-/// vì "chạy quá lâu" dù vừa bật.
+/// Seconds elapsed since [sinceMs]. SIGNED arithmetic so it stays correct across
+/// the millis() wrap at ~49 days. A wall-mounted panel runs continuously so that
+/// point really does arrive; with unsigned subtraction, on day 49 every timer would
+/// jump and the unit would be cut off for "running too long" seconds after being
+/// switched on.
 uint32_t elapsedSec(uint32_t sinceMs, uint32_t nowMs) {
   const int32_t d = (int32_t)(nowMs - sinceMs);
   return d > 0 ? (uint32_t)d / 1000u : 0u;
 }
 
-/// Đổi trạng thái THẬT: bắn IR trước, chỉ ghi nhận khi bắn được.
+/// Change the REAL state: transmit IR first, only record it if the transmission
+/// worked.
 void applyState(bool want, Reason why, uint32_t nowMs) {
   if (g_emit == nullptr) return;
 
-  // Mốc THỬ, ghi trước khi biết kết quả: nó là thứ chặn vòng thử-lại khi chưa
-  // học mã. KHÔNG dùng g_lastSwitchMs cho việc đó nữa — dwell nay chỉ chặn
-  // chiều tắt, nên nạp nó ở đây sẽ vừa không chặn được log spam chiều bật, vừa
-  // âm thầm dời mốc dwell của chiều tắt vì một lần bắn trượt.
+  // The ATTEMPT timestamp, written before we know the result: it is what throttles
+  // the retry loop when no code has been learned. Do NOT use g_lastSwitchMs for
+  // that any more -- the dwell now only blocks the off direction, so loading it here
+  // would both fail to throttle the on-direction log spam and silently push out the
+  // off-direction dwell deadline because of one failed transmission.
   g_lastTryMs = nowMs;
 
   if (!g_emit(want)) {
-    // Không bắn được (chưa học mã). KHÔNG đổi g_on — máy thật có đổi gì đâu.
+    // Could not transmit (no code learned). Do NOT change g_on -- the real unit did
+    // not change either.
     g_reason = Reason::NO_CODE;
     return;
   }
@@ -101,36 +110,38 @@ void applyState(bool want, Reason why, uint32_t nowMs) {
   if (want) g_onSinceMs = nowMs;
   rememberOn(want);
 
-  Serial.printf("[am] %s may tao am - %s\n", want ? "BAT" : "TAT", reasonAscii(why));
+  Serial.printf("[humid] %s the humidifier - %s\n", want ? "ON" : "OFF", reasonAscii(why));
 }
 
-/// Một lượt quyết định. Tách khỏi tick() để tick() chỉ còn lo nhịp và EMA.
+/// One decision round. Split out of tick() so that tick() only deals with the
+/// cadence and the EMA.
 void decide(uint32_t nowMs) {
-  // --- 1) Chạy quá lâu: CẮT, đè lên cả ghi đè tay ---------------------------
-  // Trên cùng vì đây là nhánh bảo vệ phần cứng. Để nó dưới nhánh ghi đè thì một
-  // lần bấm tay có thể giữ máy chạy vô hạn — mà "bấm tay rồi quên" chính là ca
-  // MAX_RUN sinh ra để chặn.
+  // --- 1) Running too long: CUT, overriding even a manual override -----------
+  // At the top because this is the hardware-protection branch. Putting it below the
+  // override branch would let a single button press keep the unit running
+  // indefinitely -- and "pressed the button and forgot" is precisely the case
+  // MAX_RUN exists to catch.
   if (g_on && elapsedSec(g_onSinceMs, nowMs) >= MAX_RUN_SEC) {
     g_override = false;
     applyState(false, Reason::MAX_RUN, nowMs);
     g_lockout = true;
     g_lockoutStartMs = nowMs;
-    Serial.println("[am] chay lien tuc qua lau -> cat va khoa. DI XEM BINH NUOC.");
+    Serial.println("[humid] ran continuously for too long -> cut off and locked out. GO CHECK THE TANK.");
     return;
   }
 
-  // --- 2) Ghi đè tay --------------------------------------------------------
+  // --- 2) Manual override ---------------------------------------------------
   if (g_override) {
     if (elapsedSec(g_overrideStartMs, nowMs) >= OVERRIDE_HOLD_SEC) {
       g_override = false;
-      Serial.println("[am] het han GHI DE -> tro ve TU DONG");
+      Serial.println("[humid] OVERRIDE expired -> back to AUTO");
     } else {
       g_reason = Reason::MANUAL;
       return;
     }
   }
 
-  // --- 3) Mất số đo: CẮT ----------------------------------------------------
+  // --- 3) No reading: CUT ---------------------------------------------------
   const bool sensorOk =
       !isnan(g_rh) && g_lastGoodMs != 0 &&
       elapsedSec(g_lastGoodMs, nowMs) < SENSOR_STALE_SEC;
@@ -140,7 +151,7 @@ void decide(uint32_t nowMs) {
     return;
   }
 
-  // --- 4) Khoá chờ đổ nước --------------------------------------------------
+  // --- 4) Refill lockout ----------------------------------------------------
   if (g_lockout) {
     if (elapsedSec(g_lockoutStartMs, nowMs) < REFILL_LOCKOUT_SEC) {
       if (g_on) applyState(false, Reason::LOCKOUT, nowMs);
@@ -148,10 +159,10 @@ void decide(uint32_t nowMs) {
       return;
     }
     g_lockout = false;
-    Serial.println("[am] het khoa do nuoc -> tu dong tro lai");
+    Serial.println("[humid] refill lockout over -> automatic again");
   }
 
-  // --- 5) Trễ (deadband) ----------------------------------------------------
+  // --- 5) Hysteresis (deadband) ---------------------------------------------
   bool   want = g_on;
   Reason why  = Reason::DEADBAND;
   if (g_rh < ON_BELOW_RH) {
@@ -167,17 +178,19 @@ void decide(uint32_t nowMs) {
     return;
   }
 
-  // --- 6) Dwell — CHỈ CHẶN CHIỀU TẮT ----------------------------------------
-  //  Bật thì đi ngay. Lý do bất đối xứng ghi đầy đủ ở DWELL_SEC trong .h; tóm
-  //  tắt: bật muộn thì phòng cứ khô và người ở cảm nhận được, còn tắt muộn thì
-  //  chỉ phun thừa vài phút. Deadband 15 điểm mới là lớp chặn dao động, nên bỏ
-  //  dwell chiều bật không mở đường cho bật/tắt liên tục.
+  // --- 6) Dwell -- BLOCKS THE OFF DIRECTION ONLY ----------------------------
+  //  Turning on happens immediately. The asymmetry is explained in full at
+  //  DWELL_SEC in the .h; in short: turning on late leaves the room dry and the
+  //  occupant notices, while turning off late only sprays for a few extra minutes.
+  //  The 15-point deadband is the oscillation guard, so dropping the dwell on the
+  //  on direction opens no path to rapid cycling.
   if (!want && elapsedSec(g_lastSwitchMs, nowMs) < DWELL_SEC) {
     g_reason = Reason::DWELL_HOLD;
     return;
   }
 
-  // Chưa học mã thì đừng thử mỗi nhịp 5 giây — xem NO_CODE_RETRY_SEC.
+  // With no code learned, do not retry on every 5-second tick -- see
+  // NO_CODE_RETRY_SEC.
   if (g_reason == Reason::NO_CODE &&
       elapsedSec(g_lastTryMs, nowMs) < NO_CODE_RETRY_SEC) {
     return;
@@ -192,33 +205,36 @@ void begin(Emitter emit) {
   g_emit = emit;
 
   g_nvsReady = g_nvs.begin(NVS_NS, false /*read-write*/);
-  // Nạp lại niềm tin. KHÔNG bắn IR ở đây: ta không biết máy thật đang thế nào,
-  // và bắn một phát "cho chắc" với remote bập bênh là đảo đúng cái trạng thái
-  // mình vừa khôi phục.
+  // Reload the belief. Do NOT transmit IR here: we do not know the real unit's
+  // state, and transmitting once "to be sure" with a toggle remote inverts the very
+  // state we just restored.
   g_on = g_nvsReady && g_nvs.getBool(NVS_KEY, false);
   g_reason = Reason::BOOT;
 
   const uint32_t now = millis();
-  // Mốc dwell nạp từ lúc boot. GIỜ CHỈ CÒN CHẶN CHIỀU TẮT, nên nó không còn khoá
-  // cứng 5 phút đầu như trước: phòng đang khô thì panel bật máy ngay ở nhịp
-  // quyết định đầu tiên. Đó chính là lỗi "đáp ứng chậm" đã được báo.
+  // The dwell deadline starts at boot. IT NOW ONLY BLOCKS THE OFF DIRECTION, so it
+  // no longer hard-locks the first 5 minutes as it used to: if the room is dry the
+  // panel switches the unit on at the very first decision tick. That was exactly
+  // the "slow response" bug that was reported.
   g_lastSwitchMs = now;
   g_lastTryMs    = now;
-  // Tính giờ chạy từ lúc boot, không từ lúc bật thật — ta không biết lúc đó, và
-  // ước lượng THẤP hơn thực tế sẽ làm MAX_RUN cắt muộn. Đếm lại từ 0 chỉ sai
-  // theo chiều an toàn (cắt muộn hơn) khi panel vừa mất điện cùng máy; chấp nhận
-  // được vì MAX_RUN là lưới thứ hai, không phải cơ chế chính.
+  // Count the runtime from boot rather than from the real switch-on -- we do not
+  // know when that was, and UNDER-estimating it would make MAX_RUN cut off late.
+  // Restarting from 0 only errs in the safe direction (cutting off later) when the
+  // panel lost power together with the unit; acceptable, because MAX_RUN is the
+  // second safety net, not the primary mechanism.
   g_onSinceMs = now;
 
-  Serial.printf("[am] khoi dong, tin rang may tao am dang %s%s\n",
-                g_on ? "CHAY" : "TAT",
-                g_nvsReady ? "" : " (NVS loi — niem tin khong giu qua mat dien)");
+  Serial.printf("[humid] started, believing the humidifier is %s%s\n",
+                g_on ? "RUNNING" : "OFF",
+                g_nvsReady ? "" : " (NVS error - the belief will not survive a power cut)");
 }
 
 void tick(float rhRaw, uint32_t nowMs) {
-  // EMA CHỈ CHẠY TRÊN SỐ HỢP LỆ. Trộn NaN vào là g_rh thành NaN vĩnh viễn —
-  // một góc rụng nửa giây cũng đủ để giết luôn đường lọc, và triệu chứng là máy
-  // tắt hẳn với lý do SENSOR_LOST trong khi ba góc kia vẫn báo số đều đặn.
+  // THE EMA ONLY RUNS ON VALID NUMBERS. Mixing in a NaN makes g_rh permanently NaN --
+  // one corner dropping out for half a second would be enough to kill the filter for
+  // good, and the symptom would be the unit shutting down with reason SENSOR_LOST
+  // while the other three corners keep reporting perfectly normal numbers.
   if (!isnan(rhRaw)) {
     g_rh = isnan(g_rh) ? rhRaw : (EMA_ALPHA * rhRaw + (1.0f - EMA_ALPHA) * g_rh);
     g_lastGoodMs = nowMs;
@@ -228,34 +244,36 @@ void tick(float rhRaw, uint32_t nowMs) {
 }
 
 void manualSet(bool on, uint32_t nowMs) {
-  // Bấm tay dọn luôn khoá đổ nước: ca dùng chính của nút này chính là "vừa đổ
-  // nước xong, chạy lại đi".
+  // A manual press also clears the refill lockout: the main use case for this
+  // button is precisely "I have just refilled it, run again".
   g_lockout = false;
   g_override = true;
   g_overrideStartMs = nowMs;
 
   if (on == g_on) {
-    // Trạng thái đã đúng ý rồi — vẫn vào GHI ĐÈ (để giữ nó khỏi bị tự động đổi)
-    // nhưng KHÔNG bắn IR. Bắn thừa một phát với remote bập bênh là đảo ngược
-    // đúng cái vừa được yêu cầu.
+    // The state is already what was asked for -- still enter OVERRIDE (to stop
+    // automation changing it) but do NOT transmit IR. One redundant transmission
+    // with a toggle remote inverts exactly what was just requested.
     g_reason = Reason::MANUAL;
-    Serial.printf("[am] GHI DE: giu nguyen %s\n", on ? "BAT" : "TAT");
+    Serial.printf("[humid] OVERRIDE: holding %s\n", on ? "ON" : "OFF");
     return;
   }
   applyState(on, Reason::MANUAL, nowMs);
-  // applyState() có thể rơi vào nhánh NO_CODE và đặt lý do khác. Chỉ ghi đè lý
-  // do khi nó đã đổi được thật — nếu không, màn sẽ nói "người dùng đang GHI ĐÈ"
-  // trong khi thứ người dùng cần đọc là "CHƯA HỌC MÃ".
+  // applyState() may fall into the NO_CODE branch and set a different reason. Only
+  // overwrite the reason once the state really did change -- otherwise the screen
+  // says "the user is OVERRIDING" when what the user needs to read is "NO CODE
+  // LEARNED".
   if (g_on == on) g_reason = Reason::MANUAL;
 }
 
 void backToAuto(uint32_t nowMs) {
   g_override = false;
-  // KHÔNG đặt lại về BOOT: lượt quyết định kế tiếp (trong vòng TICK_MS) sẽ điền
-  // lý do thật. Đặt BOOT ở đây làm màn hiện "vừa khởi động" cho một panel đã
-  // chạy nhiều ngày — một câu sai, dù chỉ sai trong 5 giây.
+  // Do NOT reset to BOOT: the next decision round (within TICK_MS) will fill in the
+  // real reason. Setting BOOT here makes the screen say "just started" on a panel
+  // that has been running for days -- a false statement, even if only false for 5
+  // seconds.
   decide(nowMs);
-  Serial.println("[am] tro ve TU DONG");
+  Serial.println("[humid] back to AUTO");
 }
 
 Status status(uint32_t nowMs) {

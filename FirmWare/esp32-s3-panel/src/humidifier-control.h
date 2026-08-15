@@ -2,186 +2,208 @@
 #include <Arduino.h>
 
 // ============================================================================
-//  Máy tạo độ ẩm: quyết định BẬT / TẮT, chạy ngay trên panel.
+//  Humidifier: the ON / OFF decision, running directly on the panel.
 // ----------------------------------------------------------------------------
-//  NGUỒN GỐC: bản port của bo thử `esp32-humidity` (đã gỡ khỏi repo ở lần dọn
-//  15/08/2026 — bo đó chỉ dùng để thử logic trước khi nạp lên bo thật, và giờ
-//  bản chạy thật là chính file này). Muốn xem bản gốc thì:
+//  ORIGIN: a port of the `esp32-humidity` test board (removed from the repo in the
+//  2026-08-15 cleanup -- that board only existed to prove the logic before it went
+//  onto real hardware, and the production version is now this very file). To look
+//  at the original:
 //      git log --diff-filter=D -- FirmWare/esp32-humidity/src/diffuser-control.cpp
 //
-//  Giữ nguyên sáu nhánh ưu tiên, ba lớp chống dao động, và nguyên tắc "nghi ngờ
-//  thì TẮT". BA CHỖ ĐÃ ĐỔI so với bản gốc, cả ba do panel có thứ bo kia không có:
+//  The six priority branches, three layers of oscillation control, and the "when in
+//  doubt, turn it OFF" principle are unchanged. THREE THINGS DIFFER from the
+//  original, all three because the panel has something the test board did not:
 //
-//   1. ĐỘ ẨM LÀ TRUNG VỊ BỐN GÓC PHÒNG, không phải một con DHT gắn trên bo.
-//      Bo thử đo bằng cảm biến của chính nó nên phải tắt WiFi để khỏi tự sinh
-//      nhiệt làm sai số đo. Panel không có cảm biến nào cả — số vào đây do
-//      RoomRegistry::median() dựng từ các node góc phòng, cách xa panel — nên
-//      ràng buộc đó biến mất.
+//   1. HUMIDITY IS THE MEDIAN OF FOUR ROOM CORNERS, not a DHT mounted on the board.
+//      The test board measured with its own sensor, so it had to disable WiFi to
+//      avoid its own self-heating skewing the reading. The panel has no sensor at
+//      all -- the number arriving here is built by RoomRegistry::median() from the
+//      corner nodes, far away from the panel -- so that constraint disappears.
 //
-//   2. MÃ IR HỌC TỪ APP, nằm trong kho chung của panel dưới hai bí danh
-//      "HUMID_ON" / "HUMID_OFF" (xem ir_action_service.KNOWN_ACTIONS). Không có
-//      kho hai-ô riêng nữa.
+//   2. THE IR CODES ARE LEARNED FROM THE APP and live in the panel's shared store
+//      under the two aliases "HUMID_ON" / "HUMID_OFF" (see
+//      ir_action_service.KNOWN_ACTIONS). There is no separate two-slot store any
+//      more.
 //
-//   3. REMOTE BẬP BÊNH TỰ NHẬN RA, không còn cờ biên dịch DIFFUSER_IR_TOGGLE.
-//      Hộ nào remote chỉ có một nút nguồn thì học cùng một khung vào cả hai ô,
-//      hoặc chỉ học ô BẬT — Emitter bên main.cpp lo phần đó. Module này không
-//      cần biết, và đó là điểm đáng giá: một cờ biên dịch đặt sai chỉ lộ ra
-//      ngoài hiện trường, còn ở đây thì "chưa học ô TẮT" là một trạng thái đọc
-//      được ngay trên màn.
+//   3. A TOGGLE REMOTE IS DETECTED AUTOMATICALLY, with no DIFFUSER_IR_TOGGLE
+//      compile flag. A household whose remote has only one power button can learn
+//      the same frame into both slots, or learn only the ON slot -- the Emitter over
+//      in main.cpp handles that. This module does not need to know, and that is the
+//      valuable part: a misconfigured compile flag only reveals itself out in the
+//      field, whereas here "the OFF slot has not been learned" is a state you can
+//      read straight off the screen.
 //
-//  THỨ TỰ ƯU TIÊN (trên đè dưới) — phần dễ viết sai nhất, giữ nguyên bản gốc:
-//     1. Chạy quá lâu      -> CẮT, và cắt cả ghi đè tay
-//     2. Ghi đè tay        -> giữ nguyên ý người dùng
-//     3. Mất số đo         -> CẮT
-//     4. Đang khoá đổ nước -> giữ TẮT
-//     5. Trễ (deadband)    -> muốn gì
-//     6. Dwell             -> có được đổi bây giờ không — CHỈ CHẶN CHIỀU TẮT,
-//                             xem DWELL_SEC cho lý do bất đối xứng
+//  PRIORITY ORDER (upper overrides lower) -- the easiest part to get wrong, kept
+//  identical to the original:
+//     1. Running too long   -> CUT, overriding even a manual override
+//     2. Manual override    -> respect the user's intent
+//     3. No reading         -> CUT
+//     4. Refill lockout     -> stay OFF
+//     5. Hysteresis (deadband) -> whatever it wants
+//     6. Dwell              -> may it change right now -- BLOCKS THE OFF DIRECTION
+//                              ONLY, see DWELL_SEC for the asymmetry
 // ============================================================================
 namespace HumidifierControl {
 
-// --- Ngưỡng và thời gian ------------------------------------------------------
-//  Chép nguyên số (kể cả lý do) từ bo thử trước khi nó bị gỡ khỏi repo. Đây là
-//  bản duy nhất còn lại, nên sửa ở đây là sửa cho cả sản phẩm — không còn bản
-//  thứ hai để mà lệch.
+// --- Thresholds and timings ---------------------------------------------------
+//  The numbers (and their reasoning) were copied verbatim from the test board
+//  before it was removed from the repo. This is the only remaining copy, so
+//  changing it here changes it for the product -- there is no second copy left to
+//  drift from.
 //
-//  KHÔNG ĐƯA VÀO config.h: file đó bị gitignore vì chứa mật khẩu, nên mọi giá
-//  trị mặc định đặt trong đó sẽ biến mất khỏi repo và người tiếp theo không biết
-//  lấy số ở đâu ra.
+//  NOT PUT IN config.h: that file is gitignored because it holds passwords, so any
+//  default placed there would vanish from the repo and the next person would have
+//  no idea where the numbers came from.
 
-/// Khô hơn mức này thì BẬT (%RH).
+/// Drier than this and it turns ON (%RH).
 constexpr float ON_BELOW_RH = 45.0f;
 
-/// Ẩm hơn mức này thì TẮT (%RH). Ở giữa: giữ nguyên.
+/// Wetter than this and it turns OFF (%RH). In between: no change.
 ///
-/// = HUMID_LOW_KNEE của src/app/comfort/setpoint_calculator.py. Neo vào đó có
-/// chủ đích: máy tạo ẩm KHÔNG BAO GIỜ được đẩy phòng vượt qua mốc mà chính
-/// thuật toán comfort bắt đầu coi là khó chịu — nếu không thì hai bộ điều khiển
-/// trong một căn nhà đang đánh nhau, và người ở chỉ thấy "sao thấy bí bí".
+/// = HUMID_LOW_KNEE from src/app/comfort/setpoint_calculator.py. Anchoring to it
+/// is deliberate: the humidifier must NEVER push the room past the point where the
+/// comfort algorithm itself starts treating it as uncomfortable -- otherwise two
+/// controllers in one house are fighting each other, and the occupant only notices
+/// that "it feels a bit stuffy".
 constexpr float OFF_ABOVE_RH = 60.0f;
 
-/// Nhịp gọi update() (ms). EMA_ALPHA dưới đây tính theo đúng nhịp này.
+/// The update() call interval (ms). EMA_ALPHA below is calibrated to exactly this
+/// interval.
 constexpr uint32_t TICK_MS = 5000UL;
 
-/// Làm mượt đầu vào. 0.5 ở nhịp 5 giây -> hằng số thời gian ~7 giây.
+/// Input smoothing. 0.5 at a 5-second interval -> a time constant of ~7 seconds.
 ///
-/// NÂNG TỪ 0.2 (τ ~22 giây) VÌ MÁY BẬT QUÁ CHẬM sau khi phòng khô. Với bước
-/// 50%->40%, ngưỡng 45 nằm đúng giữa nên số đã lọc cần `ln0.5/ln(1-α)` nhịp để
-/// cắt qua: ở 0.2 là ~16 giây, ở 0.5 là **một nhịp = 5 giây**.
+/// RAISED FROM 0.2 (tau ~22 seconds) BECAUSE THE UNIT TURNED ON TOO SLOWLY after
+/// the room dried out. For a 50%->40% step, the threshold of 45 sits exactly in the
+/// middle, so the filtered value needs `ln0.5/ln(1-alpha)` ticks to cross it: at 0.2
+/// that is ~16 seconds, at 0.5 it is **one tick = 5 seconds**.
 ///
-/// AN TOÀN VÌ ĐẦU VÀO ĐÃ ĐƯỢC LỌC MỘT LẦN RỒI: số vào đây là TRUNG VỊ bốn góc
-/// phòng, tức đã khử nhiễu theo KHÔNG GIAN. EMA chỉ còn phải khử nhiễu theo THỜI
-/// GIAN của chính con trung vị đó, và một con trung vị thì khó nhảy đột ngột.
-/// Lớp chống dao động thật sự vẫn là DEADBAND 15 điểm ở §2, không phải EMA.
+/// SAFE BECAUSE THE INPUT HAS ALREADY BEEN FILTERED ONCE: the number arriving here
+/// is the MEDIAN of four room corners, i.e. already denoised SPATIALLY. The EMA
+/// only has to denoise that median TEMPORALLY, and a median does not jump
+/// abruptly. The real oscillation guard is still the 15-point DEADBAND in §2, not
+/// the EMA.
 constexpr float EMA_ALPHA = 0.5f;
 
-/// Tối thiểu bao lâu giữ trạng thái trước khi được TẮT (giây).
+/// Minimum time to hold a state before it may be turned OFF (seconds).
 ///
-/// CHỈ ÁP CHO CHIỀU TẮT — bật thì đi ngay, không chờ. Bất đối xứng có chủ đích,
-/// cùng khuôn với "giành lái chậm, nhả lái nhanh" của lớp edge AI:
+/// APPLIES ONLY TO THE OFF DIRECTION -- turning on happens immediately, with no
+/// wait. The asymmetry is deliberate, the same pattern as the edge AI layer's
+/// "take control slowly, release control quickly":
 ///
-///   BẬT MUỘN  -> phòng cứ khô, người ở cảm nhận được ngay. Đây đúng là lỗi
-///                đã bị báo: dwell 300 giây chặn cả lần bật đầu tiên.
-///   TẮT MUỘN  -> máy phun thêm vài phút. Gần như vô hại.
+///   LATE ON   -> the room stays dry and the occupant notices at once. This was the
+///                actual reported bug: a 300-second dwell blocked even the first
+///                switch-on.
+///   LATE OFF  -> the unit sprays for a few more minutes. Almost harmless.
 ///
-/// Và lý do gốc của dwell chỉ đúng cho chiều TẮT: "hơi nước cần vài phút mới lan
-/// tới cảm biến" là chuyện xảy ra SAU KHI ĐÃ BẬT — nó ngăn ta vội kết luận lệnh
-/// vừa rồi không có tác dụng. Nó không nói gì về việc có nên bật hay không khi
-/// phòng đang khô thật.
+/// And the dwell's original justification only holds for the OFF direction: "water
+/// vapour needs a few minutes to reach the sensor" is something that happens AFTER
+/// SWITCHING ON -- it stops us concluding too early that the last command had no
+/// effect. It says nothing about whether to switch on when the room really is dry.
 ///
-/// KHÔNG SỢ DAO ĐỘNG khi bỏ dwell chiều bật: đã bật rồi thì phải vượt 60%RH mới
-/// tắt (deadband 15 điểm), nên không có đường nào để bật/tắt liên tục.
+/// NO RISK OF OSCILLATION from dropping the dwell on the on direction: once on, it
+/// has to exceed 60%RH to switch off (a 15-point deadband), so there is no path to
+/// rapid cycling.
 constexpr uint32_t DWELL_SEC = 300UL;
 
-/// Chưa học mã IR thì thử lại mỗi bấy nhiêu giây (giây).
+/// If no IR code has been learned, retry this often (seconds).
 ///
-/// Tách khỏi DWELL_SEC vì dwell nay không còn chặn chiều bật: không có bộ đếm
-/// riêng thì mỗi nhịp 5 giây lại thử bắn một lần và log phun ra liên tục cho tới
-/// khi có người vào app học mã.
+/// Separate from DWELL_SEC because the dwell no longer blocks the on direction:
+/// without its own counter, every 5-second tick would attempt a transmission and
+/// the log would spew continuously until somebody went into the app and learned the
+/// code.
 constexpr uint32_t NO_CODE_RETRY_SEC = 300UL;
 
-/// Chạy liên tục quá lâu thì cắt (giây). Phòng quá khô hoặc cửa mở suốt thì
-/// vòng lặp không bao giờ đạt ngưỡng tắt, và máy chạy tới cạn bình.
+/// Cut off after running continuously for this long (seconds). In a very dry room,
+/// or with a door left open, the loop never reaches the off threshold and the unit
+/// runs until the tank is empty.
 constexpr uint32_t MAX_RUN_SEC = 4UL * 3600UL;
 
-/// Khoá sau lần cắt trên (giây). BỎ ĐI LÀ MẤT LUÔN TÁC DỤNG CỦA MAX_RUN_SEC:
-/// cắt xong mà không khoá thì vòng kế tiếp vẫn thấy phòng khô và bật lại ngay.
+/// Lockout after the cut-off above (seconds). REMOVING IT DEFEATS MAX_RUN_SEC
+/// ENTIRELY: cut without locking out and the next cycle still sees a dry room and
+/// switches straight back on.
 constexpr uint32_t REFILL_LOCKOUT_SEC = 30UL * 60UL;
 
-/// Mất số đo lâu hơn mức này thì cắt (giây). Chạy mù tệ hơn không chạy.
+/// Cut off after losing readings for longer than this (seconds). Running blind is
+/// worse than not running.
 constexpr uint32_t SENSOR_STALE_SEC = 120UL;
 
-/// Ghi đè tay tự hết hạn sau bấy lâu (giây). Cùng ngữ nghĩa TỰ ĐỘNG/GHI ĐÈ của
-/// máy lạnh: người dùng luôn thắng máy, nhưng KHÔNG thắng vĩnh viễn — một lần
-/// bấm giữ mãi thì ba tháng sau không ai nhớ vì sao máy thôi tự chạy.
+/// A manual override expires by itself after this long (seconds). The same
+/// AUTO/OVERRIDE semantics as the air conditioner: the user always beats the
+/// machine, but NOT permanently -- an override held forever means that three months
+/// later nobody remembers why the unit stopped running by itself.
 constexpr uint32_t OVERRIDE_HOLD_SEC = 2UL * 3600UL;
 
 static_assert(OFF_ABOVE_RH > ON_BELOW_RH,
-              "Nguong TAT phai LON HON nguong BAT — bang nhau la mat hoan toan "
-              "vung tre, may se bat/tat lien tuc quanh diem cat.");
+              "The OFF threshold must be GREATER THAN the ON threshold - equal values remove "
+              "the hysteresis band entirely and the unit will cycle around the switching point.");
 static_assert(DWELL_SEC * 1000UL > TICK_MS,
-              "DWELL_SEC phai dai hon mot nhip, khong thi dwell vo tac dung.");
-static_assert(MAX_RUN_SEC > DWELL_SEC, "MAX_RUN_SEC phai dai hon DWELL_SEC.");
+              "DWELL_SEC must be longer than one tick, otherwise the dwell does nothing.");
+static_assert(MAX_RUN_SEC > DWELL_SEC, "MAX_RUN_SEC must be longer than DWELL_SEC.");
 
-/// Vì sao trạng thái hiện tại lại như vậy. Có mặt để màn trả lời được câu "sao
-/// máy không chạy?" bằng MỘT dòng — không có nó thì người dùng phải tự suy từ
-/// mấy con số rời rạc, và họ sẽ suy sai.
+/// Why the current state is what it is. It exists so the screen can answer "why is
+/// the unit not running?" in ONE line -- without it the user has to infer it from a
+/// handful of disconnected numbers, and they will infer it wrongly.
 enum class Reason : uint8_t {
-  BOOT,         ///< vừa khởi động, chưa quyết định lần nào
-  AUTO_DRY,     ///< tự động: phòng khô hơn ngưỡng BẬT
-  AUTO_WET,     ///< tự động: phòng ẩm hơn ngưỡng TẮT
-  DEADBAND,     ///< nằm giữa hai ngưỡng — giữ nguyên, đúng như thiết kế
-  DWELL_HOLD,   ///< muốn đổi rồi nhưng chưa đủ thời gian giữ tối thiểu
-  MANUAL,       ///< người dùng đang ghi đè
-  MAX_RUN,      ///< bị cắt vì chạy liên tục quá lâu
-  LOCKOUT,      ///< đang khoá chờ đổ nước sau lần cắt trên
-  SENSOR_LOST,  ///< mất số đo quá lâu
-  NO_CODE,      ///< muốn đổi nhưng CHƯA HỌC MÃ IR cho việc đó
+  BOOT,         ///< just started, no decision made yet
+  AUTO_DRY,     ///< automatic: the room is drier than the ON threshold
+  AUTO_WET,     ///< automatic: the room is wetter than the OFF threshold
+  DEADBAND,     ///< between the two thresholds -- unchanged, exactly as designed
+  DWELL_HOLD,   ///< it wants to change but the minimum hold time has not elapsed
+  MANUAL,       ///< the user is overriding
+  MAX_RUN,      ///< cut off for running continuously too long
+  LOCKOUT,      ///< in the refill lockout following the cut-off above
+  SENSOR_LOST,  ///< no readings for too long
+  NO_CODE,      ///< it wants to change but NO IR CODE has been learned for it
 };
 
 struct Status {
-  bool     on;                ///< niềm tin: máy đang chạy?
-  bool     overriding;        ///< đang ở chế độ GHI ĐÈ tay?
+  bool     on;                ///< our belief: is the unit running?
+  bool     overriding;        ///< currently in manual OVERRIDE?
   Reason   reason;
-  float    rh;                ///< độ ẩm ĐÃ LÀM MƯỢT, NAN khi chưa có số đo
-  uint32_t stateAgeSec;       ///< giữ trạng thái hiện tại bao lâu rồi
-  uint32_t overrideLeftSec;   ///< còn bao lâu tự về TỰ ĐỘNG (0 = không ghi đè)
-  uint32_t lockoutLeftSec;    ///< còn bao lâu hết khoá đổ nước (0 = không khoá)
-  uint32_t dwellLeftSec;      ///< còn bao lâu mới ĐƯỢC PHÉP đổi (0 = đổi được ngay)
+  float    rh;                ///< the SMOOTHED humidity, NAN when there is no reading
+  uint32_t stateAgeSec;       ///< how long the current state has been held
+  uint32_t overrideLeftSec;   ///< how long until it returns to AUTO (0 = not overriding)
+  uint32_t lockoutLeftSec;    ///< how long until the refill lockout ends (0 = not locked)
+  uint32_t dwellLeftSec;      ///< how long until a change is ALLOWED (0 = can change now)
 };
 
-/// Bên gọi cung cấp cách bắn IR.
+/// The caller supplies the way to transmit IR.
 ///
-/// TRẢ FALSE KHI KHÔNG BẮN ĐƯỢC (chưa học mã). Bộ điều khiển sẽ KHÔNG đổi niềm
-/// tin trạng thái trong ca đó — vì máy thật có đổi gì đâu. Đây là chỗ rất dễ
-/// viết sai: coi như đã đổi rồi thì panel tin máy đang chạy, sẽ không thử bật
-/// lại nữa, và phòng cứ khô mãi trong khi log nói "da bat".
+/// RETURN FALSE WHEN IT CANNOT TRANSMIT (no code learned). The controller will then
+/// NOT update its belief about the state -- because the real unit did not change
+/// either. This is a very easy thing to get wrong: treating it as changed makes the
+/// panel believe the unit is running, so it never retries, and the room stays dry
+/// while the log says "turned on".
 typedef bool (*Emitter)(bool on);
 
-/// Gọi một lần trong setup(), SAU IrStore::begin().
+/// Call once in setup(), AFTER IrStore::begin().
 void begin(Emitter emit);
 
-/// Một lượt đo + quyết định. [rhRaw] là độ ẩm THÔ (trung vị các góc); NAN = chưa
-/// có số đo.
+/// One measure-and-decide round. [rhRaw] is the RAW humidity (the median of the
+/// corners); NAN = no reading yet.
 ///
-/// PHẢI GỌI ĐÚNG NHỊP TICK_MS — hàm này CỐ Ý không tự chặn nhịp. EMA_ALPHA gắn
-/// chặt với nhịp gọi (0.2 ở 5 giây = hằng số thời gian ~25 giây), nên tự chặn
-/// bên trong sẽ che mất chuyện người gọi đang gọi sai nhịp: bộ lọc lặng lẽ đổi
-/// hằng số thời gian mà không có triệu chứng nào. Để người gọi giữ nhịp thì cái
-/// nhịp đó nằm ngay chỗ đọc được trong loop().
+/// IT MUST BE CALLED AT EXACTLY TICK_MS -- this function DELIBERATELY does not rate
+/// limit itself. EMA_ALPHA is tightly coupled to the call interval (0.2 at 5 seconds
+/// = a time constant of ~25 seconds), so rate limiting internally would hide the
+/// fact that the caller is calling at the wrong rate: the filter would silently
+/// change its time constant with no symptom at all. Leaving the caller to keep the
+/// interval puts that interval somewhere visible, right there in loop().
 void tick(float rhRaw, uint32_t nowMs);
 
-/// Bật/tắt bằng tay — vào GHI ĐÈ, tự hết hạn sau OVERRIDE_HOLD_SEC.
-/// CÓ dọn luôn khoá đổ nước: "vừa đổ nước xong, chạy lại đi" là ca dùng chính.
+/// Manual on/off -- enters OVERRIDE, expiring by itself after OVERRIDE_HOLD_SEC.
+/// It ALSO clears the refill lockout: "I have just refilled it, run again" is the
+/// main use case.
 void manualSet(bool on, uint32_t nowMs);
 
-/// Thoát GHI ĐÈ, trả về TỰ ĐỘNG ngay lập tức.
+/// Leave OVERRIDE and return to AUTO immediately.
 void backToAuto(uint32_t nowMs);
 
 Status status(uint32_t nowMs);
 
-/// Câu mô tả ngắn của [r] — tiếng Việt CÓ DẤU (hiện lên màn LVGL, font ui/fonts
-/// có đủ dải). Log serial thì dùng reasonAscii() — xem chú thích ở .cpp.
+/// A short description of [r] -- ACCENTED Vietnamese (it appears on the LVGL
+/// screen, and the ui/fonts cover the full range). The serial log uses
+/// reasonAscii() instead -- see the note in the .cpp.
 const char *reasonText(Reason r);
 
 }  // namespace HumidifierControl

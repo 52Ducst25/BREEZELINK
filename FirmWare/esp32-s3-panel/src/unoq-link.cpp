@@ -2,8 +2,9 @@
 
 #include <string.h>
 
-// Chân UART tới UNO Q. Khai trong platformio.ini vì chúng khác nhau giữa bo QR
-// Box (ESP32 classic) và bo ESP32-S3 — cùng chỗ với các cờ chân khác.
+// The UART pins to the UNO Q. Declared in platformio.ini because they differ
+// between the QR Box board (classic ESP32) and the ESP32-S3 board -- alongside the
+// other pin flags.
 #ifndef UNOQ_TX_PIN
 #define UNOQ_TX_PIN 17
 #endif
@@ -11,16 +12,18 @@
 #define UNOQ_RX_PIN 18
 #endif
 
-// 115200 là dư: ảnh chụp 39 byte mỗi 5 giây = 62 byte/giây. Không nâng lên cao
-// hơn — dây đi giữa hai bo có thể dài vài chục cm không bọc giáp, và tốc độ cao
-// đổi lấy tỉ lệ lỗi bit chứ không đổi lấy gì cả ở lưu lượng này.
+// 115200 is more than enough: a 39-byte snapshot every 5 seconds = 62 bytes/second.
+// Do not raise it -- the wire between the two boards can be tens of centimetres of
+// unshielded cable, and a higher rate trades bit error rate for nothing at all at
+// this throughput.
 #ifndef UNOQ_BAUD
 #define UNOQ_BAUD 115200
 #endif
 
-// UART1, KHÔNG PHẢI Serial (UART0). UART0 là console gỡ lỗi — dùng chung một
-// cổng cho cả log lẫn dữ liệu nhị phân thì log biến thành rác và gói biến thành
-// log. Đã có sẵn một bài học cùng loại ở IR_TX_PIN: chọn nhầm chân là hỏng câm.
+// UART1, NOT Serial (UART0). UART0 is the debug console -- sharing one port for both
+// the log and binary data turns the log into garbage and the packets into log. There
+// is already a lesson of the same kind at IR_TX_PIN: picking the wrong pin fails
+// silently.
 #define UNOQ_SERIAL Serial1
 
 namespace UnoQLink {
@@ -34,22 +37,24 @@ uint32_t g_lastHeardMs = 0;
 uint16_t g_lastSeq = 0;
 bool     g_haveSeq = false;
 
-/// Bao lâu không nghe thấy gói hợp lệ thì coi là UNO Q đã im (ms).
+/// How long without a valid packet before the UNO Q counts as silent (ms).
 ///
-/// UNO Q gửi mỗi 30 giây (nhịp tính của nó), nên 90s cho phép rơi hai nhịp liên
-/// tiếp. Đặt sát hơn thì log nhấp nháy "đã nối/chưa nối" mà chẳng có gì hỏng —
-/// cùng cái bẫy đã gặp với SlaveWatch khi nhịp tim 15s gặp ngưỡng 20s.
+/// The UNO Q sends every 30 seconds (its own computation cadence), so 90s tolerates
+/// two consecutive misses. Setting it tighter makes the log flicker
+/// "connected/disconnected" with nothing actually wrong -- the same trap already hit
+/// with SlaveWatch when a 15s heartbeat met a 20s threshold.
 const uint32_t SILENT_AFTER_MS = 90000UL;
 
-/// Đệm gom byte cho tới khi đủ một khung lệnh.
+/// Buffer accumulating bytes until a full command frame is present.
 uint8_t g_buf[sizeof(AcUnoQCommandHeader)];
 uint8_t g_len = 0;
 
-/// Có gói vừa bóc xong chờ poll() rút.
+/// A packet has just been decoded and is waiting for poll() to collect it.
 bool     g_hasIncoming = false;
 Incoming g_incoming;
 
-/// Bóc một khung đã đủ byte. Trả false nếu không hợp lệ (bên gọi tự trượt đệm).
+/// Decode a frame once enough bytes are present. Returns false if it is invalid
+/// (the caller slides the buffer itself).
 bool decodeFrame(const uint8_t *raw) {
   AcUnoQCommandHeader hdr;
   memcpy(&hdr, raw, sizeof(hdr));
@@ -57,16 +62,18 @@ bool decodeFrame(const uint8_t *raw) {
   if (hdr.magic != AC_UNOQ_MAGIC || hdr.version != AC_UNOQ_VERSION) return false;
   if (!acUnoQCheckCommand(&hdr)) return false;
 
-  // SAI KHOÁ LÀ VỨT, KHÔNG PHẢI CẢNH BÁO RỒI VẪN LÀM. Một bo UNO Q của hộ khác
-  // (hoặc cắm nhầm dây) không được lái máy lạnh nhà này.
+  // A WRONG KEY MEANS DISCARD, not warn-and-do-it-anyway. Another household's UNO Q
+  // board (or a miswired cable) must not be allowed to drive this house's air
+  // conditioner.
   if (hdr.link_key != g_linkKey) {
-    Serial.printf("[unoq] tu choi goi sai link_key (%08X, cho %08X)\n",
+    Serial.printf("[unoq] rejected packet with wrong link_key (%08X, expected %08X)\n",
                   (unsigned)hdr.link_key, (unsigned)g_linkKey);
     return false;
   }
 
-  // Trùng seq = UNO Q gửi lại vì tưởng gói trước rơi. Thi hành hai lần là bấm
-  // remote hai lần; với nút xoay vòng thì lần hai nhảy sang nấc khác.
+  // A duplicate seq means the UNO Q resent because it thought the previous packet
+  // was lost. Executing it twice is pressing the remote twice; with a cycle button
+  // the second press steps to a different level.
   if (g_haveSeq && hdr.seq == g_lastSeq) return false;
   g_lastSeq = hdr.seq;
   g_haveSeq = true;
@@ -85,7 +92,7 @@ bool begin(const char *orgId) {
   g_linkKey = acUnoQLinkKey(orgId);
   UNOQ_SERIAL.begin(UNOQ_BAUD, SERIAL_8N1, UNOQ_RX_PIN, UNOQ_TX_PIN);
   g_started = true;
-  Serial.printf("[unoq] UART san sang · TX=GPIO%d RX=GPIO%d @%d · link_key=%08X\n",
+  Serial.printf("[unoq] UART ready - TX=GPIO%d RX=GPIO%d @%d - link_key=%08X\n",
                 UNOQ_TX_PIN, UNOQ_RX_PIN, UNOQ_BAUD, (unsigned)g_linkKey);
   return true;
 }
@@ -101,10 +108,11 @@ bool poll(Incoming &out) {
   while (UNOQ_SERIAL.available() > 0) {
     const uint8_t b = (uint8_t)UNOQ_SERIAL.read();
 
-    // ĐỒNG BỘ KHUNG BẰNG MAGIC, KHÔNG CẦN BYTE PHÂN CÁCH RIÊNG. Gói có kích
-    // thước cố định, mở đầu bằng magic và kết bằng CRC — nên chỉ cần chờ thấy
-    // magic rồi gom đủ byte, sai thì trượt một byte và tìm lại. Nhờ vậy nhiễu
-    // trên dây hay cắm dây giữa chừng đều tự phục hồi, không cần ai reset.
+    // FRAME SYNC VIA THE MAGIC BYTE, WITH NO SEPARATE DELIMITER. Packets are fixed
+    // size, start with the magic byte and end with a CRC -- so it is enough to wait
+    // for the magic, collect the full length, and on a mismatch slide one byte and
+    // resync. That way line noise or plugging the cable in mid-stream both recover
+    // by themselves, with nobody having to reset anything.
     if (g_len == 0 && b != AC_UNOQ_MAGIC) continue;
 
     g_buf[g_len++] = b;
@@ -116,9 +124,10 @@ bool poll(Incoming &out) {
       g_lastHeardMs = millis();
     } else {
       g_rejected++;
-      // Trượt MỘT byte rồi tìm magic tiếp, không xoá sạch đệm: magic thật có thể
-      // nằm ngay trong đám byte vừa gom (ví dụ nửa gói cũ dính nửa gói mới).
-      // Xoá sạch thì mất luôn khung tốt đứng ngay sau khung hỏng.
+      // Slide ONE byte and keep looking for the magic, rather than clearing the
+      // buffer: the real magic byte may be inside the bytes just collected (for
+      // example half an old packet stuck to half a new one). Clearing would also
+      // discard a good frame sitting immediately after a corrupt one.
       memmove(g_buf, g_buf + 1, sizeof(g_buf) - 1);
       g_len = sizeof(g_buf) - 1;
       while (g_len > 0 && g_buf[0] != AC_UNOQ_MAGIC) {

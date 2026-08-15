@@ -5,44 +5,49 @@
 #include "unoq-link-protocol.h"
 
 // ============================================================================
-//  Nhật ký từng gói VÀO/RA của gateway — chỉ để truy lỗi.
+//  Per-packet IN/OUT trace log for the gateway -- for debugging only.
 // ----------------------------------------------------------------------------
-//  BẬT BẰNG `-D GATEWAY_TRACE=1`. MẶC ĐỊNH TẮT, và khi tắt thì mọi hàm dưới đây
-//  là thân rỗng inline — trình biên dịch bỏ hẳn lời gọi, không tốn một byte flash
-//  nào. Nhờ vậy để lời gọi nằm sẵn trong main.cpp là vô hại.
+//  ENABLE WITH `-D GATEWAY_TRACE=1`. OFF BY DEFAULT, and when off every function
+//  below is an empty inline body -- the compiler removes the calls entirely, at a
+//  cost of zero bytes of flash. That is what makes leaving the calls in main.cpp
+//  harmless.
 //
-//  VÌ SAO KHÔNG BẬT LUÔN: bo QR Box treo tường có màn hình để nhìn, và một dòng
-//  log cho MỖI gói (5 node × 5 giây) sẽ nhấn chìm những dòng thật sự đáng đọc —
-//  `[cmd]`, `[learn]`, cảnh báo NVS đầy. Log dày làm mất log quan trọng chứ không
-//  làm nó rõ hơn.
+//  WHY NOT JUST LEAVE IT ON: the wall-mounted QR Box board has a screen to look at,
+//  and one log line per PACKET (5 nodes x 5 seconds) would drown out the lines that
+//  really matter -- `[cmd]`, `[learn]`, the NVS-full warning. A dense log destroys
+//  the important log rather than clarifying it.
 //
-//  THỨ ĐÁNG GIÁ NHẤT Ở ĐÂY LÀ CỘT `Δ`: khoảng cách thời gian tới gói TRƯỚC của
-//  ĐÚNG node đó. Node phát mỗi 5s mà Δ=15.0s nghĩa là rơi hai gói — nhìn một dòng
-//  là biết, không phải ngồi trừ dấu thời gian. Broadcast ESP-NOW không có ACK nên
-//  đây là cách duy nhất thấy được mất gói từ phía nhận.
+//  THE MOST VALUABLE THING HERE IS THE `delta` COLUMN: the time since THAT SAME
+//  node's PREVIOUS packet. A node transmitting every 5s with delta=15.0s means two
+//  lost packets -- one line tells you, with no timestamp subtraction. ESP-NOW
+//  broadcast has no ACK, so this is the only way to see packet loss from the
+//  receiving side.
 // ============================================================================
 namespace SerialTrace {
 
 #if defined(GATEWAY_TRACE) && GATEWAY_TRACE
 
-/// Một gói ESP-NOW vừa tới (in kèm Δ và số thứ tự riêng của node đó).
+/// An ESP-NOW packet just arrived (printed with delta and that node's own sequence
+/// number).
 void packetIn(const AcEspNowPacket &pkt, const uint8_t mac[6]);
 
-/// Vừa publish lên MQTT. [ok] là giá trị PubSubClient trả về — false nghĩa là
-/// gói KHÔNG rời khỏi bo (thường do vượt bộ đệm), thứ rất dễ tưởng là mạng lỗi.
+/// Just published to MQTT. [ok] is PubSubClient's return value -- false means the
+/// packet did NOT leave the board (usually because it exceeded the buffer),
+/// something very easily mistaken for a network fault.
 void mqttOut(const char *topic, const uint8_t *payload, size_t len, bool ok);
 
-/// Vừa nhận một gói MQTT. Payload bị cắt bớt khi in: lệnh mang `ir_raw` vài trăm
-/// mốc thời gian, in đủ là trôi hết màn hình.
+/// Just received an MQTT packet. The payload is truncated when printed: a command
+/// carries an `ir_raw` of several hundred timings, and printing it in full scrolls
+/// the whole screen away.
 void mqttIn(const char *topic, const uint8_t *payload, size_t len);
 
-/// Vừa đẩy một ảnh chụp sang Arduino UNO Q.
+/// Just pushed a snapshot to the Arduino UNO Q.
 void snapshotOut(const AcUnoQSnapshot &snap, bool linkUp);
 
-/// Bảng tổng kết: mỗi node một dòng, kèm số gói và Δ trung bình.
+/// Summary table: one line per node, with its packet count and average delta.
 void summary();
 
-#else   // ----- TẮT: thân rỗng, trình biên dịch xoá sạch lời gọi -----
+#else   // ----- OFF: empty bodies, the compiler removes every call -----
 
 inline void packetIn(const AcEspNowPacket &, const uint8_t[6]) {}
 inline void mqttOut(const char *, const uint8_t *, size_t, bool) {}

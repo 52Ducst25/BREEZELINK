@@ -4,73 +4,87 @@
 #include "unoq-link-protocol.h"
 
 // ============================================================================
-//  Đường UART tới Arduino UNO Q (edge AI).
+//  The UART link to the Arduino UNO Q (edge AI).
 // ----------------------------------------------------------------------------
-//  Bố cục gói, khoá liên kết, lý do chia vai: ../../shared/unoq-link-protocol.h
-//  — KHÔNG đổi khi chuyển từ Bluetooth sang UART. Chỉ đường ống đổi.
+//  Packet layout, link key, and the reasoning behind the role split:
+//  ../../shared/unoq-link-protocol.h -- UNCHANGED by the move from Bluetooth to
+//  UART. Only the transport changed.
 //
-//  VÌ SAO BỎ BLUETOOTH — ĐÂY LÀ SỐ ĐO, KHÔNG PHẢI SỞ THÍCH:
+//  WHY BLUETOOTH WAS DROPPED -- THIS IS A MEASUREMENT, NOT A PREFERENCE:
 //
-//    Gateway, BLE bật:   0,31 gói ESP-NOW/giây
-//    Gateway, BLE tắt:   0,80 gói/giây  ← đúng bằng 4 node × 5 giây
+//    Gateway, BLE on:    0.31 ESP-NOW packets/second
+//    Gateway, BLE off:   0.80 packets/second  <- exactly 4 nodes x 5 seconds
 //
-//  Bật Bluetooth thì chip BẮT BUỘC phải bật ngủ WiFi — nó abort chứ không chạy
-//  kém đi (`Should enable WiFi modem sleep when both WiFi and Bluetooth are
-//  enabled`). Mà radio ngủ thì gói ESP-NOW đến đúng lúc đó là mất, không ai đệm
-//  hộ, và broadcast không có ACK nên node vẫn báo "đã phát". Node ngoài trời rơi
-//  ~50% và nhấp nháy ONLINE/OFFLINE liên tục; tắt BLE là nó vào sạch, 0 gói rơi.
+//  Turning on Bluetooth FORCES the chip to enable WiFi modem sleep -- it aborts
+//  rather than merely degrading (`Should enable WiFi modem sleep when both WiFi and
+//  Bluetooth are enabled`). With the radio asleep, an ESP-NOW frame arriving at that
+//  moment is lost, nothing buffers it, and since broadcast has no ACK the node still
+//  reports "sent". The outdoor node dropped ~50% of its packets and flickered
+//  between ONLINE and OFFLINE constantly; with BLE off it arrives cleanly, zero
+//  drops.
 //
-//  Nói cách khác: BLE ăn mất ~60% khả năng thu của chính cái gateway mà nó phục
-//  vụ. UART không đụng tới radio, nên lấy lại toàn bộ. Cái giá là một sợi dây.
+//  In other words: BLE ate ~60% of the receive capacity of the very gateway it was
+//  serving. UART does not touch the radio, so all of it comes back. The price is one
+//  wire.
 //
-//  KÈM THEO, MẤT LUÔN CẢ MỘT MỚ LỘN XỘN: không quét, không ghép đôi, không
-//  thương lượng MTU (ảnh chụp 39 byte từng bị nghi cắt cụt vì BlueZ báo MTU 23),
-//  không NimBLE ~100KB flash, và không còn ai tranh ăng-ten 2.4GHz.
+//  IT ALSO REMOVES A PILE OF COMPLEXITY: no scanning, no pairing, no MTU
+//  negotiation (a 39-byte snapshot was once suspected of being truncated because
+//  BlueZ reported MTU 23), no ~100KB of NimBLE flash, and nobody competing for the
+//  2.4GHz antenna.
 //
-//  BA LUẬT CỦA FILE NÀY GIỮ NGUYÊN TỪ BẢN BLE:
+//  THIS FILE'S THREE RULES ARE UNCHANGED FROM THE BLE VERSION:
 //
-//  1. CHỈ ĐẶT HÀNG, KHÔNG THI HÀNH. poll() trả gói ra cho loop(); nó không bắn
-//     IR và không publish MQTT — cùng luật đã áp cho callback ESP-NOW và MQTT.
+//  1. PLACE ORDERS ONLY, NEVER EXECUTE. poll() hands the packet out to loop(); it
+//     does not transmit IR and does not publish MQTT -- the same rule already
+//     applied to the ESP-NOW and MQTT callbacks.
 //
-//  2. ĐỀ XUẤT KHÁC LỆNH. `kind` trong gói ghi rõ, và file này KHÔNG suy diễn:
-//     UNO Q gửi ADVICE thì gateway chỉ ghi lại; chỉ COMMAND mới ra máy lạnh.
-//     Gộp hai cái là mọi phép thử trên UNO Q chạy thẳng vào máy nén.
+//  2. ADVICE IS NOT A COMMAND. The packet's `kind` says which, and this file does
+//     NOT infer: when the UNO Q sends ADVICE the gateway only records it; only
+//     COMMAND reaches the air conditioner. Merging the two would send every
+//     experiment on the UNO Q straight to the compressor.
 //
-//  3. SAI link_key LÀ VỨT. Gói không mang đúng khoá băm từ ORG_ID bị bỏ và đếm
-//     vào rejectedCount() — để một bo UNO Q của hộ khác không lái nhầm máy lạnh.
+//  3. A WRONG link_key MEANS DISCARD. A packet not carrying the correct hash of
+//     ORG_ID is dropped and counted in rejectedCount() -- so another household's UNO
+//     Q board cannot drive the wrong air conditioner.
 // ============================================================================
 namespace UnoQLink {
 
-/// Lệnh/đề xuất vừa nhận từ UNO Q, đã kiểm magic/version/CRC/link_key và lọc
-/// trùng `seq`. Rút bằng poll() trong loop().
+/// A command/advice just received from the UNO Q, already validated for
+/// magic/version/CRC/link_key and de-duplicated by `seq`. Retrieved with poll() in
+/// loop().
 struct Incoming {
-  bool     isCommand;   ///< false = chỉ đề xuất, KHÔNG được bắn IR
+  bool     isCommand;   ///< false = advice only, IR must NOT be transmitted
   uint8_t  mode;        ///< AcUnoQMode
   int8_t   setpoint;
   uint16_t seq;
 };
 
-/// Mở cổng UART và chuẩn bị khoá liên kết. [orgId] dùng để băm ra link_key.
+/// Open the UART port and prepare the link key. [orgId] is hashed into the
+/// link_key.
 ///
-/// Gọi được BẤT CỨ LÚC NÀO trong setup() — khác hẳn bản BLE vốn phải xếp sau
-/// WiFi vì tranh radio. UART không liên quan gì tới sóng.
+/// Can be called AT ANY POINT in setup() -- quite unlike the BLE version, which had
+/// to come after WiFi because they competed for the radio. UART has nothing to do
+/// with radio.
 bool begin(const char *orgId);
 
-/// Đẩy một ảnh chụp sang UNO Q. Rẻ và không chặn: 39 byte ở 115200 baud mất
-/// ~3,4ms, mà đệm truyền của driver nuốt gọn nên hàm trả về ngay.
+/// Push one snapshot to the UNO Q. Cheap and non-blocking: 39 bytes at 115200 baud
+/// takes ~3.4ms, and the driver's transmit buffer swallows it whole so the function
+/// returns immediately.
 void publish(const AcUnoQSnapshot &snapshot);
 
-/// Rút lệnh/đề xuất UNO Q vừa gửi. Trả false nếu không có. Gọi mỗi vòng loop().
+/// Retrieve a command/advice the UNO Q has just sent. Returns false if there is
+/// none. Call every loop().
 bool poll(Incoming &out);
 
-/// UNO Q có đang nói chuyện không.
+/// Is the UNO Q talking to us.
 ///
-/// UART KHÔNG CÓ TRẠNG THÁI KẾT NỐI như BLE — dây cắm vào là "nối" kể cả khi
-/// đầu kia đã chết. Nên ở đây "nối" nghĩa là ĐÃ NGHE THẤY GÓI HỢP LỆ GẦN ĐÂY.
-/// Đó mới là thứ người đọc log thật sự muốn biết.
+/// UART HAS NO CONNECTION STATE the way BLE does -- a plugged-in cable is
+/// "connected" even when the other end is dead. So here "connected" means A VALID
+/// PACKET WAS HEARD RECENTLY. That is what someone reading the log actually wants
+/// to know.
 bool connected();
 
-uint32_t rxCount();        ///< số gói hợp lệ đã nhận
-uint32_t rejectedCount();  ///< số gói bị bỏ (sai magic/version/CRC/link_key/lặp)
+uint32_t rxCount();        ///< valid packets received
+uint32_t rejectedCount();  ///< packets dropped (bad magic/version/CRC/link_key/duplicate)
 
 } // namespace UnoQLink
