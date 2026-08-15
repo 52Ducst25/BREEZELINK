@@ -140,6 +140,19 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _submit() async {
     if (_busy) return;
+
+    // Địa chỉ máy chủ rỗng thì DỪNG Ở ĐÂY, đừng gửi đi.
+    //
+    // Mặc định của ô này nạp lúc biên dịch (`--dart-define=BREEZELINK_BASE_URL`,
+    // xem auth_gate.dart) nên một bản dựng quên khai cờ đó sẽ để ô trống. Không
+    // chặn thì lời gọi vẫn đi với base URL rỗng, thất bại, và rơi vào nhánh
+    // catch bên dưới — báo "Lỗi kết nối máy chủ. Kiểm tra địa chỉ và mạng", tức
+    // là đổ lỗi cho mạng của người dùng về một lỗi của bản dựng.
+    if (_url.text.trim().isEmpty) {
+      setState(() => _error = 'Chưa có địa chỉ máy chủ — nhập vào ô trên.');
+      return;
+    }
+
     setState(() {
       _busy = true;
       _error = null;

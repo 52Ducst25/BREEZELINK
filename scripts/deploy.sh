@@ -27,17 +27,36 @@
 
 set -euo pipefail
 
-# ---- config (override via environment) --------------------------------------
-AC_HOST="${AC_HOST:-SERVER_IP}"
-AC_USER="${AC_USER:-duc}"
+# ---- config -----------------------------------------------------------------
+# KHÔNG GHI CỨNG ĐỊA CHỈ SERVER TRONG FILE ĐƯỢC COMMIT. Repo này công khai, và
+# IP + user SSH + tên miền gộp lại là một tấm bản đồ khá đầy đủ cho người muốn
+# thử cửa. Chúng không phải bí mật (không đăng nhập được bằng chúng), nhưng
+# không có lý do gì để công bố sẵn.
+#
+# Ba cách nạp, xét theo thứ tự — cách đầu tiên có giá trị sẽ thắng:
+#   1. biến môi trường:   AC_HOST=1.2.3.4 scripts/deploy.sh
+#   2. file cấu hình:     scripts/deploy.env   (BỊ GITIGNORE — cách tiện nhất)
+#   3. không có gì        -> dừng lại và nói thiếu biến nào
+#
+# Mẫu: scripts/deploy.env.example
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+[ -f "$SCRIPT_DIR/deploy.env" ] && . "$SCRIPT_DIR/deploy.env"
+
 AC_REMOTE_DIR="${AC_REMOTE_DIR:-aircon}"          # relative to the user's home
 AC_PROJECT="${AC_PROJECT:-aircon}"                # docker compose -p
 AC_COMPOSE="${AC_COMPOSE:-docker/docker-compose.vps.yml}"
-AC_URL="${AC_URL:-https://admin.vi-du.com}"
 SSH_OPTS="-o ConnectTimeout=30"
 
+# Ba giá trị KHÔNG có mặc định — chúng gắn với một máy chủ cụ thể.
+# Dừng NGAY ở đây chứ không để script chạy tới bước ssh rồi treo ở một tên máy
+# rỗng: lỗi lúc đó đọc ra là "mạng hỏng", không phải "thiếu cấu hình".
+: "${AC_HOST:?thiếu AC_HOST — tạo scripts/deploy.env từ deploy.env.example}"
+: "${AC_USER:?thiếu AC_USER — tạo scripts/deploy.env từ deploy.env.example}"
+: "${AC_URL:?thiếu AC_URL — tạo scripts/deploy.env từ deploy.env.example}"
+
 # ---- locate the repo root, no matter where the script is called from --------
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# SCRIPT_DIR đã tính ở khối cấu hình bên trên (nó cần để nạp deploy.env).
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 

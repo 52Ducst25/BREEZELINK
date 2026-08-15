@@ -401,7 +401,11 @@ docker compose -f docker/docker-compose.yml exec -T api python - < scripts/seed_
 cd app-flutter
 flutter pub get
 flutter run
-flutter build apk --release      # -> build/app/outputs/flutter-apk/app-release.apk
+# Địa chỉ máy chủ nạp LÚC BIÊN DỊCH — không ghi cứng trong mã (repo công khai).
+# Quên cờ này thì APK vẫn dựng được nhưng ô "Địa chỉ máy chủ" ở màn đăng nhập
+# để trống, và app nói thẳng ra điều đó thay vì đổ lỗi cho mạng.
+flutter build apk --release \n    --dart-define=BREEZELINK_BASE_URL=https://quan-tri.cua-ban.com
+#   -> build/app/outputs/flutter-apk/app-release.apk
 ```
 
 **Đổi icon toàn dự án:** thay `Icon/1.png` rồi
@@ -492,6 +496,7 @@ Khai báo trong `.env` (xem `.env.example`). Quan trọng nhất:
 | `MQTT_HOST` / `MQTT_PORT` / `MQTT_PASS` | Kết nối MQTT broker. |
 | `SMTP_*` | Gửi email (đặt lại mật khẩu, thông báo). |
 | `CF_TUNNEL_TOKEN` | Token Cloudflare Tunnel — chỉ trong `docker/.env` trên server, **không** commit. |
+| `MQTT_PUBLIC_HOST` | IP/tên máy chủ MQTT mà **firmware** nối tới. Cũng ở `docker/.env`; compose **từ chối khởi động** nếu thiếu, thay vì chạy với giá trị rỗng. |
 
 ---
 
@@ -500,11 +505,20 @@ Khai báo trong `.env` (xem `.env.example`). Quan trọng nhất:
 `scripts/deploy.sh` đồng bộ **chỉ thư mục `src/`**, rebuild container và kiểm tra sức khoẻ
 — **không bao giờ đụng `docker/.env`** (token tunnel).
 
+Địa chỉ máy chủ **không nằm trong mã** — chép bản mẫu rồi điền:
+
+```bash
+cp scripts/deploy.env.example scripts/deploy.env   # AC_HOST / AC_USER / AC_URL
+```
+
 ```bash
 scripts/deploy.sh              # hỏi xác nhận
 scripts/deploy.sh --yes        # không hỏi
-AC_HOST=1.2.3.4 scripts/deploy.sh
+AC_HOST=1.2.3.4 scripts/deploy.sh   # biến môi trường vẫn thắng file trên
 ```
+
+Thiếu cấu hình thì script **dừng ngay** và nói thiếu biến nào, thay vì chạy tới
+bước `ssh` rồi treo ở một tên máy rỗng — lỗi lúc đó đọc ra là "mạng hỏng".
 
 Mỗi lần deploy gián đoạn ~30–40 giây (cloudflared khởi động lại). Script chờ tới 60 giây
 cho tunnel gắn lại trước khi kết luận — hỏi một lần ngay sau đó gần như chắc chắn gặp 502

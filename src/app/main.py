@@ -1,8 +1,8 @@
 """FastAPI application factory.
 
 Wires logging, middleware, exception handlers, the /api/v1 router, the SSR admin,
-and the static mount. Exposed publicly through a Cloudflare tunnel at
-admin.vi-du.com -- see docker/docker-compose.vps.yml.
+and the static mount. Exposed publicly through a Cloudflare tunnel -- the
+hostname is configured per deployment, see docker/docker-compose.vps.yml.
 """
 
 from pathlib import Path

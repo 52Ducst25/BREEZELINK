@@ -77,8 +77,10 @@ class Settings(BaseSettings):
     smtp_port: int = 587
     smtp_user: str | None = None
     smtp_pass: str | None = None
+    # Mặc định là VÍ DỤ, không phải địa chỉ thật: repo công khai. Giá trị dùng
+    # thật đặt trong .env (SMTP_FROM / RESET_PASSWORD_URL_BASE) — xem .env.example.
     smtp_from: str = "no-reply@vi-du.com"
-    reset_password_url_base: str = "https://admin.vi-du.com/web/reset-password"
+    reset_password_url_base: str = "https://quan-tri.vi-du.com/web/reset-password"
 
 
 _DEV_TEST_ENVIRONMENTS = {"development", "test", "testing"}

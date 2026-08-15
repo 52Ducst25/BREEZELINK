@@ -16,7 +16,26 @@ import '../widgets/update_prompt.dart';
 import 'main_shell.dart';
 
 const _kBaseUrlKey = 'base_url';
-const _kDefaultBaseUrl = 'https://admin.vi-du.com';
+
+/// Máy chủ mặc định, NẠP LÚC BIÊN DỊCH — không ghi cứng trong mã.
+///
+///     flutter build apk --release \
+///         --dart-define=BREEZELINK_BASE_URL=https://quan-tri.cua-ban.com
+///
+/// Repo này công khai nên địa chỉ máy chủ không nằm trong mã nguồn. Cùng nguyên
+/// tắc với `config.h` của firmware và `docker/.env` của backend: thứ gắn với MỘT
+/// lần triển khai thì không thuộc về file được commit.
+///
+/// ĐỂ RỖNG KHI KHÔNG KHAI, có chủ đích. Đặt một tên miền giả làm mặc định thì
+/// app vẫn dựng được, vẫn cài được, và chỉ hỏng lúc người dùng bấm đăng nhập —
+/// với thông báo "không kết nối được máy chủ", tức là đổ lỗi cho mạng của họ.
+/// Rỗng thì màn đăng nhập nói thẳng ra là bản dựng này thiếu cấu hình.
+///
+/// LƯU Ý QUAN TRỌNG (README §Đổi tên miền): giá trị này chỉ là MẶC ĐỊNH. Máy nào
+/// đã từng đăng nhập thì `SharedPreferences` giữ URL cũ và **giá trị đã lưu luôn
+/// thắng** — phát hành bản mới với `--dart-define` khác KHÔNG tự động chuyển
+/// khách sang máy chủ mới.
+const _kDefaultBaseUrl = String.fromEnvironment('BREEZELINK_BASE_URL');
 
 /// Login gate: unauthenticated -> [LoginScreen]; authenticated -> builds the
 /// [ApiClient] + domain wrappers + [AppState] and shows [MainShell]. Ported

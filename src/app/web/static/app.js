@@ -450,7 +450,7 @@ var acMorph = (function () {
   }
 
   // In-app Yes/No box, styled like the toast — replaces the browser's native
-  // confirm() dialog (the ugly "admin.vi-du.com says…" one). Resolves true on
+  // confirm() dialog (the ugly "example.com says…" one). Resolves true on
   // confirm, false on cancel / Esc / backdrop click.
   function confirmBox(msg) {
     return new Promise(function (resolve) {

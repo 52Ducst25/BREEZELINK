@@ -115,3 +115,7 @@ FirmWare/Interface/ESP32-P4-Smart-86-Box-Smarthome-Panel-main/
 FirmWare/*.png
 FirmWare/Kich_ban_video_*.md
 FirmWare/*.bat
+
+# Dia chi may chu trien khai — khong ghi cung trong file duoc commit.
+# Ban mau: scripts/deploy.env.example
+scripts/deploy.env

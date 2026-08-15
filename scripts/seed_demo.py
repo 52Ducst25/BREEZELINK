@@ -22,7 +22,7 @@ from app.models.organization import Organization
 from app.models.user import User, UserRole
 
 DEMO_ORG_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
-DEMO_EMAIL = "demo@vi-du.com"
+DEMO_EMAIL = "demo@example.com"
 DEMO_PASSWORD = "DEMO_PASSWORD"  # dev-only demo credential
 
 
