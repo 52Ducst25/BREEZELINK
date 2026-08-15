@@ -68,6 +68,51 @@ FORGET = 0.995
 # 5 phút = 10 giờ, tức là phải thấy ít nhất một chu kỳ nóng-mát trong ngày.
 MIN_SAMPLES = 120
 
+# ============================================================================
+#  VÙNG CÓ NGHĨA VẬT LÝ — chặn theo τ VÀ theo hai hệ số dẫn xuất
+# ----------------------------------------------------------------------------
+#  CHẶN THEO τ CHỨ KHÔNG THEO `a`, và đây là sửa một lỗi đã xảy ra thật.
+#
+#  Bản trước viết thẳng `0.5 < a < 0.9999`. Hai vấn đề, cái thứ hai mới nặng:
+#
+#  1. Ý NGHĨA CỦA `a` PHỤ THUỘC DT_SEC. Ai đổi nhịp mô hình thì cùng một ngưỡng
+#     `a` lặng lẽ mang một τ khác hẳn, mà không dòng nào trong điều kiện nói ra
+#     điều đó. Chặn thẳng τ thì ý định nằm ngay trong biểu thức.
+#
+#  2. 0.9999 LỎNG TỚI MỨC VÔ DỤNG. Ở Δt = 5 phút:
+#         a < 0.9999  ->  τ tối đa 49.998 phút = 34,7 NGÀY
+#     Không phòng nào có hằng số thời gian 34 ngày, nhưng mọi giá trị tới đó đều
+#     được nhận là "có nghĩa vật lý".
+#
+#  ĐÃ DÍNH ĐÚNG CA ĐÓ, và triệu chứng trông như mô hình đang chạy tốt:
+#         τ = 49.502 phút · ngoài trời ×303,33 · lạnh 283,45 °C/đv · 332 mẫu
+#         huy hiệu trên trang theo dõi: "đã khớp"
+#     Tính ngược ra thì a = 0,9998990 — lọt qua ngưỡng cũ đúng ở chữ số thứ tư.
+#     `b` = 0,0306 và `c` = −0,0286 đều BÌNH THƯỜNG; cả ba con số hiển thị nổ
+#     tung chỉ vì chúng đều chia cho (1−a) = 0,0001.
+#
+#  `a → 1` nghĩa là mô hình kết luận "nhiệt độ trong nhà không bao giờ đổi" —
+#  T_in[k+1] = T_in[k]. Đó không phải một mô hình, đó là phép đo lặp lại chính
+#  nó. Nguyên nhân thường là dữ liệu KHÔNG CÓ KÍCH THÍCH: phòng phẳng lì suốt
+#  lịch sử, hoặc hai cảm biến trong/ngoài đang đo cùng một chỗ nên hai cột hồi
+#  quy trùng nhau và ma trận thiết kế suy biến.
+TAU_MIN_MIN, TAU_MAX_MIN = 10.0, 300.0
+
+# Hai hệ số dẫn xuất cũng phải nằm trong vùng vật lý. Chặn τ đã đủ cho ca trên
+# (cả ba cùng chia (1−a)), nhưng hai ngưỡng này bắt được những kiểu hỏng mà τ
+# không thấy — ví dụ `b` sai dấu: τ đẹp mà "ngoài trời nóng lên thì phòng lạnh đi".
+#
+# Nới một chút về phía âm thay vì chặn ở 0: lúc mới khớp, hệ số của một tác động
+# yếu có thể lệch qua 0 vì nhiễu. Chặn cứng ở 0 sẽ khiến một phòng gần như không
+# chịu ảnh hưởng ngoài trời KHÔNG BAO GIỜ khớp được, mà không ai đoán ra vì sao.
+OUTDOOR_GAIN_LO, OUTDOOR_GAIN_HI = -0.2, 1.5     # ×, ở trạng thái dừng
+COOL_GAIN_LO, COOL_GAIN_HI = -0.5, 10.0          # °C cho mỗi đơn vị nhu cầu lạnh
+
+
+def _a_from_tau(tau_min: float) -> float:
+    """`a` tương ứng với một hằng số thời gian, ở nhịp DT_SEC."""
+    return math.exp(-(DT_SEC / 60.0) / tau_min)
+
 
 class ThermalModel:
     """RLS cho ARX bậc nhất. Khớp mẻ lúc khởi động, rồi cập nhật trực tuyến."""
@@ -88,17 +133,46 @@ class ThermalModel:
     def samples(self) -> int:
         return self._n
 
+    @staticmethod
+    def _reject(theta) -> str | None:
+        """Vì sao bộ tham số này không dùng được. ``None`` = dùng được.
+
+        TRẢ VỀ LÝ DO CHỨ KHÔNG PHẢI True/False, có chủ đích: cùng một hàm vừa
+        làm cổng chặn (``ready``) vừa làm lời giải thích (``describe`` và log
+        khớp mẻ). Tách thành hai chỗ là đúng cái đã sinh ra lỗi cũ — điều kiện
+        ``0.5 < a < 0.9999`` từng được chép ở hai nơi và sửa một nơi là quên nơi
+        kia.
+        """
+        a, b, c, _ = (float(v) for v in theta)
+
+        # Ba ca hỏng của `a` cần ba câu khác nhau: chúng dẫn tới ba chỗ phải đi
+        # tìm khác nhau, gộp thành "a ngoài khoảng" là ném đi manh mối.
+        if a >= 1.0:
+            return f"a={a:.5f} ≥ 1 — mô hình tin phòng tự nóng lên vô hạn"
+        if a <= 0.0:
+            return f"a={a:.5f} ≤ 0 — mô hình dao động đổi dấu mỗi bước"
+
+        tau = -(DT_SEC / 60.0) / math.log(a)
+        if not (TAU_MIN_MIN <= tau <= TAU_MAX_MIN):
+            return (f"τ={tau:.0f}' ngoài khoảng {TAU_MIN_MIN:.0f}'..{TAU_MAX_MIN:.0f}' "
+                    f"(a={a:.5f}) — dữ liệu có thể chưa đủ kích thích")
+
+        inv = 1.0 - a
+        og, cg = b / inv, -c / inv
+        if not (OUTDOOR_GAIN_LO <= og <= OUTDOOR_GAIN_HI):
+            return f"ngoài trời ăn vào ×{og:.2f}, ngoài khoảng {OUTDOOR_GAIN_LO}..{OUTDOOR_GAIN_HI}"
+        if not (COOL_GAIN_LO <= cg <= COOL_GAIN_HI):
+            return f"công suất lạnh {cg:.2f}°C/đv, ngoài khoảng {COOL_GAIN_LO}..{COOL_GAIN_HI}"
+        return None
+
     @property
     def ready(self) -> bool:
         """Đã đủ dữ liệu VÀ tham số nằm trong vùng có nghĩa vật lý.
 
-        0 < a < 1 là điều kiện phòng ỔN ĐỊNH: a ≥ 1 nghĩa là mô hình tin rằng
-        phòng tự nóng lên vô hạn, a ≤ 0 nghĩa là nó dao động đổi dấu mỗi phút.
-        Cả hai đều là dấu hiệu khớp hỏng, và dùng chúng để dự báo thì tệ hơn là
-        không dự báo gì.
+        Vùng đó do ``_reject()`` định nghĩa — xem khối TAU_MIN_MIN ở đầu file
+        cho lý do chặn theo τ chứ không theo `a`.
         """
-        a = self._theta[0]
-        return self._n >= MIN_SAMPLES and 0.5 < a < 0.9999
+        return self._n >= MIN_SAMPLES and self._reject(self._theta) is None
 
     @property
     def tau_min(self) -> float | None:
@@ -126,8 +200,21 @@ class ThermalModel:
         return float(-self._theta[2] / (1.0 - self._theta[0]))
 
     def describe(self) -> str:
-        if not self.ready:
+        """Một câu nói ĐÚNG chuyện đang xảy ra — trang theo dõi hiện thẳng câu này.
+
+        PHẢI TÁCH "thiếu mẫu" KHỎI "đủ mẫu nhưng tham số vô nghĩa". Bản trước gộp
+        cả hai vào một câu, nên ca đã gặp thật hiện ra là:
+
+            "chưa đủ dữ liệu (332/120 mẫu)"
+
+        — một câu tự mâu thuẫn, và nó gửi người đọc đi chờ thêm dữ liệu trong khi
+        vấn đề là dữ liệu KHÔNG CÓ KÍCH THÍCH, chờ bao lâu cũng không tự khỏi.
+        """
+        if self._n < MIN_SAMPLES:
             return f"chưa đủ dữ liệu ({self._n}/{MIN_SAMPLES} mẫu)"
+        why = self._reject(self._theta)
+        if why is not None:
+            return f"đủ mẫu ({self._n}) nhưng tham số vô nghĩa — {why}"
         return (f"τ={self.tau_min:.0f}' · ngoài trời×{self.outdoor_gain:.2f} · "
                 f"lạnh {self.cool_gain:.2f}°C/đv · {self._n} mẫu")
 
@@ -185,7 +272,11 @@ class ThermalModel:
 
         if len(y) >= MIN_SAMPLES:
             theta, *_ = np.linalg.lstsq(phi, y, rcond=None)
-            if 0.5 < theta[0] < 0.9999:
+            # CÙNG MỘT PHÉP KIỂM với `ready`, gọi chung một hàm. Trước đây chỗ này
+            # chép lại điều kiện `0.5 < theta[0] < 0.9999` — hai bản của cùng một
+            # luật, và sửa một bên là quên bên kia.
+            why = self._reject(theta)
+            if why is None:
                 self._theta = theta
                 # P ≈ nghịch đảo ma trận thông tin: nói với RLS rằng "đã biết
                 # chừng này rồi", nên nó không nhảy dựng lên vì một mẫu nhiễu.
@@ -193,8 +284,8 @@ class ThermalModel:
                 self._n = len(y)
                 logger.info("Khớp mẻ từ %d cặp mẫu · %s", len(y), self.describe())
                 return True
-            logger.warning("Khớp mẻ cho a=%.4f, ngoài vùng có nghĩa — chuyển sang phát lại",
-                           theta[0])
+            logger.warning("Khớp mẻ từ %d cặp bị loại — %s. Chuyển sang phát lại.",
+                           len(y), why)
 
         # Phát lại. observe() tự lọc nhịp và tự xử lý chỗ đứt quãng, nên không
         # cần chuẩn bị gì thêm — chỉ cần bảo đảm bắt đầu từ trạng thái sạch.
