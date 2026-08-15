@@ -1,18 +1,21 @@
-"""Đường UART tới gateway: đọc ảnh chụp, gửi lệnh.
+"""The UART link to the gateway: read snapshots, send commands.
 
-THAY CHO ble_client.py. Lý do bỏ Bluetooth nằm ở FirmWare/shared/unoq-link-protocol.h;
-tóm tắt bằng số đo trên bo thật:
+REPLACES ble_client.py. The reasoning for dropping Bluetooth is in
+FirmWare/shared/unoq-link-protocol.h; summarised by the measurement on real
+hardware:
 
-    Gateway, BLE bật:   0,31 gói ESP-NOW/giây
-    Gateway, BLE tắt:   0,80 gói/giây
+    Gateway, BLE on:    0.31 ESP-NOW packets/second
+    Gateway, BLE off:   0.80 packets/second
 
-Bật Bluetooth thì ESP32 BẮT BUỘC phải bật ngủ WiFi (nó abort chứ không chạy kém
-đi), mà radio ngủ thì gói ESP-NOW đến đúng lúc đó là mất. Tức là đường BLE ăn mất
-~60% khả năng thu của chính cái gateway nó phục vụ.
+Turning on Bluetooth FORCES the ESP32 to enable WiFi sleep (it aborts rather than
+merely degrading), and with the radio asleep an ESP-NOW packet arriving at that
+moment is lost. In other words, the BLE link ate ~60% of the receive capacity of the
+very gateway it was serving.
 
-MẤT KẾT NỐI LÀ CHUYỆN THƯỜNG, KHÔNG PHẢI NGOẠI LỆ: gateway khởi động lại, ai đó
-rút dây, cổng USB đổi tên. Nên vòng đời ở đây là mở-đọc-lại mãi mãi, và mọi lỗi
-đều dẫn về đầu vòng thay vì làm chết dịch vụ.
+LOSING THE CONNECTION IS ROUTINE, NOT EXCEPTIONAL: the gateway restarts, someone
+unplugs the cable, the USB port gets renamed. So the lifecycle here is
+open-read-reopen forever, and every error leads back to the top of the loop rather
+than killing the service.
 """
 
 import asyncio
@@ -33,19 +36,20 @@ _port_hint_shown = False
 
 
 def _find_port(configured: str | None) -> str | None:
-    """Cổng serial của gateway. Trả None nếu không tìm thấy.
+    """The gateway's serial port. Returns None if none is found.
 
-    KHÔNG GHIM /dev/ttyUSB0: số thứ tự đổi theo thứ tự cắm, và cắm thêm bất kỳ
-    thiết bị USB-serial nào cũng đẩy nó sang tên khác. Đã mất thời gian vì đúng
-    loại chuyện này với địa chỉ IP của bo.
+    DO NOT PIN /dev/ttyUSB0: the number follows plug-in order, and adding any other
+    USB-serial device pushes it to a different name. Time has already been lost to
+    exactly this kind of thing with the board's IP address.
     """
     if configured:
         return configured
 
     ports = list(list_ports.comports())
-    # Ưu tiên các chip cầu USB-UART hay dùng để nối ESP32: CH34x, CP210x, FTDI.
-    # Nếu nối thẳng chân UART của bo (không qua cầu) thì phải khai EDGE_UART_PORT
-    # tay — Linux không có cách nào đoán được /dev/ttyS* nào đang nối vào đâu.
+    # Prefer the USB-UART bridge chips commonly used to connect an ESP32: CH34x,
+    # CP210x, FTDI. If the board's UART pins are wired directly (with no bridge),
+    # EDGE_UART_PORT has to be declared by hand -- Linux has no way to guess which
+    # /dev/ttyS* is connected to what.
     for p in ports:
         blob = f"{p.description} {p.manufacturer or ''} {p.product or ''}".lower()
         if any(k in blob for k in ("ch340", "ch343", "cp210", "ftdi", "usb serial", "uart")):
@@ -54,7 +58,7 @@ def _find_port(configured: str | None) -> str | None:
 
 
 class GatewayLink:
-    """Giữ một cổng UART tới gateway và tự mở lại khi đứt."""
+    """Holds one UART port to the gateway and reopens it whenever it breaks."""
 
     def __init__(self, settings) -> None:
         self._s = settings
@@ -67,7 +71,7 @@ class GatewayLink:
         return self._serial is not None and self._serial.is_open
 
     async def run(self, on_snapshot: SnapshotHandler) -> None:
-        """Vòng đời: mở cổng -> đọc -> mãi mãi. Không bao giờ trả về."""
+        """Lifecycle: open the port -> read -> forever. Never returns."""
         global _port_hint_shown
         while True:
             port = _find_port(getattr(self._s, "uart_port", None))
@@ -75,11 +79,12 @@ class GatewayLink:
                 if not _port_hint_shown:
                     _port_hint_shown = True
                     logger.error(
-                        "KHÔNG THẤY CỔNG SERIAL NÀO.\n"
-                        "  Kiểm: dây đã cắm chưa, và user chạy dịch vụ có trong nhóm\n"
-                        "  `dialout` không (`groups`). Thiếu nhóm thì cổng CÓ tồn tại\n"
-                        "  nhưng mở ra bị Permission denied — dễ đọc nhầm thành mất dây.\n"
-                        "  Biết tên cổng thì khai thẳng: EDGE_UART_PORT=/dev/ttyUSB0"
+                        "NO SERIAL PORT FOUND.\n"
+                        "  Check: is the cable plugged in, and is the user running the\n"
+                        "  service in the `dialout` group (`groups`)? Without the group the\n"
+                        "  port DOES exist but opening it gives Permission denied -- easily\n"
+                        "  misread as a missing cable.\n"
+                        "  If you know the port name, declare it: EDGE_UART_PORT=/dev/ttyUSB0"
                     )
                 await asyncio.sleep(self._s.reconnect_sec)
                 continue
@@ -89,7 +94,7 @@ class GatewayLink:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
-                logger.warning("Phiên UART đứt (%s): %s", port, exc)
+                logger.warning("UART session dropped (%s): %s", port, exc)
             finally:
                 self._close()
             await asyncio.sleep(self._s.reconnect_sec)
@@ -103,10 +108,11 @@ class GatewayLink:
             self._serial = None
 
     async def _session(self, port: str, on_snapshot: SnapshotHandler) -> None:
-        # timeout=0 (không chặn) vì vòng lặp này chạy trong asyncio: một lần đọc
-        # chặn 1 giây là cả dịch vụ đứng im 1 giây, kể cả lúc cần gửi lệnh.
+        # timeout=0 (non-blocking) because this loop runs inside asyncio: a read that
+        # blocks for 1 second stalls the whole service for 1 second, including when a
+        # command needs sending.
         self._serial = serial.Serial(port, protocol.BAUD, timeout=0)
-        logger.info("Đã mở %s @%d", port, protocol.BAUD)
+        logger.info("Opened %s @%d", port, protocol.BAUD)
 
         buf = bytearray()
         while True:
@@ -115,16 +121,18 @@ class GatewayLink:
                 buf.extend(chunk)
                 self._consume(buf, on_snapshot)
             else:
-                # Ngủ ngắn thay vì đọc chặn: giữ vòng lặp asyncio thở được.
+                # A short sleep rather than a blocking read: keeps the asyncio loop
+                # breathing.
                 await asyncio.sleep(0.05)
 
     def _consume(self, buf: bytearray, on_snapshot: SnapshotHandler) -> None:
-        """Bóc mọi ảnh chụp đầy đủ trong đệm.
+        """Extract every complete snapshot in the buffer.
 
-        ĐỒNG BỘ KHUNG BẰNG MAGIC: gói cố định 39 byte, mở đầu bằng magic, kết
-        bằng CRC. Sai thì trượt MỘT byte rồi tìm lại — không xoá sạch đệm, vì
-        magic thật có thể nằm ngay trong đám byte vừa gom (nửa gói cũ dính nửa
-        gói mới), và xoá sạch là mất luôn khung tốt đứng ngay sau khung hỏng.
+        FRAME SYNC VIA THE MAGIC BYTE: packets are a fixed 39 bytes, starting with
+        the magic and ending with a CRC. On a mismatch, slide ONE byte and resync --
+        do not clear the buffer, because the real magic byte may be inside the bytes
+        just collected (half an old packet stuck to half a new one), and clearing
+        would also discard a good frame sitting immediately after a corrupt one.
         """
         while True:
             start = buf.find(bytes([protocol.MAGIC]))
@@ -140,13 +148,13 @@ class GatewayLink:
             try:
                 snap = protocol.parse_snapshot(frame)
             except ProtocolError:
-                del buf[:1]        # trượt một byte, tìm magic tiếp
+                del buf[:1]        # slide one byte and keep looking for the magic
                 continue
             del buf[: protocol.SNAPSHOT_SIZE]
             on_snapshot(snap)
 
     async def send(self, *, kind: int, mode: protocol.Mode, setpoint: int | None) -> bool:
-        """Gửi một đề xuất hoặc lệnh. Trả False nếu chưa mở được cổng."""
+        """Send an advice or a command. Returns False if the port is not open yet."""
         if not self.connected or self._serial is None:
             return False
         self._seq = (self._seq + 1) & 0xFFFF
@@ -157,5 +165,5 @@ class GatewayLink:
             self._serial.write(frame)
             return True
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Gửi lệnh không được: %s", exc)
+            logger.warning("Could not send the command: %s", exc)
             return False

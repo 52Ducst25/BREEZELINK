@@ -3,8 +3,8 @@
 Nothing here has a secret as its default. The service refuses to start rather
 than fall back to a guess for ``EDGE_ORG_ID`` — that value is hashed into the
 ``link_key`` the gateway checks, so a wrong one means every command this node
-sends is silently rejected, with the gateway logging "UNO Q của hộ khác?" and
-this node logging nothing at all.
+sends is silently rejected, with the gateway logging "another household's UNO Q?"
+and this node logging nothing at all.
 """
 
 import os
@@ -19,7 +19,7 @@ class ConfigError(RuntimeError):
 def _require(name: str) -> str:
     value = os.getenv(name, "").strip()
     if not value:
-        raise ConfigError(f"Thiếu biến môi trường bắt buộc: {name}")
+        raise ConfigError(f"Missing required environment variable: {name}")
     return value
 
 
@@ -30,38 +30,39 @@ def _num(name: str, default: float) -> float:
     try:
         return float(raw)
     except ValueError as exc:
-        raise ConfigError(f"{name} phải là số, đang là {raw!r}") from exc
+        raise ConfigError(f"{name} must be a number, got {raw!r}") from exc
 
 
 def _coords() -> tuple[float | None, float | None]:
-    """Toạ độ cho dự báo. Phải có ĐỦ CẢ HAI hoặc không có gì.
+    """Coordinates for the forecast. BOTH must be present, or neither.
 
-    Chỉ khai một trong hai là lỗi cấu hình chứ không phải "tắt": nó gần như chắc
-    chắn là gõ sót, và im lặng bỏ qua sẽ để lại một dự báo không bao giờ chạy mà
-    không ai hiểu vì sao.
+    Declaring only one is a configuration error rather than "disabled": it is almost
+    certainly a typo, and silently ignoring it would leave a forecast that never runs
+    with nobody understanding why.
     """
     lat_raw = os.getenv("EDGE_LAT", "").strip()
     lon_raw = os.getenv("EDGE_LON", "").strip()
     if not lat_raw and not lon_raw:
         return None, None
     if not lat_raw or not lon_raw:
-        raise ConfigError("EDGE_LAT và EDGE_LON phải khai cùng nhau, hoặc bỏ trống cả hai")
+        raise ConfigError("EDGE_LAT and EDGE_LON must be declared together, or both left empty")
     try:
         lat, lon = float(lat_raw), float(lon_raw)
     except ValueError as exc:
-        raise ConfigError(f"EDGE_LAT/EDGE_LON phải là số: {lat_raw!r}, {lon_raw!r}") from exc
+        raise ConfigError(f"EDGE_LAT/EDGE_LON must be numbers: {lat_raw!r}, {lon_raw!r}") from exc
     if not (-90 <= lat <= 90 and -180 <= lon <= 180):
-        raise ConfigError(f"Toạ độ ngoài dải hợp lệ: {lat}, {lon}")
+        raise ConfigError(f"Coordinates out of range: {lat}, {lon}")
     return lat, lon
 
 
 def _ir_temps() -> tuple[int, ...]:
-    """Đọc EDGE_IR_TEMPS="24,25,26,27,28". Rỗng = tự học bằng quan sát.
+    """Read EDGE_IR_TEMPS="24,25,26,27,28". Empty = learn by observation.
 
-    Từ chối số vô lý thay vì lọc im lặng: một mức 250 lọt vào đây sẽ được
-    ``nearest_captured_temp`` coi là ứng viên hợp lệ, và gateway thì không có mã
-    cho nó nên lệnh bay ra rồi rơi vào hư không — triệu chứng duy nhất là "máy
-    lạnh không nhúc nhích".
+    Nonsensical values are rejected rather than silently filtered: a level of 250
+    getting in here would be treated by ``nearest_captured_temp`` as a valid
+    candidate, and since the gateway has no code for it the command goes out and
+    falls into the void -- with the only symptom being "the air conditioner does not
+    move".
     """
     raw = os.getenv("EDGE_IR_TEMPS", "").strip()
     if not raw:
@@ -74,25 +75,26 @@ def _ir_temps() -> tuple[int, ...]:
         try:
             value = int(part)
         except ValueError as exc:
-            raise ConfigError(f"EDGE_IR_TEMPS có phần tử không phải số: {part!r}") from exc
+            raise ConfigError(f"EDGE_IR_TEMPS contains a non-numeric entry: {part!r}") from exc
         if not 5 <= value <= 35:
-            raise ConfigError(f"EDGE_IR_TEMPS: {value}°C nằm ngoài dải máy lạnh dân dụng")
+            raise ConfigError(f"EDGE_IR_TEMPS: {value}°C is outside the domestic air conditioner range")
         out.append(value)
     return tuple(sorted(set(out)))
 
 
 def _link() -> str:
-    """Chọn đường tới gateway. "auto" = dò xem có đang ở trong App Lab không.
+    """Pick the path to the gateway. "auto" = detect whether we are inside App Lab.
 
-    Dấu hiệu nhận biết là CÁI SOCKET, không phải gói `arduino` import được: gói
-    đó nằm sẵn trong ảnh nền nên nó có mặt kể cả khi router chưa chạy, và lúc đó
-    `Bridge.provide()` sẽ ném ra một lỗi kết nối khó đọc thay vì rơi về pyserial.
+    The tell is THE SOCKET, not whether the `arduino` package imports: that package
+    ships in the base image so it is present even when the router is not running, and
+    in that case `Bridge.provide()` raises a hard-to-read connection error instead of
+    falling back to pyserial.
     """
     choice = os.getenv("EDGE_LINK", "auto").strip().lower() or "auto"
     if choice in {"bridge", "serial"}:
         return choice
     if choice != "auto":
-        raise ConfigError(f"EDGE_LINK phải là auto|bridge|serial, đang là {choice!r}")
+        raise ConfigError(f"EDGE_LINK must be auto|bridge|serial, got {choice!r}")
     return "bridge" if os.path.exists("/var/run/arduino-router.sock") else "serial"
 
 
@@ -100,95 +102,104 @@ def _link() -> str:
 class Settings:
     org_id: str
 
-    # Cổng UART tới gateway. None = tự dò (ưu tiên chip cầu CH34x/CP210x/FTDI).
-    # Khai tay khi nối thẳng chân UART: Linux không đoán được /dev/ttyS* nào
-    # đang nối vào đâu.
+    # The UART port to the gateway. None = auto-detect (preferring CH34x/CP210x/FTDI
+    # bridge chips). Declare it by hand when the UART pins are wired directly: Linux
+    # cannot guess which /dev/ttyS* is connected to what.
     #
-    # (EDGE_SCAN_TIMEOUT_SEC đã bỏ cùng trường `scan_timeout_sec`: đó là thời
-    # gian quét BLE tìm gateway theo UUID dịch vụ. Từ khi chuyển sang UART thì
-    # không còn gì để quét — trường đó chỉ được ĐẶT chứ không nơi nào ĐỌC.)
+    # (EDGE_SCAN_TIMEOUT_SEC went away along with the `scan_timeout_sec` field: that
+    # was the BLE scan timeout for finding the gateway by service UUID. Since the
+    # move to UART there is nothing to scan -- the field was only ever SET, never
+    # READ anywhere.)
     uart_port: str | None
     reconnect_sec: float
 
-    # Đường tới gateway: "bridge" (qua sketch trên STM32) hay "serial" (cổng
-    # USB-TTL của nửa Linux). "auto" chọn bridge nếu đang chạy trong App Lab.
+    # The path to the gateway: "bridge" (through the sketch on the STM32) or "serial"
+    # (the Linux half's USB-TTL port). "auto" picks bridge when running inside App
+    # Lab.
     #
-    # HAI ĐƯỜNG NÀY KHÔNG THỂ CÙNG ĐÚNG: dây chỉ cắm được vào một chỗ. Cắm vào
-    # D0/D1 thì nửa Linux KHÔNG có /dev/tty* nào tương ứng — pyserial sẽ vớ đại
-    # một cổng khác rồi ngồi chờ mãi mãi, và triệu chứng ("không thấy ảnh chụp")
-    # giống hệt đứt dây. Nên mặc định là dò, không phải đoán.
+    # THESE TWO CANNOT BOTH BE RIGHT: the cable can only be plugged into one place.
+    # Plugged into D0/D1 there is NO corresponding /dev/tty* on the Linux half --
+    # pyserial would grab some other port at random and then wait forever, and the
+    # symptom ("no snapshots") looks exactly like a broken cable. Hence detection
+    # rather than guessing by default.
     link: str
 
-    # Cửa sổ trượt giữ số đo từng góc (giây). Đủ dài để hồi quy tuyến tính có gì
-    # mà bám, đủ ngắn để một chiều nắng gắt không bị pha loãng bởi buổi sáng mát.
+    # The sliding window of per-corner readings (seconds). Long enough for a linear
+    # regression to have something to hold on to, short enough that an afternoon of
+    # harsh sun is not diluted by a cool morning.
     history_sec: float
 
-    # Im lặng bao lâu từ phía máy chủ thì UNO Q giành quyền lái.
+    # How long the server has to be silent before the UNO Q takes control.
     #
-    # Con số này so với `cloud_silence_sec` GATEWAY BÁO SANG, không phải một phép
-    # đo của riêng dịch vụ này — gateway giữ phiên MQTT nên nó biết chắc chắn hơn.
+    # This number is compared against the `cloud_silence_sec` THE GATEWAY REPORTS,
+    # not against a measurement made by this service -- the gateway holds the MQTT
+    # session so it knows more reliably.
     #
-    # 300s rộng có chủ đích: hai bên cùng ra lệnh là máy lạnh nhận hai lệnh trái
-    # nhau trong cùng một phút, và triệu chứng (nhiệt độ tự nhảy) trông y hệt lỗi
-    # thuật toán. Thà giành muộn.
+    # 300s is deliberately generous: both sides issuing commands means the air
+    # conditioner receives two contradictory orders within the same minute, and the
+    # symptom (a setpoint that jumps on its own) looks exactly like an algorithm bug.
+    # Better to take over late.
     takeover_after_sec: float
 
-    # Nhịp vòng điều khiển. Không cần dày: nhiệt độ phòng không đổi trong 30
-    # giây, và mỗi vòng đều có thể sinh ra một lệnh IR.
+    # The control loop interval. It does not need to be short: room temperature does
+    # not change over 30 seconds, and every iteration can emit an IR command.
     tick_sec: float
 
-    # Những mức nhiệt độ hộ này ĐÃ HỌC MÃ IR (chế độ COOL).
+    # The temperatures this household HAS LEARNED IR CODES for (COOL mode).
     #
-    # PHẢI KHAI TAY vì node edge không có đường tới Postgres — bảng `ir_codes`
-    # nằm trên máy chủ, mà cả lý do tồn tại của node này là chạy tiếp khi mất
-    # máy chủ. Để trống thì nó rơi về cách cũ: tự học bằng cách quan sát máy chủ
-    # ra lệnh, và cách đó có một cái bẫy:
+    # IT HAS TO BE DECLARED BY HAND because the edge node has no path to Postgres --
+    # the `ir_codes` table lives on the server, and the entire reason this node exists
+    # is to keep running when the server is gone. Left empty it falls back to the old
+    # approach: learning by watching the server issue commands, and that approach has
+    # a trap:
     #
-    #   Vừa khởi động, mới thấy đúng một mức (vd 27). nearest_captured_temp()
-    #   luôn trả về mức GẦN NHẤT trong danh sách nó có — nên mục tiêu 24.5 bị
-    #   ép thành 27, không lỗi, không cảnh báo. Danh sách lấp một nửa nguy hiểm
-    #   hơn danh sách rỗng: rỗng thì NoIrCodesError chặn lại.
+    #   Freshly started, it has seen exactly one level (say 27).
+    #   nearest_captured_temp() always returns the NEAREST level in the list it has --
+    #   so a target of 24.5 gets forced to 27, with no error and no warning. A
+    #   half-filled list is more dangerous than an empty one: an empty one makes
+    #   NoIrCodesError stop everything.
     #
-    # Danh sách thật lấy bằng:
+    # Get the real list with:
     #   SELECT DISTINCT temp FROM ir_codes WHERE mode='COOL' ORDER BY temp;
     ir_temps: tuple[int, ...]
 
-    # Lịch sử cục bộ (SQLite). Đây là nền cho mô hình nhiệt: không có nó thì mỗi
-    # lần khởi động lại dịch vụ là mô hình quay về con số 0 và mất vài giờ mới
-    # dùng được. Để trống = cạnh gói edge_ai.
+    # Local history (SQLite). This is the foundation of the thermal model: without it,
+    # every service restart puts the model back to zero and it takes hours to become
+    # usable again. Empty = next to the edge_ai package.
     history_db: str
     history_days: float
 
-    # Toạ độ để lấy dự báo nhiệt độ ngoài trời (open-meteo, không cần khoá API).
-    # Cả hai cùng None = tắt dự báo; lúc đó mô hình vẫn chạy nhưng khi nhìn xa
-    # hơn ~15 phút nó phải giả định trời ngoài đứng yên.
+    # Coordinates for fetching the outdoor temperature forecast (open-meteo, no API
+    # key needed). Both None = the forecast is disabled; the model still runs but
+    # looking further ahead than ~15 minutes it has to assume the outdoor temperature
+    # stands still.
     lat: float | None
     lon: float | None
 
-    # Chỉ đề xuất, không bao giờ ra lệnh — kể cả khi mất cloud. Bật khi chạy thử
-    # tại nhà khách để đối chiếu quyết định edge với quyết định cloud trước khi
-    # giao cho nó quyền thật.
+    # Advise only, never command -- even when the cloud is gone. Enable it during a
+    # trial run in a customer's home to compare edge decisions against cloud
+    # decisions before handing it real authority.
     advisory_only: bool
 
 
 def _default_db() -> str:
-    """Thư mục ``data/`` cạnh gói edge_ai.
+    """The ``data/`` directory next to the edge_ai package.
 
-    PHẢI NẰM TRONG THƯ MỤC APP, không có lựa chọn khác: container của App Lab chỉ
-    gắn đúng một chỗ vừa ghi được vừa sống sót qua lần dựng lại — chính thư mục
-    app (``/app``). Mọi đường dẫn khác đều biến mất cùng container.
+    IT HAS TO BE INSIDE THE APP DIRECTORY, with no alternative: App Lab's container
+    only mounts one location that is both writable and survives a rebuild -- the app
+    directory itself (``/app``). Every other path vanishes with the container.
 
-    RIÊNG MỘT THƯ MỤC CON, không rải thẳng cạnh mã nguồn. SQLite tạo BA file
-    (``.db``, ``.db-wal``, ``.db-shm``), cộng bộ đệm dự báo là bốn. Để chúng ngang
-    hàng với ``main.py`` thì trình duyệt tệp của App Lab liệt kê lẫn vào mã nguồn,
-    và bấm nhầm vào một file nhị phân sẽ mở nó trong trình soạn thảo văn bản —
-    lưu lại một lần là hỏng cả cơ sở dữ liệu.
+    IN ITS OWN SUBDIRECTORY, not scattered next to the source. SQLite creates THREE
+    files (``.db``, ``.db-wal``, ``.db-shm``), plus the forecast cache makes four.
+    Sitting alongside ``main.py``, App Lab's file browser lists them mixed in with the
+    source, and clicking a binary file by mistake opens it in the text editor --
+    saving it once corrupts the whole database.
     """
     return str(Path(__file__).resolve().parent.parent / "data" / "breezelink-history.db")
 
 
 def load() -> Settings:
-    """Đọc cấu hình từ môi trường (đã nạp .env nếu có)."""
+    """Read the configuration from the environment (with .env already loaded if present)."""
     lat, lon = _coords()
     return Settings(
         org_id=_require("EDGE_ORG_ID"),

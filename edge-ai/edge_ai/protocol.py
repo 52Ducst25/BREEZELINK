@@ -1,13 +1,14 @@
-"""Bố cục gói trên đường UART tới gateway.
+"""Packet layout for the UART link to the gateway.
 
-BẢN SONG SINH CỦA ``FirmWare/shared/unoq-link-protocol.h``. Chuỗi ``struct``
-dưới đây phải khớp từng byte với struct C bên đó; đổi một bên mà quên bên kia
-thì gói vẫn giải mã "thành công" và cho ra nhiệt độ rác — nên có ``VERSION``, và
-nó được kiểm ở mọi lối vào.
+THE TWIN OF ``FirmWare/shared/unoq-link-protocol.h``. The ``struct`` format strings
+below must match the C structs over there byte for byte; change one side and forget
+the other and the packet still decodes "successfully" while producing garbage
+temperatures -- hence ``VERSION``, which is checked at every entry point.
 
-Vì sao không sinh tự động từ header C: một bộ sinh mã là thêm một bước build
-phải chạy đúng trên cả máy dev lẫn UNO Q, để tránh chép hai chục dòng. Cái giá
-đó không đáng; cái giá của việc quên đồng bộ thì được chặn bằng version + CRC.
+Why it is not generated automatically from the C header: a code generator is another
+build step that has to run correctly on both the dev machine and the UNO Q, all to
+avoid copying twenty lines. That price is not worth paying; the price of forgetting
+to sync is covered by the version field plus the CRC.
 """
 
 import struct
@@ -15,16 +16,17 @@ from dataclasses import dataclass
 from enum import IntEnum
 
 MAGIC = 0xAC
-# 2 = ban UART. Ban 1 la BLE va KHONG tuong thich: goi lenh v1 dai 12 byte,
-# v2 dai 13 (them crc8). Gateway kiem truong nay nen hai ben lech phien ban se bi
-# tu choi thang thay vi doc lech truong roi ra lenh sai.
+# 2 = the UART version. Version 1 was BLE and is NOT compatible: a v1 command packet
+# is 12 bytes, v2 is 13 (a crc8 was added). The gateway checks this field, so a
+# version mismatch is rejected outright rather than misreading fields and issuing a
+# wrong command.
 VERSION = 2
 
-# Toc do UART. PHAI KHOP UNOQ_BAUD trong FirmWare/esp32-*/platformio.ini.
-# 115200 la du: anh chup 39 byte moi 5 giay = 62 byte/giay. Khong nang cao hon —
-# day di giua hai bo khong boc giap, toc do cao doi lay ti le loi bit chu khong
-# doi lay gi ca o luu luong nay. Hai ben lech baud thi byte ra rac, va trieu
-# chung giong het thieu day GND.
+# UART speed. It MUST MATCH UNOQ_BAUD in FirmWare/esp32-*/platformio.ini.
+# 115200 is more than enough: a 39-byte snapshot every 5 seconds = 62 bytes/second.
+# Do not raise it -- the wire between the two boards is unshielded, and a higher rate
+# trades bit error rate for nothing at all at this throughput. A baud mismatch
+# produces garbage bytes, and the symptom looks exactly like a missing GND wire.
 BAUD = 115200
 MAX_ROOMS = 4
 
@@ -43,7 +45,7 @@ KIND_COMMAND = 1
 
 
 class Mode(IntEnum):
-    """Khớp AcUnoQMode bên firmware VÀ app.models.enums.AcMode bên backend."""
+    """Matches AcUnoQMode in the firmware AND app.models.enums.AcMode in the backend."""
 
     OFF = 0
     COOL = 1
@@ -56,8 +58,9 @@ class Mode(IntEnum):
         return "UNKNOWN" if self is Mode.UNKNOWN else self.name
 
 
-# '<' = little-endian KHÔNG căn lề — bắt buộc, vì struct C bên kia là __packed__.
-# Bỏ '<' thì Python tự chèn byte đệm và mọi trường sau ô đầu tiên lệch chỗ.
+# '<' = little-endian with NO alignment -- mandatory, because the C struct on the
+# other side is __packed__. Drop the '<' and Python inserts padding bytes, shifting
+# every field after the first one.
 _SNAPSHOT_FMT = (
     "<"
     "BBBB"          # magic, version, room_count, flags
@@ -74,29 +77,31 @@ SNAPSHOT_SIZE = struct.calcsize(_SNAPSHOT_FMT)
 
 # magic, version, kind, mode, setpoint, reserved, seq, link_key, crc8
 #
-# CRC LA MOI O BAN UART. Ban BLE khong co vi tang lien ket cua Bluetooth da tu
-# kiem CRC24 va loai goi hong truoc khi len tang ung dung. UART khong co gi nhu
-# vay: day nhieu, cam rut giua chung, hai dau lech baud — tat ca deu day byte rac
-# len thang. Voi anh chup thi mot bit lat lam sai mot so do trong mot nhip; voi
-# LENH thi no doi setpoint roi di thang ra may lanh.
+# THE CRC IS NEW IN THE UART VERSION. The BLE version had none, because Bluetooth's
+# link layer already checked a CRC24 and discarded corrupt packets before they
+# reached the application layer. UART has nothing of the kind: a noisy wire,
+# hot-plugging the cable, a baud mismatch -- all of them push garbage bytes straight
+# up. For a snapshot, one flipped bit corrupts one reading for one tick; for a
+# COMMAND it changes the setpoint and goes straight out to the air conditioner.
 _COMMAND_FMT = "<BBBBbBHIB"
 COMMAND_SIZE = struct.calcsize(_COMMAND_FMT)
 
-# Chốt kích thước, khớp static_assert trong unoq-link-protocol.h. Thêm một trường
-# ở một bên mà quên bên kia thì gói vẫn "giải mã thành công" — chỉ là mọi trường
-# sau chỗ chèn đều lệch, và nhiệt độ phòng đọc ra thành số rác. CRC không cứu
-# được: nó tính trên đúng số byte mà bên gửi nghĩ là đúng. Hai dòng này nổ ngay
-# lúc import, tức là lúc dịch vụ khởi động, chứ không phải lúc đang lái máy lạnh.
-assert SNAPSHOT_SIZE == 39, f"Snapshot {SNAPSHOT_SIZE} byte, firmware chốt 39"
-assert COMMAND_SIZE == 13, f"Command {COMMAND_SIZE} byte, firmware chốt 13"
+# Size pinning, matching the static_assert in unoq-link-protocol.h. Add a field on
+# one side and forget the other and the packet still "decodes successfully" -- only
+# every field after the insertion point is shifted, and the room temperature reads
+# out as garbage. The CRC does not save you: it is computed over exactly the number
+# of bytes the sender thought was right. These two lines blow up at import time,
+# i.e. when the service starts, rather than while it is driving an air conditioner.
+assert SNAPSHOT_SIZE == 39, f"Snapshot is {SNAPSHOT_SIZE} bytes, the firmware pins 39"
+assert COMMAND_SIZE == 13, f"Command is {COMMAND_SIZE} bytes, the firmware pins 13"
 
 
 class ProtocolError(ValueError):
-    """Gói không đúng khuôn — bên gọi phải BỎ, không được đoán."""
+    """The packet is malformed -- the caller must DISCARD it and must not guess."""
 
 
 def crc8(data: bytes) -> int:
-    """CRC8 Dallas/Maxim (đa thức phản chiếu 0x8C) — khớp acUnoQCrc8()."""
+    """CRC8 Dallas/Maxim (reflected polynomial 0x8C) -- matches acUnoQCrc8()."""
     crc = 0
     for byte in data:
         for _ in range(8):
@@ -109,7 +114,7 @@ def crc8(data: bytes) -> int:
 
 
 def fnv1a(text: str) -> int:
-    """FNV-1a 32-bit — khớp acUnoQLinkKey(). Dùng để băm ORG_ID thành link_key."""
+    """FNV-1a 32-bit -- matches acUnoQLinkKey(). Used to hash ORG_ID into link_key."""
     h = 2166136261
     for b in text.encode("utf-8"):
         h ^= b
@@ -118,8 +123,9 @@ def fnv1a(text: str) -> int:
 
 
 def _temp(raw: int) -> float | None:
-    """None chứ không 0.0 cho "không có số đo": 0 °C là một nhiệt độ hợp lệ, và
-    hiểu nó thành "thiếu" là cách nhanh nhất để một cảm biến hỏng kéo trung vị."""
+    """None rather than 0.0 for "no reading": 0 degC is a valid temperature, and
+    reading it as "missing" is the fastest way for a broken sensor to drag the
+    median."""
     return None if raw == T_INVALID else raw / 100.0
 
 
@@ -129,14 +135,14 @@ def _rh(raw: int) -> float | None:
 
 @dataclass(frozen=True)
 class RoomSlot:
-    corner: int | None  # nhãn góc node tự khai; None = ô trống
+    corner: int | None  # the corner label the node declares; None = empty slot
     temp: float | None
     humidity: float | None
 
 
 @dataclass(frozen=True)
 class Snapshot:
-    """Ảnh chụp gateway gửi sang. Mọi số đo thiếu là None, không bao giờ là 0."""
+    """The snapshot the gateway sends over. Every missing reading is None, never 0."""
 
     room_count: int
     flags: int
@@ -145,7 +151,7 @@ class Snapshot:
     t_out: float | None
     h_out: float | None
     rooms: list[RoomSlot]
-    cloud_silence_sec: int | None  # None = máy chủ CHƯA TỪNG ra lệnh
+    cloud_silence_sec: int | None  # None = the server has NEVER issued a command
     ac_mode: Mode
     ac_setpoint: int | None
     uptime_min: int
@@ -168,29 +174,30 @@ class Snapshot:
 
 
 def parse_snapshot(data: bytes) -> Snapshot:
-    """Giải mã một ảnh chụp. Ném ProtocolError nếu có bất cứ gì không khớp.
+    """Decode one snapshot. Raises ProtocolError if anything does not match.
 
-    Kiểm ĐỘ DÀI TRƯỚC TIÊN: trên UART, một khung có thể tới làm nhiều mảnh (đệm
-    driver cắt bất kỳ đâu). Bên gọi phải gom đủ byte rồi mới đưa vào đây; dòng
-    kiểm này biến "gọi sớm" thành một thông báo đọc được thay vì một IndexError.
+    THE LENGTH IS CHECKED FIRST: over UART a frame can arrive in several pieces (the
+    driver buffer splits anywhere). The caller must gather enough bytes before
+    calling in here; this check turns "called too early" into a readable message
+    rather than an IndexError.
     """
     if len(data) < SNAPSHOT_SIZE:
         raise ProtocolError(
-            f"Ảnh chụp dài {len(data)} byte, cần {SNAPSHOT_SIZE}. "
-            "Gần như chắc chắn MTU quá nhỏ nên gói bị cắt cụt."
+            f"Snapshot is {len(data)} bytes, {SNAPSHOT_SIZE} are needed. "
+            "Almost certainly the MTU is too small and the packet was truncated."
         )
     fields = struct.unpack(_SNAPSHOT_FMT, data[:SNAPSHOT_SIZE])
 
     magic, version, room_count, flags = fields[0:4]
     if magic != MAGIC:
-        raise ProtocolError(f"magic sai: {magic:#04x}")
+        raise ProtocolError(f"wrong magic: {magic:#04x}")
     if version != VERSION:
         raise ProtocolError(
-            f"phiên bản gói {version}, dịch vụ này hiểu {VERSION} — "
-            "firmware gateway và edge-ai lệch nhau, nạp lại một bên."
+            f"packet version {version}, this service understands {VERSION} -- "
+            "the gateway firmware and edge-ai have diverged, reflash one of them."
         )
     if crc8(data[: SNAPSHOT_SIZE - 1]) != fields[-1]:
-        raise ProtocolError("CRC sai")
+        raise ProtocolError("wrong CRC")
 
     i = 4
     t_in, h_in, t_out, h_out = fields[i : i + 4]
@@ -231,15 +238,16 @@ def parse_snapshot(data: bytes) -> Snapshot:
 
 
 def build_command(*, kind: int, mode: Mode, setpoint: int | None, seq: int, link_key: int) -> bytes:
-    """Đóng gói một đề xuất (kind=ADVICE) hoặc lệnh thật (kind=COMMAND).
+    """Package an advice (kind=ADVICE) or a real command (kind=COMMAND).
 
-    ``kind`` là ranh giới quan trọng nhất của cả giao thức: gateway CHỈ bắn hồng
-    ngoại khi nhận COMMAND. Mặc định ở mọi lối gọi phải là ADVICE.
+    ``kind`` is the most important boundary in the whole protocol: the gateway ONLY
+    fires infrared on COMMAND. The default at every call site must be ADVICE.
     """
-    # Đóng gói với crc8 = 0 rồi tính CRC trên 12 byte đầu và ghi đè byte cuối.
-    # Cùng cách firmware làm (acUnoQSealCommand) — và phải cùng cách, vì CRC tính
-    # trên một chuỗi byte khác đi một byte là mọi lệnh bị gateway từ chối, mà
-    # triệu chứng chỉ là "máy lạnh không nhúc nhích".
+    # Pack with crc8 = 0, then compute the CRC over the first 12 bytes and overwrite
+    # the last one. The same way the firmware does it (acUnoQSealCommand) -- and it
+    # has to be the same way, because a CRC computed over a byte string that differs
+    # by one byte makes the gateway reject every command, with the symptom being
+    # simply "the air conditioner does not move".
     body = struct.pack(
         _COMMAND_FMT,
         MAGIC,
@@ -250,6 +258,6 @@ def build_command(*, kind: int, mode: Mode, setpoint: int | None, seq: int, link
         0,                    # reserved
         seq & 0xFFFF,
         link_key & 0xFFFFFFFF,
-        0,                    # crc8, điền ngay dưới
+        0,                    # crc8, filled in just below
     )
     return body[:-1] + bytes([crc8(body[:-1])])
