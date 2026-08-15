@@ -35,7 +35,8 @@
 //     3. Mất số đo         -> CẮT
 //     4. Đang khoá đổ nước -> giữ TẮT
 //     5. Trễ (deadband)    -> muốn gì
-//     6. Dwell             -> có được đổi bây giờ không
+//     6. Dwell             -> có được đổi bây giờ không — CHỈ CHẶN CHIỀU TẮT,
+//                             xem DWELL_SEC cho lý do bất đối xứng
 // ============================================================================
 namespace HumidifierControl {
 
@@ -62,15 +63,42 @@ constexpr float OFF_ABOVE_RH = 60.0f;
 /// Nhịp gọi update() (ms). EMA_ALPHA dưới đây tính theo đúng nhịp này.
 constexpr uint32_t TICK_MS = 5000UL;
 
-/// Làm mượt đầu vào. 0.2 ở nhịp 5 giây -> hằng số thời gian ~25 giây.
-constexpr float EMA_ALPHA = 0.2f;
-
-/// Tối thiểu bao lâu giữ một trạng thái trước khi được đổi (giây).
+/// Làm mượt đầu vào. 0.5 ở nhịp 5 giây -> hằng số thời gian ~7 giây.
 ///
-/// Không phải để bảo vệ máy nén như điều hoà — máy tạo ẩm không có — mà vì HƠI
-/// NƯỚC CẦN VÀI PHÚT MỚI LAN TỚI CẢM BIẾN. Ở đây còn đúng hơn cả bo gốc: cảm
-/// biến nằm tận bốn góc phòng, xa nguồn phun hơn nhiều.
+/// NÂNG TỪ 0.2 (τ ~22 giây) VÌ MÁY BẬT QUÁ CHẬM sau khi phòng khô. Với bước
+/// 50%->40%, ngưỡng 45 nằm đúng giữa nên số đã lọc cần `ln0.5/ln(1-α)` nhịp để
+/// cắt qua: ở 0.2 là ~16 giây, ở 0.5 là **một nhịp = 5 giây**.
+///
+/// AN TOÀN VÌ ĐẦU VÀO ĐÃ ĐƯỢC LỌC MỘT LẦN RỒI: số vào đây là TRUNG VỊ bốn góc
+/// phòng, tức đã khử nhiễu theo KHÔNG GIAN. EMA chỉ còn phải khử nhiễu theo THỜI
+/// GIAN của chính con trung vị đó, và một con trung vị thì khó nhảy đột ngột.
+/// Lớp chống dao động thật sự vẫn là DEADBAND 15 điểm ở §2, không phải EMA.
+constexpr float EMA_ALPHA = 0.5f;
+
+/// Tối thiểu bao lâu giữ trạng thái trước khi được TẮT (giây).
+///
+/// CHỈ ÁP CHO CHIỀU TẮT — bật thì đi ngay, không chờ. Bất đối xứng có chủ đích,
+/// cùng khuôn với "giành lái chậm, nhả lái nhanh" của lớp edge AI:
+///
+///   BẬT MUỘN  -> phòng cứ khô, người ở cảm nhận được ngay. Đây đúng là lỗi
+///                đã bị báo: dwell 300 giây chặn cả lần bật đầu tiên.
+///   TẮT MUỘN  -> máy phun thêm vài phút. Gần như vô hại.
+///
+/// Và lý do gốc của dwell chỉ đúng cho chiều TẮT: "hơi nước cần vài phút mới lan
+/// tới cảm biến" là chuyện xảy ra SAU KHI ĐÃ BẬT — nó ngăn ta vội kết luận lệnh
+/// vừa rồi không có tác dụng. Nó không nói gì về việc có nên bật hay không khi
+/// phòng đang khô thật.
+///
+/// KHÔNG SỢ DAO ĐỘNG khi bỏ dwell chiều bật: đã bật rồi thì phải vượt 60%RH mới
+/// tắt (deadband 15 điểm), nên không có đường nào để bật/tắt liên tục.
 constexpr uint32_t DWELL_SEC = 300UL;
+
+/// Chưa học mã IR thì thử lại mỗi bấy nhiêu giây (giây).
+///
+/// Tách khỏi DWELL_SEC vì dwell nay không còn chặn chiều bật: không có bộ đếm
+/// riêng thì mỗi nhịp 5 giây lại thử bắn một lần và log phun ra liên tục cho tới
+/// khi có người vào app học mã.
+constexpr uint32_t NO_CODE_RETRY_SEC = 300UL;
 
 /// Chạy liên tục quá lâu thì cắt (giây). Phòng quá khô hoặc cửa mở suốt thì
 /// vòng lặp không bao giờ đạt ngưỡng tắt, và máy chạy tới cạn bình.

@@ -14,7 +14,8 @@ Reason g_reason = Reason::BOOT;
 float    g_rh = NAN;           ///< độ ẩm đã làm mượt
 uint32_t g_lastGoodMs = 0;     ///< lần cuối có số đo hợp lệ (0 = chưa lần nào)
 
-uint32_t g_lastSwitchMs = 0;   ///< lần cuối trạng thái ĐỔI (hoặc thử đổi)
+uint32_t g_lastSwitchMs = 0;   ///< lần cuối trạng thái ĐỔI THÀNH CÔNG
+uint32_t g_lastTryMs = 0;      ///< lần cuối THỬ bắn IR, kể cả khi trượt
 uint32_t g_onSinceMs = 0;      ///< lần cuối máy được bật
 
 bool     g_override = false;
@@ -82,14 +83,14 @@ uint32_t elapsedSec(uint32_t sinceMs, uint32_t nowMs) {
 void applyState(bool want, Reason why, uint32_t nowMs) {
   if (g_emit == nullptr) return;
 
+  // Mốc THỬ, ghi trước khi biết kết quả: nó là thứ chặn vòng thử-lại khi chưa
+  // học mã. KHÔNG dùng g_lastSwitchMs cho việc đó nữa — dwell nay chỉ chặn
+  // chiều tắt, nên nạp nó ở đây sẽ vừa không chặn được log spam chiều bật, vừa
+  // âm thầm dời mốc dwell của chiều tắt vì một lần bắn trượt.
+  g_lastTryMs = nowMs;
+
   if (!g_emit(want)) {
     // Không bắn được (chưa học mã). KHÔNG đổi g_on — máy thật có đổi gì đâu.
-    //
-    // Vẫn nạp lại đồng hồ dwell, có chủ đích: không nạp thì vòng kế tiếp lại thử
-    // ngay và log phun ra mỗi 5 giây cho tới khi có người vào app học mã. Nạp
-    // vào thì nó thử lại mỗi DWELL_SEC — vẫn tự khỏi ngay khi mã được học, mà
-    // log đọc được.
-    g_lastSwitchMs = nowMs;
     g_reason = Reason::NO_CODE;
     return;
   }
@@ -166,9 +167,19 @@ void decide(uint32_t nowMs) {
     return;
   }
 
-  // --- 6) Dwell -------------------------------------------------------------
-  if (elapsedSec(g_lastSwitchMs, nowMs) < DWELL_SEC) {
+  // --- 6) Dwell — CHỈ CHẶN CHIỀU TẮT ----------------------------------------
+  //  Bật thì đi ngay. Lý do bất đối xứng ghi đầy đủ ở DWELL_SEC trong .h; tóm
+  //  tắt: bật muộn thì phòng cứ khô và người ở cảm nhận được, còn tắt muộn thì
+  //  chỉ phun thừa vài phút. Deadband 15 điểm mới là lớp chặn dao động, nên bỏ
+  //  dwell chiều bật không mở đường cho bật/tắt liên tục.
+  if (!want && elapsedSec(g_lastSwitchMs, nowMs) < DWELL_SEC) {
     g_reason = Reason::DWELL_HOLD;
+    return;
+  }
+
+  // Chưa học mã thì đừng thử mỗi nhịp 5 giây — xem NO_CODE_RETRY_SEC.
+  if (g_reason == Reason::NO_CODE &&
+      elapsedSec(g_lastTryMs, nowMs) < NO_CODE_RETRY_SEC) {
     return;
   }
 
@@ -188,7 +199,11 @@ void begin(Emitter emit) {
   g_reason = Reason::BOOT;
 
   const uint32_t now = millis();
+  // Mốc dwell nạp từ lúc boot. GIỜ CHỈ CÒN CHẶN CHIỀU TẮT, nên nó không còn khoá
+  // cứng 5 phút đầu như trước: phòng đang khô thì panel bật máy ngay ở nhịp
+  // quyết định đầu tiên. Đó chính là lỗi "đáp ứng chậm" đã được báo.
   g_lastSwitchMs = now;
+  g_lastTryMs    = now;
   // Tính giờ chạy từ lúc boot, không từ lúc bật thật — ta không biết lúc đó, và
   // ước lượng THẤP hơn thực tế sẽ làm MAX_RUN cắt muộn. Đếm lại từ 0 chỉ sai
   // theo chiều an toàn (cắt muộn hơn) khi panel vừa mất điện cùng máy; chấp nhận
