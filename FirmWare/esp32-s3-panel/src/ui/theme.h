@@ -103,11 +103,17 @@ enum : lv_coord_t {
   PAD       = 6,
   STATUS_H  = 22,          // y 0..21
   CONTENT_Y = 24, CONTENT_H = 180,   // y 24..203
-  // NAV_W = 64 CHỨ KHÔNG CÒN 80: thêm tab MÁY TẠO ẨM là 5 tab, và 5 × 64 = 320
-  // vừa khít bề ngang. Ô chạm hẹp lại 16px nhưng vẫn 64×34 — trên ngưỡng 44×44
-  // của hướng dẫn cảm ứng theo chiều dọc, và bề ngang thì ngón tay không cần
-  // nhiều bằng: bốn tab cũ nằm sát nhau và chưa lần nào bấm nhầm.
-  NAV_Y     = 206, NAV_H = 34, NAV_W = 64,   // 5 tab × 64
+  // KHÔNG CÒN NAV_W. Số tab đã đổi hai lần (4 -> 5 -> 6) và mỗi lần lại phải tìm
+  // một bề rộng chia hết cho 320: 80, rồi 64, rồi... 53,33. Không có số nguyên
+  // nào cho 6 tab, nên chốt một hằng số là chấp nhận hoặc thừa 2px bên phải
+  // (vạch nhấn dưới tab cuối không chạm mép, nhìn như lỗi vẽ), hoặc tràn ra
+  // ngoài màn.
+  //
+  // Nay bề rộng tính theo BIÊN chứ không theo bề rộng: tab i chạy từ
+  // (320·i)/TABS tới (320·(i+1))/TABS. Phần dư được rải đều — 6 tab ra
+  // 53,54,53,53,54,53 = đúng 320 — và thêm tab lần sau không phải tính lại gì.
+  // Xem tabX()/tabW() trong ui-screens.cpp.
+  NAV_Y     = 206, NAV_H = 34,
   CH_SM = 4, CH_MD = 6, CH_LG = 10           // độ vát
 };
 

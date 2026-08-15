@@ -55,6 +55,10 @@ struct Model {
   char     ssid[33] = "";
   char     mac[18]  = "";
   uint8_t  channel  = 0;
+  /// Panel có đang TỰ ghim kênh ESP-NOW không (true = đang mất WiFi và bám kênh
+  /// đã nhớ). Phân biệt "kênh do router quyết" với "kênh do panel tự nhớ" — xem
+  /// espnow-channel.h.
+  bool     channelPinned = false;
 
   // --- số đo trong nhà: TRUNG VỊ của các node góc phòng ---
   //
@@ -78,9 +82,24 @@ struct Model {
   uint8_t  roomCorner[MAX_ROOMS] = {0};   ///< nhãn góc node tự khai; 0xFF = không khai
   uint32_t roomAgeSec[MAX_ROOMS] = {0};
 
-  // --- Arduino UNO Q (edge AI, qua Bluetooth) ---
-  bool     unoqUp = false;   ///< có đang kết nối GATT không
+  // --- Arduino UNO Q (edge AI, qua UART) ---
+  bool     unoqUp = false;   ///< gần đây có nghe thấy gói hợp lệ không
   uint32_t unoqRx = 0;       ///< số đề xuất/lệnh đã nhận từ nó
+  uint32_t unoqRejected = 0; ///< số gói bị bỏ (sai magic/CRC/link_key/lặp)
+
+  /// Đề xuất GẦN NHẤT của UNO Q — nội dung của tab EDGE AI.
+  ///
+  /// GIỚI HẠN PHẢI BIẾT TRƯỚC KHI ĐỌC MÀN NÀY: gói trên dây chỉ chở
+  /// (kind, mode, setpoint, seq) — xem AcUnoQCommandHeader. UNO Q có tính dự báo
+  /// 15 phút và đếm bất thường, nhưng CHÚNG KHÔNG QUA DÂY, chỉ nằm trong log của
+  /// chính nó. Nên tab này nói được CÁI GÌ và KHI NÀO, không nói được TẠI SAO.
+  /// Đừng bịa thêm một dòng "lý do" suy ra từ mode/setpoint — đó là đoán, và một
+  /// lời giải thích tự tin mà sai thì tệ hơn không có lời nào.
+  char     unoqMode[8] = "";       ///< "COOL"/"DRY"/"FAN"/"OFF"; rỗng = chưa có
+  int      unoqSetpoint = -1;      ///< -1 = chế độ này không dùng nhiệt độ
+  bool     unoqWasCommand = false; ///< true = LỆNH (đã bắn IR), false = chỉ đề xuất
+  uint32_t unoqAgeSec = 0;         ///< giây kể từ đề xuất gần nhất
+  bool     unoqEverAdvised = false;///< phân biệt "CHƯA TỪNG" với "vừa xong 0 giây"
 
   // --- số đo ngoài trời (qua ESP-NOW) ---
   float    tOut = NAN, hOut = NAN;
@@ -94,6 +113,12 @@ struct Model {
   int      setpoint = -1;       // -1 = chưa biết
   bool     overrideLocal = false;   // ghi đè đặt từ chính màn này (README §8.3)
   uint32_t lastCmdSec = 0;      // giây kể từ lệnh cuối của server
+  /// Máy chủ ĐÃ TỪNG ra lệnh chưa. Không gộp vào lastCmdSec=0 được: "chưa bao
+  /// giờ nghe máy chủ" và "máy chủ vừa ra lệnh xong" là hai chuyện trái ngược
+  /// nhau, mà cả hai đều cho ra số 0. Cùng lý do đã ghi ở cloud_silence_sec
+  /// trong pushUnoQSnapshot() — tab EDGE AI dựa vào đúng phân biệt này để nói
+  /// được vì sao UNO Q mới chỉ đề xuất mà chưa cầm lái.
+  bool     cloudEverCommanded = false;
 
   /// Tổ hợp nào đã có mã IR trong NVS. loop() tính sẵn rồi nhét vào đây thay vì
   /// để tác vụ UI tự hỏi IrStore: NVS do lõi 1 sở hữu, mà một cái bitmask 16

@@ -17,14 +17,30 @@ CommandFn gOnCmd     = nullptr;
 SettingFn gOnSetting = nullptr;
 
 // --- Khung chung -------------------------------------------------------------
-/// 5 tab: TRANG CHỦ · ĐIỀU KHIỂN · MÁY TẠO ẨM · THÔNG TIN · CÀI ĐẶT.
+/// 6 tab: TRANG CHỦ · ĐIỀU KHIỂN · MÁY TẠO ẨM · THÔNG TIN · EDGE AI · CÀI ĐẶT.
 ///
 /// MÁY TẠO ẨM ĐƯỢC MỘT TAB RIÊNG, không nhét vào màn ĐIỀU KHIỂN — dù chỗ trống
 /// ở đó vẫn còn. Màn ĐIỀU KHIỂN đã có sẵn một cặp THỦ CÔNG / TỰ ĐỘNG cho máy
 /// lạnh; đặt thêm một cặp nữa cho máy tạo ẩm lên cùng màn thì hai cặp nút giống
 /// hệt nhau điều khiển hai cái máy khác nhau, và câu hỏi "nút này đang nói về
 /// máy nào" không trả lời được bằng cách nhìn.
-constexpr uint8_t TABS = 5;
+///
+/// EDGE AI CHÈN TRƯỚC CÀI ĐẶT, không thêm vào cuối: CÀI ĐẶT phải ở lì vị trí
+/// cuối cùng. Nó là tab người dùng tìm bằng trí nhớ cơ bắp ("ngoài cùng bên
+/// phải"), và đẩy nó sang chỗ khác mỗi lần thêm một màn là bắt học lại vị trí
+/// của thứ họ đã quen.
+///
+/// TAB NÀY CHỈ ĐỌC, KHÔNG CÓ NÚT NÀO. Có chủ đích: quyền quyết định giữa máy chủ
+/// và edge do `cloud_silence_sec` và cờ ghi đè định đoạt (xem controller.py), và
+/// thêm một nút "cho phép edge cầm lái" ngay trên panel sẽ tạo ra một đường thứ
+/// ba tranh quyền với hai đường đã có. Màn này trả lời "edge đang nghĩ gì", chứ
+/// không phải chỗ để lái nó.
+constexpr uint8_t TABS = 6;
+
+/// Biên trái và bề rộng của tab thứ [i]. Rải phần dư thay vì chốt một bề rộng —
+/// xem khối NAV_* trong theme.h cho lý do.
+constexpr lv_coord_t tabX(uint8_t i) { return (lv_coord_t)((Theme::SCREEN_W * i) / TABS); }
+constexpr lv_coord_t tabW(uint8_t i) { return (lv_coord_t)(tabX(i + 1) - tabX(i)); }
 lv_obj_t *gStatusBar, *gNav;
 lv_obj_t *gLblClock, *gDotWifi, *gDotMqtt;
 lv_obj_t *gTabBtn[TABS], *gTabMark[TABS];
@@ -33,6 +49,18 @@ uint8_t   gTab = 0;
 
 lv_obj_t *gToast, *gToastLbl;
 uint32_t  gToastUntil = 0;
+
+// --- EDGE AI -----------------------------------------------------------------
+lv_obj_t *gEdgeBadge, *gEdgeBadgeLbl, *gEdgeMode, *gEdgeSet, *gEdgeVs;
+constexpr uint8_t EDGE_ROWS = 3;
+lv_obj_t *gEdgeVal[EDGE_ROWS];
+/// Ba câu hỏi, theo thứ tự người ta thật sự hỏi khi máy lạnh không chạy như ý.
+///
+/// "MÁY CHỦ" đứng TRÊN "ĐƯỜNG UART" dù đường dây là điều kiện cần: người dùng
+/// hỏi "sao nó không làm gì" trước, và câu trả lời gần như luôn là "máy chủ vẫn
+/// đang cầm lái" chứ không phải "dây đứt". Đặt nguyên nhân hiếm lên trên là dẫn
+/// người đọc đi kiểm tra sai thứ trong chín trên mười lần.
+const char *const kEdgeRow[EDGE_ROWS] = {"MÁY CHỦ", "ĐƯỜNG UART", "GÓI ĐÃ NHẬN"};
 
 // --- TRANG CHU ---------------------------------------------------------------
 lv_obj_t *gInTemp, *gInHum, *gOutTemp, *gOutHum, *gOutDot, *gOutNote;
@@ -333,17 +361,23 @@ void buildChrome() {
   //   giọt nước -> MÁY TẠO ẨM; TINT là giọt nước, và độ ẩm thì không có biểu
   //                tượng nào khác trong bộ này gần nghĩa hơn
   //   danh sách -> THÔNG TIN; đúng là 8 dòng chẩn đoán xếp thành danh sách
+  //   con mắt   -> EDGE AI; màn này chỉ NHÌN, không bấm được gì. Đã cân nhắc
+  //                CHARGE (tia sét) và bỏ: tia sét đọc ra "nguồn điện" và nằm
+  //                ngay cạnh biểu tượng nguồn của tab ĐIỀU KHIỂN thì thành một
+  //                cặp gây nhầm. Con mắt nói đúng việc — quan sát thứ UNO Q nghĩ.
   //   bánh răng -> CÀI ĐẶT, quy ước ai cũng hiểu
   // Không có biểu tượng "thanh trượt" trong bộ này, nên "nguồn" là cái gần
   // nghĩa nhất — đừng đổi sang bút chì hay cây kéo cho lạ mắt.
   static const char *kTab[TABS] = {LV_SYMBOL_HOME, LV_SYMBOL_POWER, LV_SYMBOL_TINT,
-                                   LV_SYMBOL_LIST, LV_SYMBOL_SETTINGS};
+                                   LV_SYMBOL_LIST, LV_SYMBOL_EYE_OPEN, LV_SYMBOL_SETTINGS};
   for (uint8_t i = 0; i < TABS; i++) {
-    // Ô chạm nguyên 64×34 — kiosk.css đòi ô lớn, và đây là ô nhỏ nhất trên màn.
+    // Ô chạm 53×34. Hẹp hơn mức 64 cũ, vẫn trên ngưỡng theo chiều dọc — và bề
+    // ngang thì ngón tay không cần nhiều bằng, năm tab trước đã nằm sát nhau mà
+    // chưa lần nào bấm nhầm.
     gTabBtn[i] = lv_btn_create(gNav);
     lv_obj_remove_style_all(gTabBtn[i]);
-    lv_obj_set_pos(gTabBtn[i], NAV_W * i, 0);
-    lv_obj_set_size(gTabBtn[i], NAV_W, NAV_H);
+    lv_obj_set_pos(gTabBtn[i], tabX(i), 0);
+    lv_obj_set_size(gTabBtn[i], tabW(i), NAV_H);
     lv_obj_add_event_cb(gTabBtn[i], onTab, LV_EVENT_CLICKED, (void *)(uintptr_t)i);
     pressFeedback(gTabBtn[i]);   // tab cũng phải kêu và đổi màu như mọi nút khác
 
@@ -356,8 +390,8 @@ void buildChrome() {
     // Vạch nhấn phía trên tab đang chọn.
     gTabMark[i] = lv_obj_create(gNav);
     lv_obj_remove_style_all(gTabMark[i]);
-    lv_obj_set_pos(gTabMark[i], NAV_W * i, 0);
-    lv_obj_set_size(gTabMark[i], NAV_W, 3);
+    lv_obj_set_pos(gTabMark[i], tabX(i), 0);
+    lv_obj_set_size(gTabMark[i], tabW(i), 3);
     lv_obj_set_style_bg_color(gTabMark[i], accent(), 0);
     lv_obj_set_style_bg_opa(gTabMark[i], LV_OPA_TRANSP, 0);
   }
@@ -799,6 +833,72 @@ void buildInfo() {
 }
 
 // ---------------------------------------------------------------------------
+//  Màn 5 — EDGE AI (đề xuất từ Arduino UNO Q)
+// ---------------------------------------------------------------------------
+//  CÁI MÀN NÀY TRẢ LỜI ĐÚNG MỘT CÂU: "bộ não phụ đang nghĩ gì, và vì sao nó
+//  chưa/đã ra tay?"
+//
+//  Trước đây câu đó chỉ trả lời được bằng cách cắm USB-TTL vào bo treo tường và
+//  đọc serial, hoặc mở nhật ký lệnh trong màn ĐIỀU KHIỂN — nơi đề xuất của edge
+//  nằm lẫn giữa lệnh máy chủ và lệnh bấm tay, phân biệt bằng một chữ "edge
+//  advice" cụt lủn ở cột lý do.
+//
+//  BA KHỐI, THEO ĐÚNG THỨ TỰ NGƯỜI TA HỎI:
+//    1. Edge đề nghị gì  -> và nó có KHÁC máy đang chạy không (chỗ đáng xem nhất)
+//    2. Ai đang cầm lái  -> máy chủ im bao lâu rồi, đó là thứ quyết định
+//    3. Đường dây có sống không -> để phân biệt "edge im" với "edge chết"
+//
+//  KHỐI 1 SO SÁNH VỚI TRẠNG THÁI THẬT, CÓ CHỦ ĐÍCH. Một dòng "edge đề xuất LẠNH
+//  25" đứng một mình không nói lên điều gì: người đọc phải nhớ máy đang chạy gì
+//  rồi tự trừ trong đầu. Đặt hai con số cạnh nhau thì câu trả lời hiện ra không
+//  cần đọc chữ — giống nhau là edge đồng ý với hiện trạng, khác nhau là nó muốn
+//  đổi mà chưa được phép.
+void buildEdge() {
+  lv_obj_t *p = gPage[4];
+
+  // --- khối 1: đề xuất gần nhất ---
+  lv_obj_t *c1 = card(p, PAD, 2, 308, 86);
+  label(c1, 12, 8, "EDGE ĐỀ NGHỊ", fontTitle(), textPrimary());
+  gEdgeBadge = badge(c1, 210, 9, 86, "ĐỀ XUẤT", accent());
+  gEdgeBadgeLbl = lv_obj_get_child(gEdgeBadge, 0);
+
+  // HAI NHÃN NÀY PHẢI CHUNG MỘT ĐƯỜNG CHÂN CHỮ, và đó là lý do y của chúng lệch
+  // nhau 9px chứ không bằng nhau. LVGL đặt nhãn theo GÓC TRÊN-TRÁI, nên cho hai
+  // cỡ chữ khác nhau cùng một y là chúng lệch chân đúng bằng chênh lệch chiều
+  // cao — chữ nhỏ trông như bị tụt xuống so với con số.
+  //
+  //   số  28px, ascent ~22 -> chân chữ = 34 + 22 = 56
+  //   chữ 16px, ascent ~13 -> chân chữ = 43 + 13 = 56
+  //
+  // Và cả cặp hạ xuống 8px so với bản đầu: huy hiệu cao 18 nên nó kết thúc ở
+  // y=27, mà con số cũ bắt đầu ngay tại 26 — số to bị hút lên dính vào huy hiệu
+  // thay vì nằm giữa nửa dưới của thẻ.
+  gEdgeMode = label(c1, 12, 43, "--", fontBody(), textPrimary());
+  gEdgeSet  = label(c1, 186, 34, "", fontBig(), accentText());
+  lv_obj_set_width(gEdgeSet, 110);
+  lv_obj_set_style_text_align(gEdgeSet, LV_TEXT_ALIGN_RIGHT, 0);
+
+  // Dòng so sánh + tuổi của đề xuất. Một dòng chứ không hai: chúng luôn được đọc
+  // cùng nhau ("edge muốn 25, máy đang 27, nói cách đây 12 giây") và tách ra chỉ
+  // làm mắt phải nhảy hai lần cho một ý.
+  // Xuống 66 theo cặp chữ ở trên: con số nay kết thúc ở 34+28 = 62, để nguyên
+  // 62 là dòng chú thích dính đáy số.
+  gEdgeVs = label(c1, 12, 66, "", fontTiny(), textMuted());
+  lv_obj_set_width(gEdgeVs, 284);
+
+  // --- khối 2 + 3: ai cầm lái, và đường dây ---
+  lv_obj_t *c2 = card(p, PAD, 92, 308, 86);
+  labelCaps(c2, 12, 6, "TRẠNG THÁI LỚP EDGE");
+  for (uint8_t i = 0; i < EDGE_ROWS; i++) {
+    const lv_coord_t y = (lv_coord_t)(26 + 20 * i);
+    labelCaps(c2, 12, y, kEdgeRow[i]);
+    gEdgeVal[i] = label(c2, 12, y, "--", fontLabel(), textPrimary());
+    lv_obj_set_width(gEdgeVal[i], 284);
+    lv_obj_set_style_text_align(gEdgeVal[i], LV_TEXT_ALIGN_RIGHT, 0);
+  }
+}
+
+// ---------------------------------------------------------------------------
 //  Màn 5 — CAI DAT
 // ---------------------------------------------------------------------------
 void onSetting(lv_event_t *e) {
@@ -995,7 +1095,7 @@ void onLogClose(lv_event_t *) {
 }
 
 void buildSettings() {
-  lv_obj_t *p = gPage[4];
+  lv_obj_t *p = gPage[5];   // CÀI ĐẶT luôn là tab CUỐI — xem chú thích ở TABS
 
   lv_obj_t *r0 = card(p, PAD, 4, 308, 40);
   label(r0, 12, 12, "ĐỘ SÁNG", fontBody(), textPrimary());
@@ -1360,6 +1460,7 @@ void build(CommandFn onCmd, SettingFn onSetting) {
   buildControl();
   buildHumidifier();
   buildInfo();
+  buildEdge();
   buildSettings();
   // THỨ TỰ CÓ NGHĨA: LVGL vẽ theo thứ tự tạo, nên lớp phủ học remote phải dựng
   // SAU danh sách mã để nó luôn nằm trên. Backend có thể kích hoạt học trong lúc
@@ -1377,7 +1478,16 @@ void build(CommandFn onCmd, SettingFn onSetting) {
 }
 
 void update(const Ui::Model &m) {
-  char b[40];
+  // 96 CHỨ KHÔNG PHẢI 40, và đây là sửa một lỗi câm chứ không phải nới cho chắc.
+  //
+  // Dòng chân trang THÔNG TIN ("MAC … · KÊNH … · NOW rx/drop · UNO Q …") dài ~74
+  // byte vì tiếng Việt có dấu và "·" đều là nhiều byte trong UTF-8. Ở 40 byte,
+  // snprintf cắt im lặng ngay sau số kênh — nghĩa là HAI BỘ ĐẾM ESP-NOW chưa
+  // từng hiện lên màn, đúng hai con số mà chú thích ở dưới nói là để phân biệt
+  // "không nghe thấy gì" với "nghe thấy mà không xử lý kịp".
+  //
+  // Stack tác vụ UI là 16 KB (kUiStack) nên 96 byte không đáng kể.
+  char b[96];
 
   // Bản sao cho các callback chạm — chúng không nhận được Model.
   gOverrideNow = m.overrideLocal;
@@ -1647,11 +1757,93 @@ void update(const Ui::Model &m) {
   snprintf(b, sizeof b, "%s - %luh%02lum", m.fw ? m.fw : "?",
            (unsigned long)(m.uptimeSec / 3600), (unsigned long)((m.uptimeSec % 3600) / 60));
   setText(gInfoVal[7], b);
+  // --- EDGE AI ---
+  {
+    // Nhãn huy hiệu nói KẾT CỤC, không nói loại gói. "ĐỀ XUẤT" và "ĐÃ RA LỆNH"
+    // là hai chuyện khác hẳn nhau với người đứng trước máy: một cái là edge nghĩ
+    // thầm, cái kia là máy lạnh vừa đổi trạng thái mà không ai bấm gì.
+    const bool cmd = m.unoqWasCommand && m.unoqEverAdvised;
+    setText(gEdgeBadgeLbl, !m.unoqEverAdvised ? "CHỜ" : (cmd ? "ĐÃ RA LỆNH" : "ĐỀ XUẤT"));
+    lv_obj_set_style_bg_color(gEdgeBadge,
+                              !m.unoqEverAdvised ? textMuted() : (cmd ? warn() : accent()), 0);
+
+    if (!m.unoqEverAdvised) {
+      // KHÔNG hiện "--" ở ô chế độ rồi để trống ô nhiệt độ: đó trông như một đề
+      // xuất rỗng. Nói thẳng là chưa nghe được gì.
+      setText(gEdgeMode, "CHƯA CÓ ĐỀ XUẤT");
+      lv_obj_set_style_text_color(gEdgeMode, textMuted(), 0);
+      setText(gEdgeSet, "");
+      setText(gEdgeVs, m.unoqUp ? "đã nối UNO Q, đang chờ chu kỳ tính đầu tiên"
+                                : "chưa nghe thấy UNO Q — kiểm tra dây IO43/IO44");
+    } else {
+      const char *vn = m.unoqMode;
+      for (uint8_t k = 0; k < 4; k++) {
+        if (strcmp(m.unoqMode, kModeName[k]) == 0) { vn = kModeLabel[k]; break; }
+      }
+      setText(gEdgeMode, vn);
+      lv_obj_set_style_text_color(gEdgeMode, textPrimary(), 0);
+
+      // Nhiệt độ chỉ có nghĩa với LẠNH — cùng luật aliasTemp() ở main.cpp. Hiện
+      // một con số cho KHÔ/QUẠT/TẮT là bịa ra một tham số máy không hề nhận.
+      if (m.unoqSetpoint >= 0 && strcmp(m.unoqMode, "COOL") == 0) {
+        snprintf(b, sizeof b, "%d°C", m.unoqSetpoint);
+        setText(gEdgeSet, b);
+      } else {
+        setText(gEdgeSet, "");
+      }
+
+      // Dòng so sánh. GIỐNG NHAU thì nói hẳn ra là "khớp" — người đọc khỏi phải
+      // tự đối chiếu hai chuỗi để kết luận không có gì bất thường.
+      char now[24];
+      if (m.mode[0]) {
+        const char *vnNow = m.mode;
+        for (uint8_t k = 0; k < 4; k++) {
+          if (strcmp(m.mode, kModeName[k]) == 0) { vnNow = kModeLabel[k]; break; }
+        }
+        if (m.setpoint >= 0 && strcmp(m.mode, "COOL") == 0)
+          snprintf(now, sizeof now, "%s %d°C", vnNow, m.setpoint);
+        else
+          snprintf(now, sizeof now, "%s", vnNow);
+      } else {
+        snprintf(now, sizeof now, "chưa rõ");
+      }
+
+      const bool same = m.mode[0] && strcmp(m.unoqMode, m.mode) == 0 &&
+                        (strcmp(m.unoqMode, "COOL") != 0 || m.unoqSetpoint == m.setpoint);
+      snprintf(b, sizeof b, "%lus trước · máy đang %s%s",
+               (unsigned long)m.unoqAgeSec, now, same ? " · khớp" : "");
+      setText(gEdgeVs, b);
+      lv_obj_set_style_text_color(gEdgeVs, same ? textMuted() : warn(), 0);
+    }
+
+    // Hàng "MÁY CHỦ" — thứ QUYẾT ĐỊNH edge có được cầm lái hay không, nên nó
+    // đứng đầu. Ba trạng thái, không gộp: chưa từng nghe / vừa nghe / im lâu.
+    if (!m.cloudEverCommanded) snprintf(b, sizeof b, "chưa từng ra lệnh");
+    else                       snprintf(b, sizeof b, "im %lus", (unsigned long)m.lastCmdSec);
+    setText(gEdgeVal[0], b);
+    lv_obj_set_style_text_color(gEdgeVal[0], m.cloudEverCommanded ? textPrimary() : warn(), 0);
+
+    setText(gEdgeVal[1], m.unoqUp ? "đã nối" : "mất kết nối");
+    lv_obj_set_style_text_color(gEdgeVal[1], m.unoqUp ? ok() : err(), 0);
+
+    // Số gói BỊ LOẠI hiện cạnh số nhận, luôn luôn — kể cả khi bằng 0. Nó là thứ
+    // duy nhất phân biệt "UNO Q im" với "UNO Q nói mà panel vứt hết" (sai
+    // link_key vì lệch ORG_ID, hoặc CRC hỏng vì nhiễu dây).
+    snprintf(b, sizeof b, "%lu · loại %lu",
+             (unsigned long)m.unoqRx, (unsigned long)m.unoqRejected);
+    setText(gEdgeVal[2], b);
+    lv_obj_set_style_text_color(gEdgeVal[2], m.unoqRejected ? warn() : textPrimary(), 0);
+  }
+
   // Bộ đếm gói ESP-NOW + trạng thái đường tới UNO Q, dồn xuống chân trang. Chỉ
   // dùng khi truy lỗi, nhưng lúc đó chúng là thứ phân biệt "không nghe thấy gì"
   // với "nghe thấy mà không xử lý kịp" — xem khối chẩn đoán ở cuối main.cpp.
-  snprintf(b, sizeof b, "MAC %s · KÊNH %u · NOW %lu/%lu · UNO Q %s",
+  // "GHIM" = panel đang tự bám kênh vì mất WiFi (espnow-channel.h). Không có dấu
+  // này thì hai ca rất khác nhau nhìn giống hệt: kênh do router quyết (bình
+  // thường) và kênh do panel tự nhớ (đang chạy dự phòng, có thể lệch với node).
+  snprintf(b, sizeof b, "MAC %s · KÊNH %u%s · NOW %lu/%lu · UNO Q %s",
            m.mac[0] ? m.mac : "?", (unsigned)m.channel,
+           m.channelPinned ? " GHIM" : "",
            (unsigned long)m.espnowRx, (unsigned long)m.espnowDrop,
            m.unoqUp ? "đã nối" : "chưa nối");
   setText(gInfoFoot, b);

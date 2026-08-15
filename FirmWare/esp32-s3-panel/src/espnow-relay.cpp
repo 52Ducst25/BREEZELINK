@@ -6,9 +6,19 @@
 namespace EspNowRelay {
 
 // Hàng đợi vòng: callback (tác vụ WiFi) ghi vào head, loop() đọc ra ở tail.
-// Một người ghi + một người đọc nên không cần khoá. 8 chỗ là dư: mỗi slave chỉ
-// gửi 15s/lần, còn loop() rút hàng mỗi vòng.
-static const uint8_t QUEUE_SIZE = 8;
+// Một người ghi + một người đọc nên không cần khoá.
+//
+// 32 CHỖ, KHÔNG PHẢI 8. Con số 8 cũ dựa trên "mỗi slave gửi 15s/lần" — nhưng đó
+// là nhịp ĐẨY LÊN CLOUD (SlaveWatch::RELAY_INTERVAL_MS), không phải nhịp phát
+// của node. Node góc phòng bắn mỗi 5 giây và có bốn cái, cộng node ngoài trời:
+// xấp xỉ 1 gói/giây. Tám chỗ đầy sau 8 giây.
+//
+// Mà loop() thì CÓ LÚC không rút hàng được đúng ngần ấy: mọi lời gọi mqtt.* đều
+// chặn, và trên một socket nửa chết (WiFi còn associated nhưng đường đã đứt) một
+// lần publish có thể mất vài giây. Timeout đã được ghì trong setup() nên quãng
+// chặn ngắn hơn trước nhiều, nhưng không thể về 0 — nên hàng đợi phải chịu được
+// nó. 32 chỗ ≈ nửa phút dữ liệu, tốn thêm ~1,2 KB RAM.
+static const uint8_t QUEUE_SIZE = 32;
 
 struct Slot {
   AcEspNowPacket pkt;

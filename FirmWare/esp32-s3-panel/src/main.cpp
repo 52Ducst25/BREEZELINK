@@ -44,6 +44,9 @@
 #include "config.h"
 #include "espnow-message.h"
 #include "espnow-relay.h"
+// Ghim kênh ESP-NOW khi mất WiFi. Không có nó thì mất mạng = mất luôn số đo của
+// 4 góc phòng, vì radio panel lang thang theo vòng dò WiFi — xem espnow-channel.h.
+#include "espnow-channel.h"
 #include "room-registry.h"
 #include "slave-watch.h"
 #include "unoq-link.h"
@@ -700,9 +703,58 @@ static void wifiDiagnose() {
 /// lớp edge sinh ra để làm.
 static const uint8_t WIFI_BOOT_ATTEMPTS = 3;
 
+/// Ba việc PHẢI làm mỗi lần vào được WiFi — thiếu một cái là hỏng ngầm.
+///
+/// GỌI TỪ CẢ HAI ĐƯỜNG VÀO (khởi động và nối lại nền). Trước đây khối này nằm
+/// hẳn trong connectWifi(), tức là chỉ chạy khi bo vào được mạng NGAY LÚC BOOT.
+/// Panel bật lúc router chưa lên rồi có mạng sau thì `serviceNetwork()` nối lại
+/// bằng `WiFi.begin()` trần và không đụng tới nó — bo chạy suốt phiên với modem
+/// sleep BẬT, mất ~60% gói ESP-NOW, trong khi mọi đèn trạng thái đều xanh.
+static void onWifiUp() {
+  // 1. TẮT tiết kiệm điện WiFi. BẮT BUỘC cho node master.
+  //
+  // ESP32 mặc định bật modem sleep khi đã vào mạng: radio ngủ giữa các beacon.
+  // Lưu lượng WiFi thường không sao vì router ĐỆM HỘ trong lúc ngủ, nhưng gói
+  // ESP-NOW từ slave thì KHÔNG ai đệm — đến đúng lúc radio ngủ là mất luôn, mà
+  // broadcast không có ACK nên slave vẫn tưởng gửi thành công.
+  //
+  // ĐÃ ĐO CÁI GIÁ ĐÓ, đừng bật lại vì bất kỳ lý do gì:
+  //     modem sleep BẬT (thời BLE):  0,31 gói/giây
+  //     modem sleep TẮT:             0,80 gói/giây  ← đúng 4 node × 5 giây
+  // Node ngoài trời khi đó rơi ~50% và nhấp nháy ONLINE/OFFLINE liên tục.
+  //
+  // Hệ quả: KHÔNG bao giờ bật lại Bluetooth trên bo này. Chip từ chối chạy WiFi +
+  // BT với modem sleep tắt — nó abort() chứ không chạy kém đi
+  // (`Should enable WiFi modem sleep when both WiFi and Bluetooth are enabled`),
+  // và bo sẽ lặp khởi động lại vô hạn mỗi ~6 giây.
+  WiFi.setSleep(false);
+
+  // 2. Nhớ kênh router. Đây là con số panel sẽ quay về bám khi mất mạng, và là
+  //    thứ duy nhất cho phép nó gặp lại node lúc router đã tắt hẳn.
+  EspNowChannel::note((uint8_t)WiFi.channel());
+
+  // 3. Thôi tự ghim — từ giờ router giữ kênh hộ, và node cũng bám theo router.
+  EspNowChannel::release();
+
+  Serial.printf(" OK  IP=%s  RSSI=%d dBm  kenh=%d\n",
+                WiFi.localIP().toString().c_str(), (int)WiFi.RSSI(), WiFi.channel());
+}
+
 static void connectWifi() {
   if (WiFi.status() == WL_CONNECTED) return;
   WiFi.mode(WIFI_STA);
+
+  // TỰ NỐI LẠI: TẮT. Không phải để tiết kiệm gì — để GIÀNH QUYỀN ĐIỀU ĐỘ RADIO.
+  //
+  // Ngăn xếp WiFi của Arduino tự gọi lại WiFi.begin() sau mỗi lần rớt, và cú
+  // begin() đó KHÔNG khai kênh nên nó quét khắp các kênh. Tức là ngay sau khi
+  // serviceNetwork() vừa ghim radio về kênh của node, một lần tự-nối-lại chạy
+  // sau lưng sẽ kéo nó đi mất — không có log nào của mình báo, vì không phải mình
+  // gọi. Tắt đi thì mọi lần radio rời kênh đều do đúng một chỗ quyết định.
+  WiFi.setAutoReconnect(false);
+  // Đừng ghi cấu hình WiFi xuống NVS ở mỗi lần begin(): vòng thử lại có thể chạy
+  // hàng trăm lần trong một đêm mất mạng, và flash thì có hạn ghi.
+  WiFi.persistent(false);
 
   for (uint8_t attempt = 1; attempt <= WIFI_BOOT_ATTEMPTS; attempt++) {
     Serial.printf("WiFi -> \"%s\" (lan %u/%u) ", WIFI_SSID, attempt, WIFI_BOOT_ATTEMPTS);
@@ -724,29 +776,19 @@ static void connectWifi() {
                   "  ESP-NOW, UART toi UNO Q va hong ngoai van hoat dong; chi mat\n"
                   "  duong len cloud. serviceNetwork() se thu lai nen trong loop().\n",
                   WIFI_BOOT_ATTEMPTS);
+    // ĐẬU RADIO LẠI TRƯỚC KHI ĐI TIẾP. Vòng thử ở trên (và wifiDiagnose() xen
+    // giữa) bỏ radio lại ở kênh cuối cùng nó dò tới — hoàn toàn ngẫu nhiên. Không
+    // có dòng này thì EspNowRelay::begin() ngay sau đây dựng bộ thu trên một kênh
+    // vô nghĩa, và panel câm với cả 5 node dù ESP-NOW khởi tạo "thành công".
+    //
+    // disconnect(false) TRƯỚC: lần begin() cuối vẫn đang dò dở, mà còn dò thì lệnh
+    // đặt kênh bị ngăn xếp WiFi ghi đè trong im lặng. `false` giữ station BẬT.
+    WiFi.disconnect(false);
+    EspNowChannel::park();
     return;
   }
 
-  // TẮT tiết kiệm điện WiFi. BẮT BUỘC cho node master, và giờ làm được vì đường
-  // tới UNO Q đã chuyển sang UART — không còn Bluetooth để ràng buộc.
-  //
-  // ESP32 mặc định bật modem sleep khi đã vào mạng: radio ngủ giữa các beacon.
-  // Lưu lượng WiFi thường không sao vì router ĐỆM HỘ trong lúc ngủ, nhưng gói
-  // ESP-NOW từ slave thì KHÔNG ai đệm — đến đúng lúc radio ngủ là mất luôn, mà
-  // broadcast không có ACK nên slave vẫn tưởng gửi thành công.
-  //
-  // ĐÃ ĐO CÁI GIÁ ĐÓ, đừng bật lại vì bất kỳ lý do gì:
-  //     modem sleep BẬT (thời BLE):  0,31 gói/giây
-  //     modem sleep TẮT:             0,80 gói/giây  ← đúng 4 node × 5 giây
-  // Node ngoài trời khi đó rơi ~50% và nhấp nháy ONLINE/OFFLINE liên tục.
-  //
-  // Hệ quả: KHÔNG bao giờ bật lại Bluetooth trên bo này. Chip từ chối chạy WiFi +
-  // BT với modem sleep tắt — nó abort() chứ không chạy kém đi
-  // (`Should enable WiFi modem sleep when both WiFi and Bluetooth are enabled`),
-  // và bo sẽ lặp khởi động lại vô hạn mỗi ~6 giây.
-  WiFi.setSleep(false);
-
-  Serial.printf(" OK  IP=%s  RSSI=%d dBm\n", WiFi.localIP().toString().c_str(), (int)WiFi.RSSI());
+  onWifiUp();
 }
 
 /// MỘT lần thử nối MQTT. Trả true nếu vào được.
@@ -766,8 +808,38 @@ static bool mqttTryConnect() {
   return false;
 }
 
-/// Bao lâu thử nối lại một lần khi đang mất mạng (ms).
-static const uint32_t NET_RETRY_MS = 15000UL;
+/// Giãn dần nhịp thử nối WiFi theo số lần trượt LIÊN TIẾP (ms).
+///
+/// KHÔNG CÒN MỘT SỐ CỐ ĐỊNH 15 GIÂY, và lý do không phải là tiết kiệm điện: mỗi
+/// lần thử là một lần radio có nguy cơ rời khỏi kênh của node. Mất mạng thì
+/// thường mất lâu (router hỏng, nhà cắt điện, ISP đứt), nên hỏi lại 4 lần/phút
+/// suốt nhiều giờ là trả giá bằng đúng thứ đang cố cứu — số đo của 4 góc phòng.
+///
+/// Hai lần đầu vẫn nhanh: ca hay gặp nhất là router vừa khởi động lại, và khi đó
+/// mạng về trong vòng một phút.
+static uint32_t wifiRetryDelayMs(uint8_t misses) {
+  if (misses < 2) return 30000UL;
+  if (misses < 5) return 60000UL;
+  return 300000UL;
+}
+
+/// Cùng ý đó cho MQTT. Tách riêng vì hai thứ hỏng độc lập nhau: WiFi tốt mà
+/// broker chết là chuyện thường, và khi đó không có lý do gì để đụng vào radio.
+static uint32_t mqttRetryDelayMs(uint8_t misses) {
+  if (misses < 3) return 15000UL;
+  if (misses < 8) return 60000UL;
+  return 300000UL;
+}
+
+/// Cho MỘT lần thử nối WiFi bao lâu trước khi bỏ cuộc và quay về đậu kênh (ms).
+static const uint32_t WIFI_ATTEMPT_WINDOW_MS = 12000UL;
+
+/// Thử bao nhiêu lần trên KÊNH ĐÃ NHỚ trước khi cho phép một lần quét đầy đủ.
+///
+/// Quét là thứ duy nhất thực sự kéo radio khỏi kênh của node, nên nó phải là
+/// phương án cuối chứ không phải mặc định. Ba lần trượt liên tiếp trên kênh cũ
+/// mới đáng nghi là router đã đổi kênh thật.
+static const uint8_t WIFI_PINNED_TRIES = 3;
 
 /// Giữ WiFi/MQTT sống mà KHÔNG CHẶN loop(). Gọi mỗi vòng.
 ///
@@ -785,26 +857,115 @@ static const uint32_t NET_RETRY_MS = 15000UL;
 /// đó. Cả kiến trúc edge-ai dựa trên giả định "gateway vẫn chạy khi mất cloud",
 /// và giả định đó sai ngay trong vòng lặp chính.
 ///
-/// Nay: thử lại theo nhịp, không chờ, và TUYỆT ĐỐI KHÔNG QUÉT. scanNetworks()
-/// nhảy khắp các kênh và bỏ radio lại ở kênh cuối — gọi nó khi ESP-NOW đang chạy
-/// là tự cắt đứt đường thu của chính mình, âm thầm.
+/// Nay: thử lại theo nhịp và không chờ.
+///
+/// LUẬT VỀ QUÉT ĐÃ ĐỔI — đọc kỹ, bản trước nói ngược lại.
+///
+/// Cũ: "TUYỆT ĐỐI KHÔNG QUÉT", vì scanNetworks() nhảy khắp các kênh và bỏ radio
+/// lại ở kênh cuối, tức là tự cắt đường thu ESP-NOW của chính mình. Chẩn đoán
+/// đúng, kết luận thiếu: nó cấm lời gọi quét TƯỜNG MINH, trong khi `WiFi.begin()`
+/// KHÔNG KHAI KÊNH cũng quét y hệt — và vòng thử lại gọi nó 4 lần mỗi phút. Lệnh
+/// cấm đó không hề bảo vệ được gì, radio vẫn lang thang suốt thời gian mất mạng.
+///
+/// Nay, ba luật thay cho một lệnh cấm không có hiệu lực:
+///   1. Thử nối bằng `WiFi.begin(ssid, pass, KÊNH ĐÃ NHỚ)` — có kênh thì station
+///      đi thẳng, không quét, nên lần thử nằm ĐÚNG trên kênh của node.
+///   2. Giữa các lần thử, đậu radio về kênh đã nhớ (EspNowChannel::park()).
+///   3. Được quét, nhưng thưa và CÓ CHỦ ĐÍCH — và mọi lần quét đều phải bám lại
+///      kênh ngay sau đó (EspNowChannel::rescan lo việc này).
 static void serviceNetwork() {
-  static uint32_t lastTry = 0;
-  const uint32_t now = millis();
+  static uint32_t lastWifiTry = 0, attemptStartMs = 0, lastRescanMs = 0, lastMqttTry = 0;
+  static uint8_t  wifiMisses = 0, mqttMisses = 0;
+  static bool     attempting = false;
+  const uint32_t  now = millis();
 
+  // ==========================================================================
+  //  MẤT WiFi — ưu tiên số một là GIỮ RADIO ĐÚNG KÊNH, không phải nối lại nhanh
+  // ==========================================================================
   if (WiFi.status() != WL_CONNECTED) {
-    if (now - lastTry >= NET_RETRY_MS) {
-      lastTry = now;
-      Serial.println("[net] mat WiFi — thu noi lai (khong chan vong lap)");
-      WiFi.begin(WIFI_SSID, WIFI_PASSWORD);   // đặt lệnh rồi đi tiếp, không chờ
+    // --- đang trong một lần thử ---
+    if (attempting) {
+      const wl_status_t st = WiFi.status();
+      // Bỏ cuộc sớm khi ngăn xếp WiFi đã biết câu trả lời, khỏi ngồi hết cửa sổ
+      // 12 giây để nghe lại đúng điều đó.
+      const bool hopeless = (st == WL_NO_SSID_AVAIL || st == WL_CONNECT_FAILED);
+      if (!hopeless && now - attemptStartMs < WIFI_ATTEMPT_WINDOW_MS) return;
+
+      attempting = false;
+      if (wifiMisses < 255) wifiMisses++;
+      lastWifiTry = now;
+
+      // DỪNG HẲN việc dò RỒI MỚI đậu lại kênh — đúng thứ tự này, không đảo được.
+      // Còn đang dò thì ngăn xếp WiFi tự lái kênh và lệnh đặt kênh bị ghi đè
+      // trong im lặng. `false` = giữ giao diện station BẬT, nên ESP-NOW vẫn thu.
+      WiFi.disconnect(false);
+      EspNowChannel::park();
+      return;
+    }
+
+    // --- đang đậu kênh, chờ tới lượt thử tiếp ---
+    //
+    // Canh kênh mỗi vòng. Đặt Ở ĐÂY chứ không ở nhánh trên: trong lúc `attempting`
+    // thì ngăn xếp WiFi đang cố tình nhảy kênh để dò SSID, kéo về là hai bên
+    // giằng nhau và không lần nối nào xong.
+    EspNowChannel::hold();
+
+    // Dò lại kênh router định kỳ, cùng nhịp với node. Chỉ cần cho ca "thấy router
+    // mà không vào được" (đổi mật khẩu, lọc MAC): khi đó vòng thử ở dưới không
+    // bao giờ thành công nên không có đường nào khác học được kênh mới.
+    if (now - lastRescanMs >= EspNowChannel::RESCAN_INTERVAL_MS) {
+      lastRescanMs = now;
+      EspNowChannel::rescan(WIFI_SSID);
+      return;   // quét vừa ăn ~1 giây; để vòng sau hãy thử nối
+    }
+
+    if (now - lastWifiTry < wifiRetryDelayMs(wifiMisses)) return;
+    lastWifiTry    = now;
+    attemptStartMs = now;
+    attempting     = true;
+
+    if (wifiMisses < WIFI_PINNED_TRIES) {
+      // KHAI KÊNH TRONG begin() — đây là mẹo làm cả bài toán này gần như biến mất.
+      // Có kênh thì station đi THẲNG tới đó, KHÔNG quét, nên lần thử nối lại tự
+      // nó đã nằm đúng kênh của node: panel vừa dò mạng vừa thu ESP-NOW bình
+      // thường, không còn phải đánh đổi giữa hai việc.
+      const uint8_t ch = EspNowChannel::last();
+      Serial.printf("[net] mat WiFi — thu lai tren kenh %u, khong quet (lan %u)\n",
+                    ch, (unsigned)(wifiMisses + 1));
+      WiFi.begin(WIFI_SSID, WIFI_PASSWORD, ch);
+    } else {
+      // Trượt mãi trên kênh cũ -> router có thể đã đổi kênh thật. Đành quét, và
+      // chấp nhận mất vài gói ESP-NOW trong cửa sổ này.
+      Serial.printf("[net] %u lan truot tren kenh %u — thu lai CO QUET\n",
+                    (unsigned)wifiMisses, EspNowChannel::last());
+      WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     }
     return;   // chưa có WiFi thì cũng chưa thể có MQTT
   }
 
+  // ==========================================================================
+  //  CÓ WiFi
+  // ==========================================================================
+  // Vừa vào lại sau một đợt mất mạng: nhớ kênh, tắt modem sleep, thôi ghim.
+  if (attempting || EspNowChannel::pinned()) {
+    attempting   = false;
+    wifiMisses   = 0;
+    lastRescanMs = now;   // đếm lại từ đây, đừng để lần rớt sau quét ngay tức thì
+    onWifiUp();
+  }
+
   if (!mqtt.connected()) {
-    if (now - lastTry >= NET_RETRY_MS) {
-      lastTry = now;
-      mqttTryConnect();   // MỘT lần; hỏng thì vòng sau thử tiếp
+    if (now - lastMqttTry >= mqttRetryDelayMs(mqttMisses)) {
+      const bool ok = mqttTryConnect();   // MỘT lần; hỏng thì vòng sau thử tiếp
+      // ĐẶT MỐC SAU KHI HÀM TRẢ VỀ, không phải trước — và đây là một lỗi thật đã
+      // sửa, không phải chuyện phong cách. mqtt.connect() CHẶN cho tới khi hết
+      // socket timeout; đặt mốc trước lời gọi thì thời gian chặn ăn trọn khoảng
+      // chờ, vòng sau `now - lastMqttTry` đã vượt ngưỡng và nó thử lại NGAY. Nhịp
+      // giãn cách biến thành chặn liên tục, và loop() không bao giờ tới được chỗ
+      // rút lệnh người dùng — panel treo tường bấm không ăn.
+      lastMqttTry = millis();
+      if (ok) mqttMisses = 0;
+      else if (mqttMisses < 255) mqttMisses++;
     }
     return;
   }
@@ -890,9 +1051,28 @@ void setup() {
   HumidifierControl::begin(humidifierEmit);
   buildTopics();
 
+  // TRƯỚC connectWifi(): nhánh thất bại của nó gọi EspNowChannel::park(), mà park
+  // cần biết kênh đã nhớ từ lần chạy trước.
+  EspNowChannel::begin();
+
   connectWifi();
   mqtt.setServer(MQTT_HOST, MQTT_PORT);
   mqtt.setCallback(onMessage);
+
+  // --- GHÌ HAI TIMEOUT MẠNG. Đây là thứ quyết định panel có bấm được hay không.
+  //
+  // Mọi lời gọi mqtt.* đều CHẶN loop(), mà loop() là nơi DUY NHẤT thi hành lệnh
+  // người dùng bấm trên màn (xem runPanelCommand). Để mặc định thì:
+  //   - PubSubClient chờ CONNACK tới 15 giây
+  //   - WiFiClient chờ bắt tay TCP tới 3 giây, và ghi vào socket chết tới ~10 giây
+  // Cộng lại, một máy chủ chết làm panel treo tường "bấm không ăn" hàng chục giây
+  // một lượt, trong khi màn vẫn vẽ và vẫn kêu bíp vì tác vụ giao diện ở lõi 0
+  // không hề bị ảnh hưởng — nhìn y hệt hỏng phần cứng.
+  //
+  // 3 giây / 5 giây là ngưỡng "thất bại nhanh". Vẫn dư cho một broker khoẻ trong
+  // LAN lẫn qua Internet; chỉ cắt đúng phần chờ vô ích khi bên kia đã chết.
+  net.setTimeout(3);            // giây — bắt tay TCP
+  mqtt.setSocketTimeout(5);     // giây — chờ CONNACK và chờ phần còn lại của gói
   if (!mqtt.setBufferSize(MQTT_BUFFER_BYTES)) {
     Serial.println("Khong cap phat duoc bo dem MQTT — lenh co ir_raw se bi bo am tham!");
   }
@@ -1204,6 +1384,16 @@ static void pushUnoQSnapshot() {
   SerialTrace::snapshotOut(snap, UnoQLink::connected());
 }
 
+// --- Đề xuất gần nhất của UNO Q, giữ lại ĐỂ HIỂN THỊ ------------------------
+//  Tab EDGE AI đọc bốn biến này. Giữ riêng chứ không đọc ké `pending` hay
+//  `actMode`: hai cái đó nói về máy lạnh ĐANG chạy, còn đây là thứ UNO Q ĐỀ
+//  NGHỊ — và giá trị của cả cái tab nằm ở chỗ hai bên có thể KHÁC nhau. Trộn
+//  chung là mất đúng thông tin duy nhất mà màn này mang lại.
+static char     unoqMode[8] = "";
+static int      unoqSetpoint = -1;
+static bool     unoqWasCommand = false;
+static uint32_t unoqLastMs = 0;
+
 /// Thi hành (hoặc chỉ ghi nhận) thứ UNO Q vừa gửi sang.
 static void runUnoQIncoming() {
   UnoQLink::Incoming in;
@@ -1214,6 +1404,15 @@ static void runUnoQIncoming() {
     Serial.printf("[unoq] che do la (%u) — bo qua\n", in.mode);
     return;
   }
+
+  // GHI NHẬN TRƯỚC MỌI NHÁNH THOÁT SỚM. Dưới đây có đường "chưa học mã — không
+  // phát", và nếu ghi ở cuối thì đúng những lần edge muốn làm gì đó mà panel
+  // không làm nổi lại KHÔNG hiện trên màn — tức là mất hẳn ca đáng xem nhất.
+  // UNO Q đã đề nghị, và điều đó có thật bất kể panel có bắn được hay không.
+  copyStr(unoqMode, sizeof(unoqMode), mode);
+  unoqSetpoint   = in.setpoint;
+  unoqWasCommand = in.isCommand;
+  unoqLastMs     = millis();
 
   if (!in.isCommand) {
     // ĐỀ XUẤT: ghi lại, KHÔNG bắn IR. Đây là ranh giới giữ cho mọi phép thử trên
@@ -1274,6 +1473,10 @@ static void pushUiModel() {
   m.mqttUp = mqtt.connected();
   m.rssi   = m.wifiUp ? (int)WiFi.RSSI() : 0;
   m.channel = (uint8_t)WiFi.channel();
+  // "Kênh này do router quyết" hay "do panel tự nhớ" là hai chuyện khác nhau, và
+  // khi đi tìm lỗi mất số đo thì chúng dẫn tới hai chỗ khác nhau. Màn THÔNG TIN
+  // nói thẳng ra thay vì để người lắp đoán.
+  m.channelPinned = EspNowChannel::pinned();
   strncpy(m.ip,   m.wifiUp ? WiFi.localIP().toString().c_str() : "", sizeof(m.ip) - 1);
   strncpy(m.ssid, WIFI_SSID, sizeof(m.ssid) - 1);
   strncpy(m.mac,  WiFi.macAddress().c_str(), sizeof(m.mac) - 1);
@@ -1300,6 +1503,12 @@ static void pushUiModel() {
   RoomRegistry::median(m.tIn, m.hIn, &m.roomVoting);   // roomVoting = số góc CÓ SỐ ĐO
   m.unoqUp  = UnoQLink::connected();
   m.unoqRx  = UnoQLink::rxCount();
+  m.unoqRejected = UnoQLink::rejectedCount();
+  copyStr(m.unoqMode, sizeof(m.unoqMode), unoqMode);
+  m.unoqSetpoint    = unoqSetpoint;
+  m.unoqWasCommand  = unoqWasCommand;
+  m.unoqEverAdvised = (unoqLastMs != 0);
+  m.unoqAgeSec      = unoqLastMs ? (millis() - unoqLastMs) / 1000 : 0;
 
   m.tOut = lastSlaveT; m.hOut = lastSlaveH;
   // Cùng ngưỡng với SlaveWatch để màn hình và topic status không bao giờ nói
@@ -1313,6 +1522,7 @@ static void pushUiModel() {
   m.setpoint      = actSetpoint;
   m.overrideLocal = overrideLocal;
   m.lastCmdSec    = lastCmdMs ? (millis() - lastCmdMs) / 1000 : 0;
+  m.cloudEverCommanded = (lastCmdMs != 0);
 
   // Quét NVS đúng một lần rồi giữ lại — xem ghi chú ở `aliasDirty`.
   static uint16_t coolMask = 0;
@@ -1369,16 +1579,27 @@ static void pushUiModel() {
 }
 
 void loop() {
+  // LỆNH NGƯỜI DÙNG ĐI TRƯỚC MẠNG. Thứ tự này là một quyết định, không phải tình
+  // cờ: runPanelCommand() bắn IR mà không cần mạng, còn serviceNetwork() thì có
+  // thể chặn vài giây (bắt tay TCP, chờ CONNACK). Đặt mạng lên trước nghĩa là
+  // mỗi cú chạm phải xếp hàng sau một lần thử nối máy chủ — đúng triệu chứng
+  // "bấm nút không ăn khi mất kết nối" mà cả kiến trúc edge sinh ra để tránh.
+  //
+  // Rút MỖI VÒNG (nút phải phản hồi ngay), khác với ảnh chụp trạng thái chỉ đẩy
+  // sang giao diện theo nhịp 200ms — đúng nhịp vẽ lại của màn (Interface/README.md
+  // §7.4), mắt không phân biệt nhanh hơn. Đẩy mỗi vòng chỉ tốn công vô ích: mỗi
+  // lần đẩy kéo theo cả loạt WiFi.RSSI()/millis()/memcpy.
+  Ui::Command panelCmd;
+  while (Ui::pollCommand(panelCmd)) runPanelCommand(panelCmd);
+
   // KHÔNG BAO GIỜ gọi connectWifi()/mqttTryConnect() thẳng ở đây — cả hai đều
   // chờ. serviceNetwork() thử lại theo nhịp rồi trả về ngay, để phần dưới luôn
   // chạy được kể cả khi mất mạng hoàn toàn. Xem chú thích của nó cho lý do.
   serviceNetwork();
 
-  // Rút lệnh người dùng bấm MỖI VÒNG (nút phải phản hồi ngay), nhưng ảnh chụp
-  // trạng thái chỉ đẩy sang giao diện theo nhịp 200ms — đúng nhịp vẽ lại của màn
-  // (Interface/README.md §7.4), mắt không phân biệt nhanh hơn. Đẩy mỗi vòng chỉ
-  // tốn công vô ích: mỗi lần đẩy kéo theo cả loạt WiFi.RSSI()/millis()/memcpy.
-  Ui::Command panelCmd;
+  // Rút LẦN NỮA. serviceNetwork() vẫn có thể vừa chặn vài giây (timeout đã ghì
+  // nhưng không thể về 0), và người bấm trong quãng đó xứng đáng được phục vụ
+  // ngay bây giờ chứ không phải sau cả phần còn lại của vòng lặp.
   while (Ui::pollCommand(panelCmd)) runPanelCommand(panelCmd);
 
   static unsigned long lastUiPush = 0;
