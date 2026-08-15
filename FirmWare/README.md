@@ -6,7 +6,7 @@ Sáu thiết bị cho **một nhà**, ba thư mục firmware:
 |---|---|---|---|
 | `esp32-s3-panel/` | **Bo 2.8" ESP32‑S3** (ILI9341V + FT6336G) | **Gateway / panel treo tường** — thu ESP‑NOW, phát IR, màn cảm ứng, UART tới UNO Q, **không cảm biến** | "Gateway trong nhà" |
 | `esp32-room/` | 4× **ESP32‑C3‑DevKitM‑1** + DHT22 | **Cảm biến phòng** — slave ESP‑NOW | "Cảm biến trong phòng" |
-| `esp32-outdoor/` | ESP32 DevKit V1 | **Ngoài trời** — slave ESP‑NOW | "Nút ngoài trời" |
+| `esp32-outdoor/` | **ESP32‑C3‑DevKitM‑1** + DHT22 | **Ngoài trời** — slave ESP‑NOW | "Nút ngoài trời" |
 | `shared/` | — | Khuôn gói dùng chung: ESP‑NOW, radio slave, giao thức UART với UNO Q. **Cả ba node trên đều `-I../shared`** | — |
 | (không ở đây) | Arduino UNO Q | Edge AI — nối gateway qua **UART**, xem [`../edge-ai/`](../edge-ai/) | — |
 
@@ -40,22 +40,32 @@ Sáu thiết bị cho **một nhà**, ba thư mục firmware:
 
 **Hai node dùng hai loại cảm biến khác nhau** — không phải tuỳ hứng mà do bo:
 
-### Node ngoài trời (ESP32 DevKit V1) — DHT22
+### Node ngoài trời (ESP32‑C3‑DevKitM‑1) — DHT22
 
-DHT có 2 loại: **module 3 chân** (đã có trở kéo — nối thẳng) hoặc **cảm biến 4 chân rời** (mắc thêm điện trở 10kΩ giữa DATA và 3V3).
+Đổi từ ESP32 DevKit V1 sang C3 ngày 15/08/2026 — **cùng bo với 4 node góc phòng**,
+nên cả năm node cảm biến giờ chung một dòng chip, một toolchain, một bộ bài học.
+
+DHT có 2 loại: **module 3 chân** (đã có trở kéo — nối thẳng) hoặc **cảm biến 4 chân rời** (mắc thêm điện trở 4.7k–10kΩ giữa DATA và 3V3).
 
 ```
-   DHT22/DHT11          ESP32 DevKit V1
+   DHT22/DHT11        ESP32-C3-DevKitM-1
   ┌───────────┐
   │  +  / VCC │──────── 3V3
-  │  S  / DATA│──────── GPIO4   (chân silk "D4" / "G4")
+  │  S  / DATA│──────── GPIO4
   │  -  / GND │──────── GND
   └───────────┘
 ```
 
 ⚠️ Cấp nguồn DHT bằng **3V3**, không dùng 5V (chân DATA vào GPIO 3.3V).
-Muốn đổi chân: sửa `DHT_PIN` trong `src/config.h`. Nhớ đặt `DHT_TYPE` đúng loại —
-khai sai vẫn đọc được (checksum vẫn pass) nhưng ra số vô lý (~1.8°C / ~23%).
+Muốn đổi chân: sửa `DHT_PIN` trong `src/config.h` — nhưng trên C3 phải tránh
+GPIO2/8/9 (strapping, GPIO9 là nút BOOT), GPIO18/19 (USB), GPIO11‑17 (flash),
+GPIO20/21 (UART0). `DHT_TYPE` nay là kiểu của DHTesp (`DHTesp::DHT22`), không
+phải macro của Adafruit.
+
+> **Công suất phát để MẶC ĐỊNH 8 dBm trên bo này.** Bo cũ chạy 19,5 dBm được nhờ
+> AMS1117 gánh nổi đỉnh dòng; C3 nuôi qua USB ở mức đó thì sóng méo và gateway
+> nhận 0 gói — mà broadcast không có ACK nên node vẫn báo "da phat". Lý do đầy
+> đủ ở cuối `esp32-outdoor/platformio.ini`.
 
 ### Node góc phòng (ESP32‑C3‑DevKitM‑1) — DHT22 trên GPIO4
 
@@ -73,7 +83,7 @@ số thứ hai khiến màn nhảy qua lại giữa nhiệt độ của cái tư
 
 ## 2. Điền cấu hình (`src/config.h` mỗi node)
 
-Lấy giá trị từ **web admin → Khách hàng "Khách hàng" → mở từng node → mục "Nạp firmware"**:
+Lấy giá trị từ **web admin → Khách hàng → mở từng node → mục "Nạp firmware"**:
 
 | Điền vào config.h | Lấy ở panel | Ghi chú |
 |---|---|---|
@@ -110,7 +120,7 @@ cd esp32-room
 cp src/config.h.example src/config.h      # WIFI_SSID (chỉ dò kênh) + DEVICE_UUID
 pio run -e esp32c3-room -t upload --upload-port COMz
 
-# Node ngoài trời (ESP32 DevKit V1)
+# Node ngoài trời (ESP32-C3-DevKitM-1)
 cd esp32-outdoor
 cp src/config.h.example src/config.h
 pio run -e esp32-espnow -t upload --upload-port COMy   # MẶC ĐỊNH: slave ESP-NOW

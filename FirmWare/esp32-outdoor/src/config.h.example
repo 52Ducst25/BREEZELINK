@@ -35,13 +35,30 @@
 //  Phần cứng — cắm cảm biến theo ../README.md
 // ============================================================================
 //  Cảm biến DHT:  VCC -> 3V3 | GND -> GND | DATA -> GPIO4
-//  (Loại 4 chân rời: thêm điện trở 10k giữa DATA và 3V3.)
-//  GPIO4 không phải chân strapping, an toàn lúc boot. Đổi chân thì tránh
-//  GPIO6-11 (nối flash) và GPIO34-39 (chỉ vào, DHT cần hai chiều).
+//
+//  NUÔI 3.3V, KHÔNG 5V: chân ESP32-C3 không chịu quá áp, mà DHT22 nuôi 5V sẽ
+//  lái đường dữ liệu lên gần 5V.
+//
+//  DHT22 là giao thức MỘT DÂY HAI CHIỀU — bắt buộc có trở kéo 4.7k lên 3.3V
+//  trên đường dữ liệu (module 3 chân đã hàn sẵn; loại 4 chân rời phải tự thêm).
+//  Thiếu trở thì đọc được lúc được lúc không: checksum bắt được nên KHÔNG ra số
+//  sai, chỉ ra NaN xen kẽ — triệu chứng rất giống dây tuột.
+//
+//  CHỌN CHÂN TRÊN ESP32-C3 — những chân PHẢI TRÁNH (khác hẳn bo ESP32 cũ):
+//    GPIO2, GPIO8, GPIO9   strapping. GPIO9 là nút BOOT: DHT22 có trở kéo lên
+//                          sẽ giữ nó CAO và bo mất khả năng vào chế độ nạp.
+//    GPIO18, GPIO19        USB D-/D+. Dùng làm GPIO là mất luôn cổng nạp.
+//    GPIO11..17            nối flash SPI trong module. Đụng vào là bo chết ngay.
+//    GPIO20, GPIO21        UART0. Còn dùng được nhưng mất log serial.
+//  GPIO4 sạch ở cả hai dòng bo, nên đổi bo không phải đổi chân.
 #define DHT_PIN        4
-//  DHT22/AM2302 hay DHT11 — ĐẶT ĐÚNG LOẠI. Đặt sai vẫn đọc được (checksum pass)
-//  nhưng ra số vô lý: DHT22 mà khai DHT11 sẽ cho ~1.8°C / ~23%.
-#define DHT_TYPE       DHT22
+//  LOẠI CẢM BIẾN — kiểu của DHTesp, KHÔNG phải macro DHT22 của Adafruit.
+//  Thư viện đã đổi cùng lúc với bo (xem platformio.ini), nên khai `DHT22` trần
+//  ở đây là đứt build ở "'DHT22' was not declared in this scope".
+//
+//  ĐẶT ĐÚNG LOẠI: sai vẫn đọc được và checksum vẫn qua, chỉ ra số vô lý —
+//  DHT22 mà khai DHT11 sẽ cho ~1.8°C / ~23%.
+#define DHT_TYPE       DHTesp::DHT22
 
 //  Chu kỳ gửi số liệu (ms). 15s cho dễ theo dõi khi test; 30000 khi chạy thật.
 //  5 GIAY khi chay ESP-NOW, KHONG PHAI 15. Day la NHIP TIM, khong phai nhip ghi

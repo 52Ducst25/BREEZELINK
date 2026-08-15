@@ -186,7 +186,8 @@ Tức là đường BLE ăn mất **~60% khả năng thu của chính cái gatew
 Mất luôn cả một mớ lộn xộn kèm theo: không quét, không ghép đôi, không thương lượng MTU,
 không NimBLE ~100 KB flash, không ai tranh ăng-ten 2.4 GHz.
 
-> **Đấu dây** (đối chiếu `Research/Uno_Q/ABX00162-full-pinout.pdf`):
+> **Đấu dây** (đối chiếu sơ đồ chân chính hãng:
+> <https://docs.arduino.cc/hardware/uno-q> — datasheet ABX00162):
 > `GPIO18 → D0` (PB7, USART1_RX) · `GPIO17 ← D1` (PB6, USART1_TX) · GND chung.
 >
 > **Đừng nối vào chân ghi "RX"/"TX"** trên hàng chân kia — đó là `SOC_SE4_RX/TX`, đi thẳng
@@ -328,7 +329,7 @@ chưa đủ thì phát lại từng mẫu qua RLS. Nên thời gian tích luỹ 
 | App | Flutter (Dart), Dio, package_info_plus, url_launcher |
 | Firmware | C++ (Arduino-ESP32), PlatformIO, LVGL 8 + TFT_eSPI, IRremoteESP8266, ESP-NOW |
 | Edge AI | Python 3.13, numpy, SQLite, Arduino App Lab (`web_ui`, RouterBridge) |
-| Phần cứng | ESP32-S3 hoặc ESP32-WROOM-32 (gateway) · 4× ESP32-C3 · ESP32 DevKit (ngoài trời) · Arduino UNO Q · DHT22 · LED IR |
+| Phần cứng | ESP32-S3 (gateway/panel) · **5× ESP32-C3** (4 góc phòng + ngoài trời) · Arduino UNO Q · DHT22 · LED IR |
 | Hạ tầng | Docker Compose, Cloudflare Tunnel |
 | Web admin | SSR Jinja2 + design system "Titanium Command" (CSS thuần, không CDN) |
 
@@ -357,7 +358,7 @@ AirConditioner/
 │   │   │   └── room-registry.*  #  Bảng 4 góc + trung vị
 │   │   └── tools/         #     Sinh font VLW / ảnh LVGL, đọc serial
 │   ├── esp32-room/        #   4 NODE GÓC PHÒNG (env ss1..ss4, mỗi node một UUID)
-│   ├── esp32-outdoor/     #   Node NGOÀI TRỜI (+ bản WiFi dự phòng)
+│   ├── esp32-outdoor/     #   Node NGOÀI TRỜI (ESP32-C3, slave ESP-NOW)
 │   ├── shared/            #   Khuôn gói ESP-NOW + radio slave + giao thức UART với UNO Q
 │   └── Interface/         #   Thiết kế giao diện + sơ đồ chân
 ├── edge-ai/               # Dịch vụ Edge AI cho Arduino UNO Q
@@ -366,7 +367,6 @@ AirConditioner/
 │   ├── applab/BreezeLink/ #   App của Arduino App Lab (sketch + python + assets)
 │   └── deploy/            #   Bộ dựng payload + unit systemd
 ├── Icon/                  # Ảnh gốc sinh ra MỌI icon của dự án
-├── Research/              # Tài liệu tham chiếu (ASHRAE, sơ đồ chân UNO Q)
 ├── docker/                # Dockerfile + compose (local + vps)
 ├── scripts/               # deploy.sh, push-unoq-app.sh, seed_demo.py
 └── docs/                  # Tài liệu thiết kế
@@ -571,6 +571,25 @@ Chưa bán cho ai thì bỏ hết năm bước, đổi thẳng.
 
 > Nếu bạn tự triển khai bản riêng, hãy tạo `docker/.env` **trực tiếp trên server** với
 > `CF_TUNNEL_TOKEN`, `JWT_SECRET`, `POSTGRES_PASSWORD`… của riêng bạn — không commit.
+
+---
+
+## Giấy phép
+
+[MIT](LICENSE) — dùng, sửa, phát hành lại, kể cả cho mục đích thương mại; chỉ cần giữ
+dòng bản quyền.
+
+**Không bao gồm trong repo** (giữ local, không phát hành lại vì thuộc bên thứ ba):
+
+| Tài liệu | Lấy ở đâu |
+|---|---|
+| ASHRAE 55 — adaptive comfort | <https://www.ashrae.org> (tiêu chuẩn có bản quyền, phải mua) |
+| Arduino UNO Q — datasheet, sơ đồ chân, schematic | <https://docs.arduino.cc/hardware/uno-q> |
+| Schematic màn cảm ứng | nhà cung cấp bo |
+
+Thuật toán comfort trong `src/app/comfort/` là bản cài đặt **từ mô hình đã công bố**
+(de Dear & Brager, ASHRAE RP-884) — hằng số hồi quy `0.31` / `17.8` là khoa học công
+khai, không phải nội dung sao chép từ bản tiêu chuẩn.
 
 ---
 
