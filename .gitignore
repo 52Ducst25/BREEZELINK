@@ -90,3 +90,28 @@ ck.md
 ~$*
 *[[]*[]]*.pptx
 *[[]*[]]*.docx
+
+# ============================================================================
+#  DON CHO REPO PUBLIC (15/08/2026)
+# ============================================================================
+# Cau hinh cong cu AI — khong phai san pham. Chiem 84% so file cua repo (2018
+# file, phan lon la skills vendored tu noi khac).
+.claude/
+.opencode/
+.vscode/
+
+# Tai lieu BEN THU BA — khong duoc phat hanh lai cong khai:
+#   ASHRAE 55  : tieu chuan co ban quyen, ASHRAE ban no
+#   ABX00162-* : datasheet/schematic chinh hang Arduino
+#   Touch_Screen_Extend : schematic cua nha cung cap
+# Giu ban local de tra cuu, khong day len repo. README tro bang LINK thay vi file.
+Research/
+
+# Repo GitHub cua nguoi khac, tai ve dang zip (hau to `-main`). Khong file nao
+# trong du an tham chieu toi no.
+FirmWare/Interface/ESP32-P4-Smart-86-Box-Smarthome-Panel-main/
+
+# File le, khong ai tham chieu
+FirmWare/*.png
+FirmWare/Kich_ban_video_*.md
+FirmWare/*.bat
