@@ -1,17 +1,18 @@
 /*
-  Logo Qualcomm động trên ma trận LED 13x8 của UNO Q.
+  An animated Qualcomm logo on the UNO Q's 13x8 LED matrix.
 
-  Vòng lặp ba pha, tổng 13 giây:
+  A three-phase loop, 13 seconds in total:
 
-      VẼ 5s            nét mọc dần từ đỉnh, quanh vành theo chiều kim đồng hồ,
-                       đuôi chữ Q hiện cuối cùng — đúng cách viết tay
-      SÁNG 3s          đứng yên, sáng đủ — cho mắt kịp đọc ra hình chữ Q
-      XOÁ NGƯỢC 5s     nét tan theo đúng đường đó nhưng ngược chiều: đuôi mất
-                       trước, vành tháo dần ngược kim đồng hồ về lại đỉnh
+      DRAW 5s          the stroke grows from the top, around the ring clockwise,
+                       with the Q's tail appearing last - the way it is written by hand
+      HOLD 3s          still and fully lit - giving the eye time to read the Q
+      ERASE 5s         the stroke dissolves along the same path but in reverse: the
+                       tail goes first, then the ring unwinds anticlockwise back to
+                       the top
 
-  TÁCH RA KHỎI sketch.ino vì nó không liên quan gì tới đường dữ liệu: sketch
-  chính lo UART và RPC, còn đây chỉ là hiển thị. Trộn vào một file thì mỗi lần
-  gỡ lỗi giao thức lại phải cuộn qua hai bảng 104 số.
+  SPLIT OUT OF sketch.ino because it has nothing to do with the data path: the main
+  sketch handles UART and RPC, while this is purely display. Merged into one file,
+  every protocol debugging session would mean scrolling past two tables of 104 numbers.
 */
 
 #pragma once
@@ -20,15 +21,15 @@
 
 namespace LedLogo {
 
-/// Bật ma trận và bắt đầu vòng lặp từ màn hình trống. Gọi một lần trong setup().
+/// Turn on the matrix and start the loop from a blank screen. Call once in setup().
 void begin();
 
-/// Đẩy vòng lặp đi tiếp. Gọi mỗi vòng loop() — hàm tự đếm thời gian, và chỉ
-/// pha VẼ mới thật sự dựng hình (25 khung/giây); hai pha kia vẽ đúng một lần
-/// lúc bước vào rồi để mạch quét của ma trận tự giữ.
+/// Advance the loop. Call every loop() -- the function keeps its own time, and only
+/// the DRAW phase actually renders (25 frames/second); the other two phases render
+/// exactly once on entry and then let the matrix's own scan circuit hold the image.
 ///
-/// GỌI SAU pump(): đệm UART của Zephyr có hạn, và một khung 39 byte tới trong
-/// lúc đang bận dựng hình là một khung mất.
+/// CALL IT AFTER pump(): Zephyr's UART buffer is finite, and a 39-byte frame arriving
+/// while we are busy rendering is a lost frame.
 void update();
 
 }  // namespace LedLogo

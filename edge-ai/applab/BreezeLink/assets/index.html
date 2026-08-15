@@ -1,17 +1,17 @@
 <!doctype html>
 <!--
-  BreezeLink — trang theo dõi, phục vụ bởi brick web_ui ở cổng 7000.
+  BreezeLink - the monitoring page, served by the web_ui brick on port 7000.
 
-  KHÔNG TẢI GÌ TỪ BÊN NGOÀI: không CDN, không phông chữ web, không thư viện biểu
-  đồ. Cả dự án này sinh ra để chạy khi mất mạng, nên một trang theo dõi chỉ hiện
-  được lúc có internet là thứ hỏng đúng vào lúc cần nhất. Biểu đồ vẽ tay bằng
-  canvas — vài chục dòng, và nó không bao giờ hết hạn.
+  IT LOADS NOTHING FROM OUTSIDE: no CDN, no web fonts, no charting library. This whole
+  project exists to keep running with no network, so a monitoring page that only renders
+  when the internet is up is the thing that breaks exactly when it is needed most. The
+  charts are hand-drawn on a canvas - a few dozen lines, and they never expire.
 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>BreezeLink</title>
-<!-- Icon trên thanh tab. File nằm ngay trong assets/ nên chính web_ui phục vụ nó
-     — cùng nguồn gốc, không phá nguyên tắc "không tải gì từ bên ngoài". -->
+<!-- The browser tab icon. The file sits inside assets/ so web_ui serves it itself -
+     same origin, so it does not break the "load nothing from outside" rule. -->
 <link rel="icon" type="image/png" sizes="192x192" href="favicon.png">
 <meta name="theme-color" content="#2AAAB6">
 <style>
@@ -32,8 +32,8 @@
   .clock b { font-size:22px; font-weight:600; font-variant-numeric:tabular-nums;
              letter-spacing:1px; }
   .clock small { color:var(--dim); font-size:12px; }
-  /* Tuổi dữ liệu: xanh khi còn tươi, vàng khi bắt đầu cũ, đỏ khi đứng hẳn.
-     Đây là thứ trả lời câu "trang có còn sống không" nhanh hơn mọi con số. */
+  /* Data age: green while fresh, amber as it starts to age, red once it has stopped.
+     This answers "is this page still alive" faster than any number on it. */
   .age { font-size:12px; font-weight:600; padding:2px 9px; border-radius:99px; }
   .legend { display:flex; gap:14px; flex-wrap:wrap; font-size:12px;
             color:var(--dim); font-weight:400; margin-top:2px; }
@@ -71,90 +71,90 @@
   <div class="clock">
     <b id="clock">--:--:--</b>
     <small id="today">—</small>
-    <span class="age pill dim" id="age">chưa có dữ liệu</span>
+    <span class="age pill dim" id="age">no data yet</span>
   </div>
 </div>
 <div class="grid">
   <div class="card">
-    <h2>Trong nhà</h2>
+    <h2>Indoor</h2>
     <div class="big" id="tin">--<span class="unit">°C</span></div>
-    <div class="row"><span>Độ ẩm</span><span id="hin">--</span></div>
-    <div class="row"><span>Máy lạnh</span><span id="ac">--</span></div>
-    <div class="row"><span>Dự báo 15'</span><span id="fc">--</span></div>
+    <div class="row"><span>Humidity</span><span id="hin">--</span></div>
+    <div class="row"><span>Air conditioner</span><span id="ac">--</span></div>
+    <div class="row"><span>15-min forecast</span><span id="fc">--</span></div>
   </div>
 
   <div class="card">
-    <h2>Ngoài trời</h2>
+    <h2>Outdoor</h2>
     <div class="big" id="tout">--<span class="unit">°C</span></div>
-    <div class="row"><span>Node ngoài trời</span><span id="outok">--</span></div>
-    <div class="row"><span>Đỉnh 12h tới</span><span id="peak">--</span></div>
-    <div class="row"><span>Dự báo lấy lúc</span><span id="wage">--</span></div>
+    <div class="row"><span>Outdoor node</span><span id="outok">--</span></div>
+    <div class="row"><span>Next-12h peak</span><span id="peak">--</span></div>
+    <div class="row"><span>Forecast fetched</span><span id="wage">--</span></div>
   </div>
 
   <div class="card">
-    <h2>Bốn góc phòng</h2>
+    <h2>The four room corners</h2>
     <div class="corners" id="corners"></div>
     <div id="anom" style="margin-top:10px"></div>
   </div>
 
   <div class="card">
-    <h2>Ai đang cầm lái</h2>
+    <h2>Who is in control</h2>
     <div style="margin-bottom:8px" id="driver"></div>
-    <div class="row"><span>Máy chủ im lặng</span><span id="silence">--</span></div>
-    <div class="row"><span>Ngưỡng giành lái</span><span id="thr">--</span></div>
-    <div class="row"><span>Quyết định của edge</span><span id="want">--</span></div>
+    <div class="row"><span>Server silent for</span><span id="silence">--</span></div>
+    <div class="row"><span>Takeover threshold</span><span id="thr">--</span></div>
+    <div class="row"><span>The edge's decision</span><span id="want">--</span></div>
   </div>
 
   <div class="card">
-    <h2>Mô hình nhiệt</h2>
+    <h2>Thermal model</h2>
     <div style="margin-bottom:8px" id="mstate"></div>
-    <div class="row"><span>Hằng số thời gian τ</span><span id="tau">--</span></div>
-    <div class="row"><span>Công suất lạnh</span><span id="cg">--</span></div>
-    <div class="row"><span>Ngoài trời ăn vào</span><span id="og">--</span></div>
-    <div class="row"><span>Số mẫu đã học</span><span id="ns">--</span></div>
+    <div class="row"><span>Time constant τ</span><span id="tau">--</span></div>
+    <div class="row"><span>Cooling power</span><span id="cg">--</span></div>
+    <div class="row"><span>Outdoor influence</span><span id="og">--</span></div>
+    <div class="row"><span>Samples learned</span><span id="ns">--</span></div>
   </div>
 
   <div class="card">
-    <h2>Dự báo có chuẩn không</h2>
+    <h2>Is the forecast any good</h2>
     <div style="margin-bottom:8px" id="sstate"></div>
-    <div class="row"><span>Sai số trung bình</span><span id="mae">--</span></div>
-    <div class="row"><span>Mốc "phòng đứng yên"</span><span id="nmae">--</span></div>
-    <div class="row"><span>Số lần đã chấm</span><span id="sn">--</span></div>
+    <div class="row"><span>Mean error</span><span id="mae">--</span></div>
+    <div class="row"><span>"Room stands still" baseline</span><span id="nmae">--</span></div>
+    <div class="row"><span>Forecasts scored</span><span id="sn">--</span></div>
   </div>
 
   <div class="card wide">
-    <h2>6 giờ qua</h2>
-    <!-- Chú thích bằng MÀU chứ không phải bằng chữ trong tiêu đề: ba đường cùng
-         một khung, và "trong nhà — ngoài trời — nhiệt độ đặt" viết liền nhau
-         không nói được đường nào là đường nào. -->
+    <h2>The last 6 hours</h2>
+    <!-- The legend is keyed by COLOUR rather than by words in the heading: three lines
+         share one frame, and "indoor - outdoor - setpoint" written in a row cannot say
+         which line is which. -->
     <div class="legend">
-      <span><i style="background:#4da3ff"></i>trong nhà (trung vị 4 góc)</span>
-      <span><i style="background:#ffb340"></i>ngoài trời</span>
-      <span><i class="dash"></i>nhiệt độ đặt</span>
-      <span class="muted">· trục dọc °C · mỗi phút một điểm</span>
+      <span><i style="background:#4da3ff"></i>indoor (median of 4 corners)</span>
+      <span><i style="background:#ffb340"></i>outdoor</span>
+      <span><i class="dash"></i>setpoint</span>
+      <span class="muted">· vertical axis °C · one point per minute</span>
     </div>
     <canvas id="chart"></canvas>
   </div>
 
   <div class="card wide">
-    <h2>12 giờ tới</h2>
+    <h2>The next 12 hours</h2>
     <div class="legend">
-      <span><i style="background:#ffb340"></i>dự báo ngoài trời (open-meteo)</span>
-      <span class="muted">· mỗi giờ một điểm · dùng để làm mát trước khi nắng lên</span>
+      <span><i style="background:#ffb340"></i>outdoor forecast (open-meteo)</span>
+      <span class="muted">· one point per hour · used to pre-cool before the sun rises</span>
     </div>
     <canvas id="wchart" style="height:110px"></canvas>
   </div>
 </div>
-<footer id="foot">đang nối…</footer>
+<footer id="foot">connecting…</footer>
 
 <script>
 const $ = id => document.getElementById(id);
 const n1 = v => (v === null || v === undefined) ? '--' : v.toFixed(1);
-const hhmm = ts => new Date(ts * 1000).toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit'});
+const hhmm = ts => new Date(ts * 1000).toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
 const pill = (cls, txt) => `<span class="pill ${cls}">${txt}</span>`;
 
 function render(s) {
-  if (!s.ready) { $('foot').textContent = 'Chưa nhận được ảnh chụp nào từ gateway.'; return; }
+  if (!s.ready) { $('foot').textContent = 'No snapshot received from the gateway yet.'; return; }
 
   $('tin').innerHTML = n1(s.indoor.t) + '<span class="unit">°C</span>';
   $('hin').textContent = n1(s.indoor.h) + ' %RH';
@@ -162,81 +162,82 @@ function render(s) {
   $('fc').textContent = s.forecast_15 === null ? '--' : n1(s.forecast_15) + ' °C';
 
   $('tout').innerHTML = n1(s.outdoor.t) + '<span class="unit">°C</span>';
-  $('outok').innerHTML = s.outdoor.online ? pill('ok','còn nhịp') : pill('bad','mất nhịp');
+  $('outok').innerHTML = s.outdoor.online ? pill('ok','heartbeat ok') : pill('bad','heartbeat lost');
   $('peak').textContent = s.weather.peak_t === null ? '--'
-      : n1(s.weather.peak_t) + ' °C lúc ' + hhmm(s.weather.peak_ts);
-  $('wage').textContent = s.weather.age_min === null ? 'chưa có'
-      : Math.round(s.weather.age_min) + ' phút trước' + (s.weather.fresh ? '' : ' (quá hạn)');
+      : n1(s.weather.peak_t) + ' °C at ' + hhmm(s.weather.peak_ts);
+  $('wage').textContent = s.weather.age_min === null ? 'none yet'
+      : Math.round(s.weather.age_min) + ' min ago' + (s.weather.fresh ? '' : ' (expired)');
 
-  // Góc nào lệch quá 2.5 °C so với trung vị thì tô đỏ — cùng ngưỡng với
-  // find_anomalies() bên Python, để mắt và log không nói hai chuyện khác nhau.
+  // A corner more than 2.5 °C from the median is coloured red - the same threshold as
+  // find_anomalies() on the Python side, so the eye and the log never say different
+  // things.
   $('corners').innerHTML = s.rooms.map(r => {
     const bad = Math.abs(r.t - s.indoor.t) >= 2.5;
     return `<div class="corner${bad ? ' bad' : ''}"><small>${r.label}</small>
             <b>${n1(r.t)}°</b></div>`;
-  }).join('') || '<span class="muted">chưa có góc nào</span>';
+  }).join('') || '<span class="muted">no corners yet</span>';
 
   $('anom').innerHTML = s.anomalies.length
       ? s.anomalies.map(a => pill('bad', a)).join(' ')
-      : pill('dim', 'không có bất thường');
+      : pill('dim', 'no anomalies');
 
   const c = s.control;
   $('driver').innerHTML = c.driving
-      ? pill('warn', 'EDGE CẦM LÁI') + (c.advisory_only ? ' ' + pill('dim','chỉ đề xuất') : '')
-      : pill('ok', 'máy chủ cầm lái');
-  $('silence').textContent = c.silence_sec === null ? 'chưa từng ra lệnh' : Math.round(c.silence_sec) + ' s';
+      ? pill('warn', 'EDGE IN CONTROL') + (c.advisory_only ? ' ' + pill('dim','advice only') : '')
+      : pill('ok', 'server in control');
+  $('silence').textContent = c.silence_sec === null ? 'never commanded' : Math.round(c.silence_sec) + ' s';
   $('thr').textContent = Math.round(c.takeover_after_sec) + ' s';
   $('want').textContent = c.want_mode === null ? '--' : c.want_mode + ' ' + c.want_setpoint + '°C';
 
   const m = s.model;
-  $('mstate').innerHTML = m.ready ? pill('ok','đã khớp') : pill('dim', m.describe);
-  $('tau').textContent = m.tau_min === null ? '--' : Math.round(m.tau_min) + ' phút';
-  $('cg').textContent  = m.cool_gain === null ? '--' : m.cool_gain.toFixed(2) + ' °C/đv';
+  $('mstate').innerHTML = m.ready ? pill('ok','fitted') : pill('dim', m.describe);
+  $('tau').textContent = m.tau_min === null ? '--' : Math.round(m.tau_min) + ' min';
+  $('cg').textContent  = m.cool_gain === null ? '--' : m.cool_gain.toFixed(2) + ' °C/unit';
   $('og').textContent  = m.outdoor_gain === null ? '--' : '×' + m.outdoor_gain.toFixed(2);
   $('ns').textContent  = m.samples;
 
   const sc = s.score;
-  $('sstate').innerHTML = sc.trustworthy ? pill('ok','ĐÁNG TIN') : pill('warn','chưa đáng tin');
+  $('sstate').innerHTML = sc.trustworthy ? pill('ok','TRUSTWORTHY') : pill('warn','not yet trustworthy');
   $('mae').textContent  = sc.mae === null ? '--' : sc.mae.toFixed(2) + ' °C';
   $('nmae').textContent = sc.naive_mae === null ? '--' : sc.naive_mae.toFixed(2) + ' °C';
   $('sn').textContent   = sc.n;
 
   drawWeather(s.weather.hours);
   lastDataTs = s.ts;
-  $('foot').textContent = 'ảnh chụp lúc ' + new Date(s.ts * 1000).toLocaleTimeString('vi-VN');
+  $('foot').textContent = 'snapshot at ' + new Date(s.ts * 1000).toLocaleTimeString('en-GB');
 }
 
-/* Đồng hồ + tuổi dữ liệu.
-   Hai thứ khác nhau và cần cả hai: đồng hồ là giờ MÁY ĐANG XEM, còn tuổi dữ
-   liệu đo từ dấu thời gian do CHÍNH BO đóng vào. Nếu trang treo hoặc bo ngừng
-   gửi, đồng hồ vẫn chạy bình thường — chỉ có tuổi dữ liệu lớn dần lên mới nói
-   ra điều đó. Một cái đồng hồ đơn độc sẽ khiến trang trông vẫn sống trong khi
-   số liệu đã chết từ lâu. */
+/* The clock plus the data age.
+   Two different things, and both are needed: the clock is the VIEWING MACHINE's time,
+   while the data age is measured from a timestamp stamped by THE BOARD ITSELF. If the
+   page hangs or the board stops sending, the clock keeps ticking normally - only the
+   growing data age reveals it. A clock on its own would make the page look alive long
+   after the data had died. */
 let lastDataTs = null;
 
 function tickClock() {
   const now = new Date();
-  $('clock').textContent = now.toLocaleTimeString('vi-VN', {hour12: false});
-  $('today').textContent = now.toLocaleDateString('vi-VN',
+  $('clock').textContent = now.toLocaleTimeString('en-GB', {hour12: false});
+  $('today').textContent = now.toLocaleDateString('en-GB',
       {weekday: 'short', day: '2-digit', month: '2-digit'});
 
   const el = $('age');
   if (lastDataTs === null) {
     el.className = 'age pill dim';
-    el.textContent = 'chưa có dữ liệu';
+    el.textContent = 'no data yet';
     return;
   }
   const sec = Math.max(0, Math.round(Date.now() / 1000 - lastDataTs));
-  // Ngưỡng theo nhịp thật: vòng điều khiển 30 giây. Quá 90 giây là đã lỡ ba
-  // nhịp — không còn là chậm nữa mà là hỏng ở đâu đó.
+  // Thresholds follow the real cadence: a 30-second control loop. Past 90 seconds three
+  // ticks have been missed - that is no longer slow, it is broken somewhere.
   el.className = 'age pill ' + (sec <= 45 ? 'ok' : sec <= 90 ? 'warn' : 'bad');
   el.textContent = sec < 60
-      ? `số liệu ${sec}s trước`
-      : `số liệu ${Math.floor(sec / 60)} phút trước`;
+      ? `data ${sec}s old`
+      : `data ${Math.floor(sec / 60)} min old`;
 }
 
-/* Vẽ nhiều đường trên một canvas. Tự lo màn hình nét cao (devicePixelRatio) —
-   thiếu bước đó thì mọi đường trông nhoè trên màn hình điện thoại. */
+/* Draw several series on one canvas. It handles high-DPI screens itself
+   (devicePixelRatio) - without that step every line looks blurry on a phone. */
 function plot(cv, series, opts) {
   const dpr = window.devicePixelRatio || 1;
   const w = cv.clientWidth, h = cv.clientHeight;
@@ -246,7 +247,7 @@ function plot(cv, series, opts) {
   g.clearRect(0, 0, w, h);
 
   const all = series.flatMap(s => s.pts.map(p => p[1])).filter(v => v !== null);
-  if (!all.length) { g.fillStyle = '#8b93a7'; g.fillText('chưa có dữ liệu', 8, 20); return; }
+  if (!all.length) { g.fillStyle = '#8b93a7'; g.fillText('no data yet', 8, 20); return; }
   let lo = Math.min(...all), hi = Math.max(...all);
   if (hi - lo < 2) { const mid = (hi + lo) / 2; lo = mid - 1; hi = mid + 1; }
   const pad = (hi - lo) * 0.15; lo -= pad; hi += pad;
@@ -291,7 +292,7 @@ async function poll(path) {
 
 async function tickState() {
   try { render(await poll('/api/state')); }
-  catch (e) { $('foot').textContent = 'mất kết nối tới bo — ' + e.message; }
+  catch (e) { $('foot').textContent = 'lost connection to the board - ' + e.message; }
 }
 
 async function tickHistory() {
@@ -302,14 +303,14 @@ async function tickHistory() {
       {pts: h.points.map(p => [p.ts, p.t_out]), color: '#ffb340'},
       {pts: h.points.map(p => [p.ts, p.sp]),    color: '#3ddc84', width: 1, dash: [4, 4]},
     ]);
-  } catch (e) { /* biểu đồ hỏng không được làm hỏng phần còn lại của trang */ }
+  } catch (e) { /* a broken chart must not break the rest of the page */ }
 }
 
 tickClock(); setInterval(tickClock, 1000);
 tickState(); tickHistory();
-// 3 giây: dữ liệu chỉ đổi mỗi 30 giây nên đây đã là dày hơn cần thiết, nhưng nó
-// làm trang phản hồi ngay khi vừa mở. Lịch sử thưa hơn nhiều — nó chỉ mọc thêm
-// một điểm mỗi phút.
+// 3 seconds: the data only changes every 30 seconds so this is already more often than
+// necessary, but it makes the page responsive the moment it is opened. History is polled
+// far less often - it only gains one point per minute.
 setInterval(tickState, 3000);
 setInterval(tickHistory, 60000);
 window.addEventListener('resize', tickHistory);

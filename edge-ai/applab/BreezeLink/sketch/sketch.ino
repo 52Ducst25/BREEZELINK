@@ -1,34 +1,39 @@
 /*
-  BreezeLink — cầu nối giữa gateway ESP32-S3 và nửa Linux của UNO Q.
+  BreezeLink - the bridge between the ESP32-S3 gateway and the UNO Q's Linux half.
 
-  ĐÂY LÀ BẢN CHẠY THẬT, khác sketch thử ở một điểm: nó không chỉ in ra màn hình
-  mà ĐẨY DỮ LIỆU sang Python. Thuật toán điều khiển và phần AI chạy bên đó.
+  THIS IS THE PRODUCTION VERSION, differing from the test sketch in one respect: it
+  does not merely print to the screen, it PUSHES DATA to Python. The control algorithm
+  and the AI run over there.
 
-    ESP32-S3 ──UART D0/D1──► sketch này ──RPC──► arduino-router ──► Python
-                            (kiểm khung)                          (quyết định)
+    ESP32-S3 --UART D0/D1--> this sketch --RPC--> arduino-router --> Python
+                            (frame check)                          (decisions)
 
-  ĐẤU DÂY (đối chiếu ABX00162-full-pinout.pdf):
-     ESP32-S3 GPIO18 (TX) ──► D0 = PB7 = USART1_RX
-     ESP32-S3 GPIO17 (RX) ◄── D1 = PB6 = USART1_TX
-     GND ─── GND
+  WIRING (cross-checked against ABX00162-full-pinout.pdf):
+     ESP32-S3 GPIO18 (TX) --> D0 = PB7 = USART1_RX
+     ESP32-S3 GPIO17 (RX) <-- D1 = PB6 = USART1_TX
+     GND --- GND
 
-  ĐỪNG NỐI VÀO CHÂN GHI "RX"/"TX" trên hàng chân kia: đó là SOC_SE4_RX/TX, đi
-  thẳng vào Qualcomm và chạy 1.8V. Nối 3.3V vào đó là hỏng chân SoC — và vì hàng
-  chân số KHÔNG có chữ RX/TX nào nên đây là chỗ rất dễ cắm nhầm.
+  DO NOT CONNECT TO THE PINS LABELLED "RX"/"TX" on the other header: those are
+  SOC_SE4_RX/TX, they go straight into the Qualcomm SoC and run at 1.8V. Feeding 3.3V
+  into them destroys an SoC pin - and because the numbered header has NO RX/TX markings
+  at all, this is a very easy mistake to make.
 
   ---------------------------------------------------------------------------
-  SKETCH NÀY CỐ Ý KHÔNG HIỂU GÓI. Nó kiểm khung (magic + version + CRC) rồi đẩy
-  nguyên 39 byte sang Python dưới dạng hex. Bố cục gói vì thế chỉ nằm ở hai chỗ
-  đã chốt với nhau bằng static_assert — struct C và protocol.py — chứ không phát
-  sinh chỗ thứ ba ở đây phải nhớ sửa theo.
+  THIS SKETCH DELIBERATELY DOES NOT UNDERSTAND THE PACKET. It validates the framing
+  (magic + version + CRC) and forwards all 39 bytes to Python as hex. The packet layout
+  therefore lives in only two places already pinned to each other by a static_assert -
+  the C struct and protocol.py - rather than growing a third place here that has to be
+  remembered.
 
-  KÈO THEO: sketch không cần biết ORG_ID. link_key băm từ nó được tính bên
-  Python, nên thư mục app này đem đi đâu cũng không mang theo định danh hộ nào.
+  A SIDE BENEFIT: the sketch does not need to know ORG_ID. The link_key hashed from it
+  is computed on the Python side, so this app directory can go anywhere without carrying
+  any household's identity.
 
-  VẪN KIỂM CRC dù Python cũng kiểm: một khung hỏng bị chặn ở đây tốn 0 byte RPC,
-  còn để lọt thì nó chiếm một lượt gọi qua router rồi mới bị bỏ. Quan trọng hơn,
-  bộ đếm `g_bad` ngay dưới đây phân biệt được "dây nhiễu" với "RPC chết", mà đó
-  là hai hỏng hóc cần sửa theo hai hướng hoàn toàn khác nhau.
+  IT STILL CHECKS THE CRC even though Python does too: a corrupt frame stopped here
+  costs 0 bytes of RPC, whereas letting it through consumes a router round trip before
+  being discarded. More importantly, the `g_bad` counter just below distinguishes "a
+  noisy wire" from "dead RPC", and those are two faults needing completely different
+  fixes.
 */
 
 #include <Arduino_RouterBridge.h>
@@ -36,37 +41,38 @@
 #include "led-matrix-logo.h"
 #include "unoq-link-protocol.h"
 
-// Serial1 = USART1 = D0/D1. KHÔNG dùng Serial: router đã chiếm cổng đó để nói
-// chuyện với nửa Linux, nên chỉ số dịch đi một — Serial1 mới là hàng chân số.
+// Serial1 = USART1 = D0/D1. Do NOT use Serial: the router has already taken that port
+// to talk to the Linux half, so the index shifts by one - Serial1 is the numbered
+// header.
 #define GW_SERIAL Serial1
 #define GW_BAUD   115200
 
-// Tên phương thức RPC. PHẢI KHỚP edge_ai/bridge_client.py. Sai tên thì router
-// định tuyến vào hư không và KHÔNG BÁO LỖI — notify là fire-and-forget, bên kia
-// chỉ đơn giản không bao giờ được gọi, y hệt triệu chứng đứt dây.
+// The RPC method names. They MUST MATCH edge_ai/bridge_client.py. A wrong name makes
+// the router route into the void and REPORT NOTHING - notify is fire-and-forget, the
+// other side simply never gets called, exactly like a broken cable.
 static const char *RPC_SNAPSHOT = "gw/snapshot";
 static const char *RPC_COMMAND  = "gw/command";
 
 static uint8_t  g_buf[sizeof(AcUnoQSnapshot)];
 static uint8_t  g_len = 0;
 
-static uint32_t g_ok = 0;        // khung hợp lệ đã đẩy sang Python
-static uint32_t g_bad = 0;       // khung sai magic/version/CRC
-static uint32_t g_bytes = 0;     // tổng byte thô đọc từ dây
-static uint32_t g_cmd = 0;       // lệnh Python gửi xuống, đã ghi ra dây
-static uint32_t g_cmdBad = 0;    // lệnh Python gửi xuống nhưng hỏng
+static uint32_t g_ok = 0;        // valid frames forwarded to Python
+static uint32_t g_bad = 0;       // frames with a bad magic/version/CRC
+static uint32_t g_bytes = 0;     // total raw bytes read from the wire
+static uint32_t g_cmd = 0;       // commands from Python, written out to the wire
+static uint32_t g_cmdBad = 0;    // commands from Python that were malformed
 static uint32_t g_lastOkMs = 0;
 
-// KHÔNG đặt tên là HEX: Arduino có sẵn `#define HEX 16` cho Print, nên khai báo
-// trùng tên sẽ nở ra `static const char 16[]` và lỗi biên dịch ở một dòng chẳng
-// liên quan gì tới chỗ thật sự sai.
+// Do NOT name it HEX: Arduino already has `#define HEX 16` for Print, so a clashing
+// declaration expands to `static const char 16[]` and produces a compile error on a
+// line with nothing to do with the real mistake.
 static const char HEXDIG[] = "0123456789abcdef";
 
-/// Đẩy một khung đã kiểm sang Python.
+/// Forward a validated frame to Python.
 static void pushSnapshot() {
-  // +1 cho ký tự kết chuỗi. Đệm TĨNH chứ không phải String cộng dồn: hàm này
-  // chạy mỗi 5 giây suốt nhiều tháng, và nối chuỗi 78 lần mỗi lượt là 78 lần
-  // cấp phát lại trên một con vi điều khiển không có ai dọn phân mảnh hộ.
+  // +1 for the terminator. A STATIC buffer rather than accumulating a String: this
+  // function runs every 5 seconds for months, and concatenating 78 times per round is
+  // 78 reallocations on a microcontroller with nobody to defragment for it.
   static char hex[sizeof(g_buf) * 2 + 1];
   for (uint8_t i = 0; i < sizeof(g_buf); i++) {
     hex[i * 2]     = HEXDIG[g_buf[i] >> 4];
@@ -78,7 +84,7 @@ static void pushSnapshot() {
 }
 
 static void reportFrame(const AcUnoQSnapshot &s) {
-  Monitor.print("[rx] phong=");
+  Monitor.print("[rx] rooms=");
   Monitor.print(s.room_count);
 
   Monitor.print("  t_in=");
@@ -89,27 +95,27 @@ static void reportFrame(const AcUnoQSnapshot &s) {
   if (s.t_out_c100 == AC_UNOQ_T_INVALID) Monitor.print("--");
   else Monitor.print(s.t_out_c100 / 100.0f, 1);
 
-  Monitor.print("  co=0x");
+  Monitor.print("  flags=0x");
   Monitor.print(s.flags, HEX);
-  Monitor.print("  im_lang=");
-  if (s.cloud_silence_sec == AC_UNOQ_SILENCE_NEVER) Monitor.print("chua-tung");
+  Monitor.print("  silence=");
+  if (s.cloud_silence_sec == AC_UNOQ_SILENCE_NEVER) Monitor.print("never");
   else { Monitor.print(s.cloud_silence_sec); Monitor.print("s"); }
   Monitor.print("  #");
   Monitor.println(g_ok);
 }
 
-/// Bóc khung đã đủ byte. Trả false nếu không hợp lệ.
+/// Decode a frame once enough bytes are present. Returns false if invalid.
 static bool decodeFrame() {
   AcUnoQSnapshot s;
   memcpy(&s, g_buf, sizeof(s));
 
   if (s.magic != AC_UNOQ_MAGIC) return false;
   if (s.version != AC_UNOQ_VERSION) {
-    Monitor.print("[!] gateway gui version ");
+    Monitor.print("[!] the gateway sent version ");
     Monitor.print(s.version);
-    Monitor.print(", sketch hieu ");
+    Monitor.print(", this sketch understands ");
     Monitor.print(AC_UNOQ_VERSION);
-    Monitor.println(" — nap lai mot ben");
+    Monitor.println(" - reflash one of them");
     return false;
   }
   if (!acUnoQCheckSnapshot(&s)) return false;
@@ -126,7 +132,7 @@ static void pump() {
     const uint8_t b = (uint8_t)GW_SERIAL.read();
     g_bytes++;
 
-    if (g_len == 0 && b != AC_UNOQ_MAGIC) continue;   // chờ magic
+    if (g_len == 0 && b != AC_UNOQ_MAGIC) continue;   // wait for the magic byte
     g_buf[g_len++] = b;
     if (g_len < sizeof(g_buf)) continue;
 
@@ -134,9 +140,10 @@ static void pump() {
       g_len = 0;
     } else {
       g_bad++;
-      // Trượt MỘT byte rồi tìm magic tiếp, KHÔNG xoá sạch đệm: magic thật có thể
-      // nằm ngay trong đám vừa gom (nửa khung cũ dính nửa khung mới), và xoá sạch
-      // là mất luôn khung tốt đứng ngay sau khung hỏng.
+      // Slide ONE byte and keep looking for the magic, do NOT clear the buffer: the
+      // real magic byte may be inside the bytes just collected (half an old frame stuck
+      // to half a new one), and clearing would also discard a good frame sitting
+      // immediately after a corrupt one.
       memmove(g_buf, g_buf + 1, sizeof(g_buf) - 1);
       g_len = sizeof(g_buf) - 1;
       while (g_len > 0 && g_buf[0] != AC_UNOQ_MAGIC) {
@@ -154,10 +161,10 @@ static int8_t nibble(char c) {
   return -1;
 }
 
-/// Python gọi hàm này để gửi một đề xuất/lệnh xuống gateway.
+/// Python calls this to send an advice/command down to the gateway.
 ///
-/// CHẠY TRÊN LUỒNG CỦA BRIDGE, mà luồng đó chỉ có 500 byte ngăn xếp — nên mọi
-/// thứ ở đây phải nhỏ và không đệ quy. 13 byte trên ngăn xếp là vừa.
+/// IT RUNS ON THE BRIDGE'S THREAD, and that thread has only 500 bytes of stack - so
+/// everything here has to be small and non-recursive. 13 bytes on the stack is fine.
 static void onCommand(String hex) {
   const size_t need = sizeof(AcUnoQCommandHeader) * 2;
   uint8_t out[sizeof(AcUnoQCommandHeader)];
@@ -176,9 +183,9 @@ static void onCommand(String hex) {
     out[i] = (uint8_t)((hi << 4) | lo);
   }
 
-  // Kiểm TRƯỚC KHI ghi ra dây. Gateway cũng kiểm và sẽ từ chối gói hỏng, nhưng
-  // một lệnh hỏng lọt xuống đó chỉ hiện ra ở log gateway — nơi không ai đang
-  // nhìn lúc gỡ lỗi phía này.
+  // Validate BEFORE writing to the wire. The gateway checks too and will refuse a
+  // corrupt packet, but a corrupt command that gets that far only shows up in the
+  // gateway's log - which nobody is watching while debugging this side.
   AcUnoQCommandHeader c;
   memcpy(&c, out, sizeof(c));
   if (c.magic != AC_UNOQ_MAGIC || c.version != AC_UNOQ_VERSION || !acUnoQCheckCommand(&c)) {
@@ -190,9 +197,9 @@ static void onCommand(String hex) {
   g_cmd++;
 
   Monitor.print("[tx] ");
-  Monitor.print(c.kind == AC_UNOQ_KIND_COMMAND ? "LENH" : "de-xuat");
-  // Ép về int: `setpoint` là int8_t, mà Print có nạp chồng riêng cho `char` —
-  // để nguyên thì 25 in ra thành một ký tự điều khiển chứ không phải "25".
+  Monitor.print(c.kind == AC_UNOQ_KIND_COMMAND ? "COMMAND" : "advice");
+  // Cast to int: `setpoint` is an int8_t, and Print has its own overload for `char` -
+  // left as is, 25 prints as a control character rather than "25".
   Monitor.print(" mode=");
   Monitor.print((int)c.mode);
   Monitor.print(" set=");
@@ -203,8 +210,8 @@ static void onCommand(String hex) {
 
 void setup() {
   Monitor.begin(115200);
-  // Bridge phải lên TRƯỚC: không có nó thì Monitor không có đường về Python và
-  // mọi dòng log dưới đây rơi vào hư không.
+  // Bridge has to come up FIRST: without it Monitor has no route back to Python and
+  // every log line below falls into the void.
   Bridge.begin();
   while (!Monitor) {
     delay(200);
@@ -214,45 +221,47 @@ void setup() {
   Bridge.provide(RPC_COMMAND, onCommand);
   LedLogo::begin();
 
-  Monitor.println("== BreezeLink · cau noi UART <-> Python ==");
-  Monitor.print("cho khung ");
+  Monitor.println("== BreezeLink - UART <-> Python bridge ==");
+  Monitor.print("waiting for ");
   Monitor.print((unsigned)sizeof(AcUnoQSnapshot));
-  Monitor.println(" byte tren D0/D1 @115200");
+  Monitor.println("-byte frames on D0/D1 @115200");
 }
 
 void loop() {
-  // ĐỌC UART TRƯỚC. Đệm UART của Zephyr có hạn, và một khung 39 byte tới trong
-  // lúc đang bận dựng hình cho ma trận LED là một khung mất.
+  // READ THE UART FIRST. Zephyr's UART buffer is finite, and a 39-byte frame arriving
+  // while we are busy rendering the LED matrix is a lost frame.
   pump();
   LedLogo::update();
 
-  // Tổng kết mỗi 30 giây — thưa hơn sketch thử, vì ở bản chạy thật thì log
-  // Python mới là thứ cần đọc, và một dòng tổng kết mỗi 5 giây sẽ đẩy nó trôi.
+  // A summary every 30 seconds - sparser than the test sketch, because in production
+  // the Python log is what needs reading, and a summary line every 5 seconds would
+  // scroll it away.
   static uint32_t lastReport = 0;
   if (millis() - lastReport >= 30000) {
     lastReport = millis();
-    Monitor.print("[tong] byte=");
+    Monitor.print("[total] bytes=");
     Monitor.print(g_bytes);
-    Monitor.print("  khung=");
+    Monitor.print("  frames=");
     Monitor.print(g_ok);
-    Monitor.print("  hong=");
+    Monitor.print("  bad=");
     Monitor.print(g_bad);
-    Monitor.print("  lenh=");
+    Monitor.print("  commands=");
     Monitor.print(g_cmd);
     if (g_cmdBad) {
       Monitor.print("(+");
       Monitor.print(g_cmdBad);
-      Monitor.print(" hong)");
+      Monitor.print(" bad)");
     }
-    // Phân biệt ba ca hỏng khác hẳn nhau, vì cách sửa khác hẳn nhau.
+    // Distinguish three completely different failures, because the fixes differ
+    // completely.
     if (g_bytes == 0) {
-      Monitor.println("  <- KHONG CO BYTE NAO: kiem day S3 GPIO18 -> D0, GND chung, S3 da chay chua");
+      Monitor.println("  <- NO BYTES AT ALL: check the S3 GPIO18 -> D0 wire, a common GND, and whether the S3 is running");
     } else if (g_ok == 0) {
-      Monitor.println("  <- CO BYTE MA KHONG RA KHUNG: gan nhu chac chan lech baud hoac thieu GND");
+      Monitor.println("  <- BYTES BUT NO FRAMES: almost certainly a baud mismatch or a missing GND");
     } else {
-      Monitor.print("  lan cuoi ");
+      Monitor.print("  last ");
       Monitor.print((millis() - g_lastOkMs) / 1000);
-      Monitor.println("s truoc");
+      Monitor.println("s ago");
     }
   }
 

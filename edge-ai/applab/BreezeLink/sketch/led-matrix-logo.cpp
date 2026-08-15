@@ -6,42 +6,43 @@
 namespace LedLogo {
 namespace {
 
-// Ma trận của UNO Q: 13 cột × 8 hàng, 3 bit xám (0..7).
+// The UNO Q's matrix: 13 columns x 8 rows, 3-bit greyscale (0..7).
 constexpr uint8_t COLS = 13;
 constexpr uint8_t ROWS = 8;
 constexpr uint16_t CELLS = COLS * ROWS;
 
-// --- Nhịp của vòng lặp --------------------------------------------------------
+// --- The loop's timing --------------------------------------------------------
 //
-//   VẼ (5s)  ->  SÁNG (3s)  ->  XOÁ NGƯỢC (5s)  ->  quay lại   · trọn vòng 13s
+//   DRAW (5s)  ->  HOLD (3s)  ->  ERASE (5s)  ->  repeat   - a full 13s cycle
 //
-// Pha SÁNG ở giữa cho mắt một nhịp nghỉ để đọc ra hình chữ Q trước khi nó bắt
-// đầu tan — không có nó thì nét vừa khép kín đã tan ngay, và logo hoàn chỉnh
-// chỉ tồn tại đúng một khung hình.
+// The HOLD phase in the middle gives the eye a pause to read the Q before it starts
+// dissolving - without it the stroke dissolves the instant it closes, and the complete
+// logo exists for exactly one frame.
 constexpr uint32_t DRAW_MS = 5000;
 constexpr uint32_t HOLD_MS = 3000;
 constexpr uint32_t ERASE_MS = 5000;
 
-// 40ms/khung = 25 hình/giây, chỉ dùng cho hai pha ĐỘNG. Pha SÁNG đứng yên nên
-// nó vẽ đúng một lần lúc bước vào — ma trận có mạch quét riêng chạy bằng ngắt,
-// khung đã nạp thì nó tự giữ mà không tốn chu kỳ nào của vòng lặp.
+// 40ms/frame = 25 frames/second, used only by the two ANIMATED phases. The HOLD phase
+// is static so it renders exactly once on entry - the matrix has its own
+// interrupt-driven scan circuit, and once a frame is loaded it holds it without costing
+// the loop a single cycle.
 //
-// Phần lớn khung sẽ giống hệt khung trước — 40 ô sáng trải trên 255 mốc nghĩa
-// là trung bình 125ms mới có một ô đổi trạng thái. Vẫn vẽ đủ 25 hình/giây vì
-// phép dựng chỉ là 104 lần so sánh, rẻ hơn nhiều so với việc phải nhớ xem
-// khung trước đã vẽ tới đâu.
+// Most frames will be identical to the previous one - 40 lit cells spread across 255
+// steps means a cell changes state every 125ms on average. We still render at 25
+// frames/second because building a frame is only 104 comparisons, far cheaper than
+// having to remember how far the previous frame got.
 constexpr uint32_t FRAME_MS = 40;
 
-// Đặt 0 nếu muốn logo đứng yên, sáng liên tục.
+// Set to 0 for a static, permanently lit logo.
 #define LOGO_ANIMATE 1
 
-// --- Bảng ---------------------------------------------------------------------
+// --- Tables -------------------------------------------------------------------
 //
-// Chữ Q của Qualcomm. Sinh bằng hàm khoảng cách (vành tròn + đoạn thẳng làm
-// đuôi) rồi lượng tử hoá về 8 mức — xem hình ASCII bên phải.
+// Qualcomm's Q. Generated with a distance function (a ring plus a line segment for the
+// tail) and quantised to 8 levels - see the ASCII rendering on the right.
 //
-// Các ô giá trị 2-5 KHÔNG PHẢI "mờ", mà là khử răng cưa: chúng nằm ở rìa nét và
-// chính chúng làm một vòng tròn 8 điểm ảnh trông ra vòng tròn.
+// Cells with values 2-5 are NOT "dim", they are antialiasing: they sit on the edge of
+// the stroke and they are what makes an 8-pixel circle actually look like a circle.
 const uint8_t LOGO[CELLS] = {
     0, 0, 0, 0, 2, 5, 4, 0, 0, 0, 0, 0, 0,  //     :+=
     0, 0, 0, 6, 7, 5, 6, 7, 3, 0, 0, 0, 0,  //    *#+*#-
@@ -53,16 +54,19 @@ const uint8_t LOGO[CELLS] = {
     0, 0, 0, 0, 2, 5, 4, 0, 0, 7, 5, 0, 0,  //     :+=  #+
 };
 
-// Mốc xuất hiện của từng ô, thang 0..255. Ô nào có mốc ≤ tiến độ thì đã được vẽ.
+// Each cell's appearance threshold, on a 0..255 scale. A cell whose threshold is <= the
+// progress value has been drawn.
 //
-// THỨ TỰ LÀ CÁCH NGƯỜI TA VIẾT TAY CHỮ Q: đi quanh vành trước, bắt đầu từ đỉnh
-// theo chiều kim đồng hồ (mốc 0..200), rồi mới tới cái đuôi (200..255). Để đuôi
-// hiện xen giữa lúc vành còn dở thì nó trông như nhiễu chứ không như nét vẽ.
+// THE ORDER IS HOW A PERSON WRITES A Q BY HAND: around the ring first, starting at the
+// top and going clockwise (steps 0..200), and only then the tail (200..255). Letting the
+// tail appear while the ring is still incomplete makes it look like noise rather than a
+// pen stroke.
 //
-// BẢNG TRA THAY VÌ TÍNH LƯỢNG GIÁC LÚC CHẠY: mỗi khung chỉ còn một phép so sánh
-// cho mỗi ô, trên con vi điều khiển đang phải đọc UART không được sót byte nào.
+// A LOOKUP TABLE RATHER THAN TRIGONOMETRY AT RUNTIME: each frame costs one comparison
+// per cell, on a microcontroller that also has to read a UART without dropping a byte.
 //
-// 255 ở ô tắt là vô hại — chúng bị chặn bởi phép kiểm LOGO[i] == 0 trước đó.
+// The 255s on unlit cells are harmless - they are short-circuited by the earlier
+// LOGO[i] == 0 check.
 const uint8_t ORDER[CELLS] = {
     255, 255, 255, 255, 189, 197,   6, 255, 255, 255, 255, 255, 255,
     255, 255, 255, 176, 185, 196,   9,  19,  26, 255, 255, 255, 255,
@@ -83,12 +87,13 @@ Phase phase = PHASE_DRAW;
 uint32_t phaseStartMs = 0;
 uint32_t lastFrameMs = 0;
 
-/// Vẽ trạng thái dở dang của nét: chỉ những ô đã tới lượt.
+/// Render the stroke's partial state: only the cells whose turn has come.
 ///
-/// XOÁ NGƯỢC DÙNG CHUNG ĐÚNG HÀM NÀY, chỉ khác là tiến độ chạy từ 255 về 0.
-/// Nhờ vậy nét tan đi theo đúng đường nó đã mọc ra, chỉ ngược chiều — đuôi chữ
-/// Q biến mất trước, rồi vành tháo dần ngược kim đồng hồ về lại đỉnh. Viết một
-/// hàm xoá riêng thì gần như chắc chắn hai đường sẽ lệch nhau ở đâu đó.
+/// THE ERASE PHASE USES THIS EXACT FUNCTION, differing only in that the progress runs
+/// from 255 down to 0. That makes the stroke dissolve along precisely the path it grew
+/// along, just in reverse - the Q's tail vanishes first, then the ring unwinds
+/// anticlockwise back to the top. Writing a separate erase function would almost
+/// certainly let the two paths diverge somewhere.
 void renderProgress(uint8_t progress) {
   for (uint16_t i = 0; i < CELLS; i++) {
     frame[i] = (LOGO[i] != 0 && ORDER[i] <= progress) ? LOGO[i] : 0;
@@ -100,14 +105,14 @@ void renderProgress(uint8_t progress) {
 
 void begin() {
   matrix.begin();
-  // BẮT BUỘC trước draw(): mặc định thư viện hiểu đệm là thang 256 mức, nên
-  // bảng 0..7 của ta sẽ hiện ra gần như tắt hẳn.
+  // MANDATORY before draw(): by default the library interprets the buffer as a
+  // 256-level scale, so our 0..7 table would come out almost completely dark.
   matrix.setGrayscaleBits(3);
 
 #if LOGO_ANIMATE
   phase = PHASE_DRAW;
   phaseStartMs = millis();
-  renderProgress(0);        // bắt đầu từ màn hình trống, nét mọc dần ra
+  renderProgress(0);        // start from a blank screen and let the stroke grow
 #else
   matrix.draw(LOGO);
 #endif
@@ -123,18 +128,19 @@ void update() {
       if (elapsed >= DRAW_MS) {
         phase = PHASE_HOLD;
         phaseStartMs = now;
-        matrix.draw(LOGO);          // khép kín nét, rồi đứng yên suốt pha SÁNG
+        matrix.draw(LOGO);          // close the stroke, then hold still for the HOLD phase
         return;
       }
       if (now - lastFrameMs < FRAME_MS) return;
       lastFrameMs = now;
-      // Nhân trước rồi mới chia để không mất độ phân giải. elapsed < 5000 nên
-      // tích tối đa là 4999×255 ≈ 1,27 triệu — vừa uint32, không tràn.
+      // Multiply before dividing so no resolution is lost. elapsed < 5000, so the
+      // maximum product is 4999x255 ~= 1.27 million - comfortably inside a uint32, no
+      // overflow.
       renderProgress((uint8_t)(elapsed * 255u / DRAW_MS));
       return;
 
     case PHASE_HOLD:
-      // Đứng yên: không vẽ lại gì cả, chỉ chờ hết giờ.
+      // Static: nothing is redrawn, we simply wait out the phase.
       if (elapsed >= HOLD_MS) {
         phase = PHASE_ERASE;
         phaseStartMs = now;
@@ -147,7 +153,7 @@ void update() {
         phase = PHASE_DRAW;
         phaseStartMs = now;
         lastFrameMs = 0;
-        renderProgress(0);          // sạch hẳn rồi mới vẽ lại từ đầu
+        renderProgress(0);          // fully cleared before drawing again from scratch
         return;
       }
       if (now - lastFrameMs < FRAME_MS) return;
