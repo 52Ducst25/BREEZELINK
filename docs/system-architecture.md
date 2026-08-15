@@ -42,7 +42,7 @@ This rule exists in **three places** and all three **must produce the same numbe
 | Location | File |
 |---|---|
 | Backend (source of truth) | `src/app/comfort/room_aggregate.py` |
-| Gateway (local screen + the packet sent to the UNO Q) | `FirmWare/esp32-s3-panel/src/room-registry.cpp` |
+| Gateway (local screen + the packet sent to the UNO Q) | `Firmware/esp32-s3-panel/src/room-registry.cpp` |
 | Edge AI | re-imports the backend file itself, via `edge-ai/edge_ai/comfort_bridge.py` |
 
 The C++ version is a copy that **has to exist** (firmware cannot import Python) — change the rule

@@ -709,9 +709,9 @@ is recorded here so it does not get forgotten.
 ## 9. Build
 
 ```bash
-# The source (config.h included) now lives in FirmWare/esp32-s3-panel/src/ — the
+# The source (config.h included) now lives in Firmware/esp32-s3-panel/src/ — the
 # esp32-qrbox/ directory only holds the build configuration for the QR Box board.
-cd FirmWare/esp32-s3-panel
+cd Firmware/esp32-s3-panel
 cp src/config.h.example src/config.h      # fill in as per README §2
 cd ../esp32-qrbox
 pio run -e qrbox-touch -t upload --upload-port COMx   # USB-TTL plugged into P3

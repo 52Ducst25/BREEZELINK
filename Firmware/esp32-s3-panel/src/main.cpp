@@ -2,7 +2,7 @@
 //  BreezeLink - QR Box Advance Touch - INDOOR GATEWAY + IR blaster
 // ----------------------------------------------------------------------------
 //  THIS BOARD NO LONGER MEASURES TEMPERATURE. Four ESP32-C3 nodes in the four
-//  corners of the room do that (FirmWare/esp32-room/), while this board does the
+//  corners of the room do that (Firmware/esp32-room/), while this board does the
 //  five jobs of a bridge:
 //    1. Receive ESP-NOW from the 4 room-corner nodes + the outdoor node -> relay
 //       to MQTT on EACH node's behalf (one topic per node, keyed by the uuid it

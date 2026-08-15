@@ -18,7 +18,7 @@ Six devices for **one household**, three firmware directories:
 > broken programming circuit) and `esp32-s3-gateway/` (a headless debug board) — both were
 > only build configurations pointing at `esp32-s3-panel/src/` — plus `esp32-humidity/` (the
 > humidifier test board, whose logic has been ported into the panel). To look them up:
-> `git log --diff-filter=D -- FirmWare/esp32-qrbox`.
+> `git log --diff-filter=D -- Firmware/esp32-qrbox`.
 >
 > Pinout and bring-up order: [`esp32-s3-panel/README.md`](esp32-s3-panel/README.md).
 

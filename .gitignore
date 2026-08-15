@@ -102,12 +102,12 @@ Research/
 
 # Repo GitHub cua nguoi khac, tai ve dang zip (hau to `-main`). Khong file nao
 # trong du an tham chieu toi no.
-FirmWare/Interface/ESP32-P4-Smart-86-Box-Smarthome-Panel-main/
+Firmware/Interface/ESP32-P4-Smart-86-Box-Smarthome-Panel-main/
 
-# File le trong FirmWare/ — anh du an thuoc ve docs/images/
-FirmWare/*.png
-FirmWare/Kich_ban_video_*.md
-FirmWare/*.bat
+# File le trong Firmware/ — anh du an thuoc ve docs/images/
+Firmware/*.png
+Firmware/Kich_ban_video_*.md
+Firmware/*.bat
 
 # Dia chi may chu trien khai — khong ghi cung trong file duoc commit.
 # Ban mau: scripts/deploy.env.example

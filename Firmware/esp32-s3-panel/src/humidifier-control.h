@@ -8,7 +8,7 @@
 //  2026-08-15 cleanup -- that board only existed to prove the logic before it went
 //  onto real hardware, and the production version is now this very file). To look
 //  at the original:
-//      git log --diff-filter=D -- FirmWare/esp32-humidity/src/diffuser-control.cpp
+//      git log --diff-filter=D -- Firmware/esp32-humidity/src/diffuser-control.cpp
 //
 //  The six priority branches, three layers of oscillation control, and the "when in
 //  doubt, turn it OFF" principle are unchanged. THREE THINGS DIFFER from the

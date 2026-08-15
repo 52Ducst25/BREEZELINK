@@ -1,7 +1,7 @@
 """The UART link to the gateway: read snapshots, send commands.
 
 REPLACES ble_client.py. The reasoning for dropping Bluetooth is in
-FirmWare/shared/unoq-link-protocol.h; summarised by the measurement on real
+Firmware/shared/unoq-link-protocol.h; summarised by the measurement on real
 hardware:
 
     Gateway, BLE on:    0.31 ESP-NOW packets/second

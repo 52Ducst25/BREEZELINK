@@ -1,6 +1,6 @@
 """Packet layout for the UART link to the gateway.
 
-THE TWIN OF ``FirmWare/shared/unoq-link-protocol.h``. The ``struct`` format strings
+THE TWIN OF ``Firmware/shared/unoq-link-protocol.h``. The ``struct`` format strings
 below must match the C structs over there byte for byte; change one side and forget
 the other and the packet still decodes "successfully" while producing garbage
 temperatures -- hence ``VERSION``, which is checked at every entry point.
@@ -22,7 +22,7 @@ MAGIC = 0xAC
 # wrong command.
 VERSION = 2
 
-# UART speed. It MUST MATCH UNOQ_BAUD in FirmWare/esp32-*/platformio.ini.
+# UART speed. It MUST MATCH UNOQ_BAUD in Firmware/esp32-*/platformio.ini.
 # 115200 is more than enough: a 39-byte snapshot every 5 seconds = 62 bytes/second.
 # Do not raise it -- the wire between the two boards is unshielded, and a higher rate
 # trades bit error rate for nothing at all at this throughput. A baud mismatch

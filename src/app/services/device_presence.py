@@ -28,7 +28,7 @@ chúc hộ 5 slave — giới hạn giao thức, không phải thiếu sót củ
 HAI ĐƯỜNG LÀM TƯƠI ``last_seen_at``
 ------------------------------------
 1. ``status_handler``  — nhịp ``STATUS_REFRESH_MS = 60s`` ở firmware
-   (FirmWare/esp32-s3-panel/src/slave-watch.h). Áp cho MỌI node.
+   (Firmware/esp32-s3-panel/src/slave-watch.h). Áp cho MỌI node.
 2. ``telemetry_handler`` — mỗi số đo, tức 15s/node
    (``SlaveWatch::RELAY_INTERVAL_MS``). Chỉ áp cho node CÓ số đo.
 

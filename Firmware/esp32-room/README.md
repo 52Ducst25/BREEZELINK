@@ -35,7 +35,7 @@ All four boards run **the same firmware** and differ in exactly two values (`DEV
 `ROOM_CORNER`). So they are **four envs**, not four directories:
 
 ```bash
-cd FirmWare/esp32-room
+cd Firmware/esp32-room
 cp src/config.h.example src/config.h     # WIFI_SSID + FW_VERSION, shared by all 4 boards
 cp nodes.ini.example nodes.ini           # per-board identity
 

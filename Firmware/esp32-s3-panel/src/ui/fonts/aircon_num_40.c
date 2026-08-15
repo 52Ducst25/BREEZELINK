@@ -1,7 +1,7 @@
 /*******************************************************************************
  * Size: 40 px
  * Bpp: 4
- * Opts: --font C:/WINDOWS/Fonts/arialbd.ttf --size 40 --bpp 4 --format lvgl --no-compress -r 0x20 -r 0x25 -r 0x2B -r 0x2D-0x2E -r 0x30-0x3A -r 0x43 -r 0xB0 --force-fast-kern-format -o e:/Project/Personal/AirConditioner/FirmWare/esp32-indoor/src/ui/fonts/aircon_num_40.c
+ * Opts: --font C:/WINDOWS/Fonts/arialbd.ttf --size 40 --bpp 4 --format lvgl --no-compress -r 0x20 -r 0x25 -r 0x2B -r 0x2D-0x2E -r 0x30-0x3A -r 0x43 -r 0xB0 --force-fast-kern-format -o e:/Project/Personal/AirConditioner/Firmware/esp32-indoor/src/ui/fonts/aircon_num_40.c
  ******************************************************************************/
 
 #ifdef LV_LVGL_H_INCLUDE_SIMPLE

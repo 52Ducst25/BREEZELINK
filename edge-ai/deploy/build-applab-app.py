@@ -18,7 +18,7 @@ CÁI GÌ LÀ MÃ NGUỒN, CÁI GÌ LÀ SẢN PHẨM (xem edge-ai/applab/.gitigno
     ├── app.yaml                      nguồn
     ├── sketch/sketch.ino             nguồn
     ├── sketch/sketch.yaml            nguồn
-    ├── sketch/unoq-link-protocol.h   SINH RA  <- FirmWare/shared/
+    ├── sketch/unoq-link-protocol.h   SINH RA  <- Firmware/shared/
     ├── python/main.py                nguồn
     ├── python/requirements.txt       nguồn
     ├── python/.env                   cấu hình của hộ, KHÔNG vào git, KHÔNG bị xoá
@@ -48,7 +48,7 @@ _payload = _load(Path(__file__).resolve().parent / "build-edge-payload.py")
 
 REPO = Path(__file__).resolve().parents[2]
 APP = REPO / "edge-ai" / "applab" / "BreezeLink"
-SHARED_HEADER = REPO / "FirmWare" / "shared" / "unoq-link-protocol.h"
+SHARED_HEADER = REPO / "Firmware" / "shared" / "unoq-link-protocol.h"
 
 # Chỉ những thư mục này bị xoá và dựng lại. KHÔNG xoá cả python/: ở đó có
 # main.py, requirements.txt và — quan trọng nhất — .env chứa ORG_ID của hộ, thứ

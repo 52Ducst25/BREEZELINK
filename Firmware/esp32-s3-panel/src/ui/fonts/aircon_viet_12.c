@@ -1,7 +1,7 @@
 /*******************************************************************************
  * Size: 12 px
  * Bpp: 2
- * Opts: --font C:\WINDOWS\Fonts\arial.ttf --size 12 --bpp 2 --format lvgl --no-compress -r 0x20-0x7F -r 0xB0 -r 0xB7 -r 0xC0-0xFF -r 0x102-0x103 -r 0x110-0x111 -r 0x128-0x129 -r 0x168-0x169 -r 0x1A0-0x1A1 -r 0x1AF-0x1B0 -r 0x1EA0-0x1EF9 -r 0x2013-0x2014 -r 0x2022 -r 0x2026 --force-fast-kern-format -o C:\VHITEK\AirConditioner\FirmWare\esp32-indoor\src\ui\fonts\aircon_viet_12.c
+ * Opts: --font C:\WINDOWS\Fonts\arial.ttf --size 12 --bpp 2 --format lvgl --no-compress -r 0x20-0x7F -r 0xB0 -r 0xB7 -r 0xC0-0xFF -r 0x102-0x103 -r 0x110-0x111 -r 0x128-0x129 -r 0x168-0x169 -r 0x1A0-0x1A1 -r 0x1AF-0x1B0 -r 0x1EA0-0x1EF9 -r 0x2013-0x2014 -r 0x2022 -r 0x2026 --force-fast-kern-format -o C:\VHITEK\AirConditioner\Firmware\esp32-indoor\src\ui\fonts\aircon_viet_12.c
  ******************************************************************************/
 
 #ifdef LV_LVGL_H_INCLUDE_SIMPLE

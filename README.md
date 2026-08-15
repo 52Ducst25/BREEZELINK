@@ -364,7 +364,7 @@ AirConditioner/
 │   ├── models/            #   ORM (SQLAlchemy)
 │   └── alembic/           #   DB migrations
 ├── app-flutter/           # Customer app (Flutter)
-├── FirmWare/              # ESP32 firmware (PlatformIO)
+├── Firmware/              # ESP32 firmware (PlatformIO)
 │   ├── esp32-s3-panel/    #   THE OFFICIAL WALL PANEL (2.8" ESP32-S3 board)
 │   │   ├── src/           #     PANEL SOURCE — the ONLY copy, shared by all 3 envs
 │   │   │   ├── ui/        #       LVGL interface (runs on core 0)
@@ -448,15 +448,15 @@ values from the admin web → *Khách hàng* → open the node → **"Nạp firm
 
 ```bash
 # GATEWAY / wall PANEL
-cd FirmWare/esp32-s3-panel && pio run -e esp32s3-panel -t upload
+cd Firmware/esp32-s3-panel && pio run -e esp32s3-panel -t upload
 
 # 4 ROOM-CORNER NODES — nodes.ini declares each board, flash them in turn
-cd FirmWare/esp32-room
+cd Firmware/esp32-room
 cp nodes.ini.example nodes.ini    # fill in each corner's DEVICE_UUID
 pio run -e ss1 -t upload && pio run -e ss2 -t upload   # ...ss3, ss4
 
 # OUTDOOR NODE
-cd FirmWare/esp32-outdoor && pio run -e esp32-espnow -t upload
+cd Firmware/esp32-outdoor && pio run -e esp32-espnow -t upload
 ```
 
 The six biggest time sinks if you do not know them in advance:
@@ -480,7 +480,7 @@ The six biggest time sinks if you do not know them in advance:
 pio device monitor -p COMx -b 115200    # RESETS the board -> lets you see the boot log
 
 # does NOT reset -> preserves accumulated state, use this while debugging
-python FirmWare/esp32-s3-panel/tools/read_serial.py COMx 30
+python Firmware/esp32-s3-panel/tools/read_serial.py COMx 30
 ```
 
 ### 4. Edge AI on the Arduino UNO Q
@@ -599,7 +599,7 @@ If you have not sold to anyone yet, skip all five steps and just change it.
 
 - Real secrets (**tunnel token, JWT secret, DB password, MQTT**) live in `.env` / `docker/.env` —
   **kept out of the repo by `.gitignore`**.
-- **`FirmWare/*/src/config.h` and `esp32-room/nodes.ini` are ignored** — each node holds the
+- **`Firmware/*/src/config.h` and `esp32-room/nodes.ini` are ignored** — each node holds the
   customer's WiFi password and its own `DEVICE_UUID`/`MQTT_PASSWORD` pair.
 - **`edge-ai/applab/BreezeLink/python/.env` is ignored** — it holds the household's `EDGE_ORG_ID`.
 - APKs, the app signing keystore and private keys are all ignored.

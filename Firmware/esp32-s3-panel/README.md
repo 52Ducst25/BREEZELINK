@@ -23,7 +23,7 @@ pio device monitor -p COM5 -b 115200                    # watch the log
 
 There used to be two more envs sharing exactly this `src/` — `esp32-qrbox` (the old QR Box board)
 and `esp32-s3-gateway` (a headless debug board) — **both removed from the repo on 2026-08-15**. To
-look them up: `git log --diff-filter=D -- FirmWare/esp32-qrbox`.
+look them up: `git log --diff-filter=D -- Firmware/esp32-qrbox`.
 
 Copying the source into another directory "to keep things tidy" creates **two panels**. Command
 execution logic, `req_id` deduplication, re-requesting IR codes, the advice/command boundary with

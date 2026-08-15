@@ -255,7 +255,7 @@ fight over the compressor. Those two costs are not equal.
 ## 5. Humidifier control
 
 Runs **entirely on the panel**, not through the server —
-`FirmWare/esp32-s3-panel/src/humidifier-control.h`. The control loop is closed inside the
+`Firmware/esp32-s3-panel/src/humidifier-control.h`. The control loop is closed inside the
 house, so it keeps working with no internet.
 
 ### Two thresholds, and the gap between them
@@ -452,7 +452,7 @@ the zero and goes looking for a fault where there is none.
 | Mode decision + dwell | `src/app/comfort/mode_decision.py` |
 | Thermal model (RLS) | `edge-ai/edge_ai/thermal_model.py` |
 | Forecast scoring | `edge-ai/edge_ai/prediction_score.py` |
-| Humidifier control | `FirmWare/esp32-s3-panel/src/humidifier-control.h` |
-| ESP-NOW packet layout | `FirmWare/shared/espnow-message.h` |
-| UART protocol to the UNO Q | `FirmWare/shared/unoq-link-protocol.h` |
-| Panel UI | `FirmWare/Interface/README.md` |
+| Humidifier control | `Firmware/esp32-s3-panel/src/humidifier-control.h` |
+| ESP-NOW packet layout | `Firmware/shared/espnow-message.h` |
+| UART protocol to the UNO Q | `Firmware/shared/unoq-link-protocol.h` |
+| Panel UI | `Firmware/Interface/README.md` |

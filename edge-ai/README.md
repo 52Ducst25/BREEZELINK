@@ -176,7 +176,7 @@ python -m edge_ai.main
   complain loudly, but if you see `Bỏ ảnh chụp không hợp lệ: … cắt cụt` repeating, that is BlueZ
   failing to negotiate a larger MTU.
 - **Changing the packet layout means changing BOTH sides** — `edge_ai/protocol.py` and
-  `FirmWare/shared/unoq-link-protocol.h`. The sizes are pinned by an `assert` at import time and
+  `Firmware/shared/unoq-link-protocol.h`. The sizes are pinned by an `assert` at import time and
   a `static_assert` at compile time, so forgetting blows up immediately instead of quietly
   misreading fields.
 - **If the UNO Q loses power, the fallback layer is gone.** It is an ADDITIONAL layer, not the
