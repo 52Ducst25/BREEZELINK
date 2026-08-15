@@ -1,29 +1,33 @@
-"""Mô hình nhiệt của phòng: ARX bậc nhất, 4 tham số, khớp trực tuyến.
+"""The room's thermal model: a first-order ARX with 4 parameters, fitted online.
 
     T_in[k+1] = a·T_in[k] + b·T_out[k] + c·u[k] + d
 
-    u[k] = max(0, T_in[k] − T_set[k])  khi COOL, ngược lại 0   (xem history_store)
+    u[k] = max(0, T_in[k] − T_set[k])  when COOL, otherwise 0   (see history_store)
 
-VÌ SAO ĐÚNG 4 THAM SỐ — ĐÂY LÀ RÀNG BUỘC CỦA DỮ LIỆU, KHÔNG PHẢI SỞ THÍCH:
-  Nhìn "12.644 điểm đo" rồi kết luận đủ cho mạng nơ-ron là sai, vì các điểm không
-  độc lập. Hai số đo cách nhau 60 giây trong một phòng có hằng số thời gian hàng
-  chục phút thì gần như là cùng một số. Số mẫu ĐỘC LẬP ≈ thời lượng ÷ τ:
+WHY EXACTLY 4 PARAMETERS -- THIS IS A CONSTRAINT OF THE DATA, NOT A PREFERENCE:
+  Looking at "12,644 data points" and concluding that is enough for a neural network
+  is wrong, because the points are not independent. Two readings 60 seconds apart in
+  a room whose time constant is tens of minutes are essentially the same number. The
+  number of INDEPENDENT samples ≈ duration ÷ τ:
 
-      2 ngày dữ liệu 4 góc ÷ τ≈45 phút  ≈  60 sự kiện nhiệt độc lập
+      2 days of four-corner data ÷ τ≈45 minutes  ≈  60 independent thermal events
 
-  4 tham số / 60 mẫu độc lập là tỉ lệ lành mạnh. Một MLP 32→64→3 có ~2.400 tham
-  số — cần khoảng hai NĂM tích luỹ với nhịp hiện tại. Xem thêm: chỉ 24 đoạn COOL
-  dài trên 20 phút trong toàn bộ lịch sử.
+  4 parameters per 60 independent samples is a healthy ratio. An MLP of 32→64→3 has
+  ~2,400 parameters -- roughly two YEARS of accumulation at the current rate. Also
+  worth noting: only 24 COOL segments longer than 20 minutes exist in the entire
+  history.
 
-BA CON SỐ VẬT LÝ RÚT RA ĐƯỢC, và đây là thứ một mô hình hộp đen không cho:
-  τ = −Δt/ln(a)     hằng số thời gian phòng
-  b/(1−a)           nắng ngoài trời ăn vào phòng bao nhiêu
-  −c/(1−a)          công suất lạnh thực tế — tụt dần nghĩa là máy yếu đi/bẩn lọc
+THREE PHYSICAL QUANTITIES CAN BE EXTRACTED, and this is what a black-box model
+cannot give you:
+  τ = −Δt/ln(a)     the room's time constant
+  b/(1−a)           how much outdoor sun makes it into the room
+  −c/(1−a)          actual cooling power -- a steady decline means the unit is
+                    weakening or the filter is dirty
 
-TÍNH TRÊN ĐỘ LỆCH so với T_REF chứ không trên số tuyệt đối: T_in và T_out đều
-quanh 32 °C và tương quan rất mạnh với số hạng hằng, nên ma trận chuẩn hoá gần
-suy biến. Trừ đi 30 là điều kiện số tốt lên hẳn mà không đổi ý nghĩa tham số nào
-ngoài ``d``.
+COMPUTED ON DEVIATIONS from T_REF rather than on absolute values: T_in and T_out are
+both around 32 °C and correlate very strongly with the constant term, making the
+normal matrix nearly singular. Subtracting 30 improves the conditioning dramatically
+without changing the meaning of any parameter except ``d``.
 """
 
 import logging
@@ -36,98 +40,107 @@ from edge_ai.history_store import Row
 
 logger = logging.getLogger("edge.model")
 
-T_REF = 30.0            # °C, gốc quy chiếu — xem chú thích đầu file
+T_REF = 30.0            # °C, the reference origin -- see the note at the top of the file
 
-# NHỊP MÔ HÌNH ≠ NHỊP LƯU TRỮ. Lịch sử ghi mỗi 60 giây (đủ dày cho phát hiện bất
-# thường và cho biểu đồ), còn mô hình chỉ lấy mỗi mẫu thứ 5.
+# THE MODEL INTERVAL IS NOT THE STORAGE INTERVAL. History is written every 60 seconds
+# (dense enough for anomaly detection and for the charts), while the model only takes
+# every 5th sample.
 #
-# VÌ SAO PHẢI THƯA HƠN: cái xác định `a` là lượng nhiệt độ THAY ĐỔI được giữa hai
-# mẫu. Ở 60 giây với τ≈45 phút thì a≈0.978, tức là mỗi bước phòng chỉ đổi 2.2%
-# quãng đường — nhỏ ngang nhiễu cảm biến. Nhiễu đó nằm ngay trong biến hồi quy
-# nên nó kéo `a` xuống một cách CÓ HỆ THỐNG (sai lệch suy giảm).
+# WHY IT HAS TO BE SPARSER: what determines `a` is how much the temperature MANAGES TO
+# CHANGE between two samples. At 60 seconds with τ≈45 minutes, a≈0.978 -- each step
+# covers only 2.2% of the journey, comparable to the sensor noise. That noise sits
+# inside the regressor itself, so it pulls `a` down SYSTEMATICALLY (attenuation bias).
 #
-# Đo trên dữ liệu giả có đáp án (τ thật 45 phút):
-#     Δt = 60s,  không trung bình:  τ = 24 phút   (sai 47%)
-#     Δt = 300s, có trung bình:     xem check-thermal-model.py
+# Measured on synthetic data with a known answer (true τ of 45 minutes):
+#     Δt = 60s,  no averaging:    τ = 24 minutes   (47% error)
+#     Δt = 300s, with averaging:  see check-thermal-model.py
 #
-# Ở 300 giây a≈0.895 — mỗi bước đổi 10.5% quãng đường, gấp 5 lần tín hiệu so với
-# cùng mức nhiễu. Vẫn còn 9 điểm trong mỗi τ, thừa để mô tả một hàm mũ.
+# At 300 seconds a≈0.895 -- each step covers 10.5% of the journey, 5× the signal for
+# the same noise. There are still 9 points within each τ, more than enough to describe
+# an exponential.
 DT_SEC = 300.0
 
-# Cặp mẫu lệch nhịp quá mức này thì BỎ, không co giãn. Mô hình ARX giả định Δt cố
-# định; nhét một khoảng 20 phút vào cùng phương trình với khoảng 5 phút sẽ làm `a`
-# sai lệch một cách âm thầm. Gateway mất mạng vài phút là chuyện thường.
+# A sample pair whose spacing is too far off is DISCARDED rather than rescaled. The
+# ARX model assumes a fixed Δt; feeding a 20-minute gap into the same equation as a
+# 5-minute one skews `a` silently. The gateway losing the network for a few minutes is
+# routine.
 DT_MIN_SEC, DT_MAX_SEC = 270.0, 330.0
 
-# Hệ số quên. 0.995 ở nhịp 300s → nửa đời ~11.5 giờ: đủ chậm để không đuổi theo
-# nhiễu cảm biến, đủ nhanh để mùa đổi hay đổi phòng thì mô hình theo kịp trong
-# khoảng một ngày.
+# Forgetting factor. 0.995 at a 300s interval → a half-life of ~11.5 hours: slow
+# enough not to chase sensor noise, fast enough that a change of season or of room
+# lets the model catch up within about a day.
 FORGET = 0.995
 
-# Dưới ngưỡng này thì mọi con số rút ra chỉ là nhiễu đội lốt tham số. 120 bước ×
-# 5 phút = 10 giờ, tức là phải thấy ít nhất một chu kỳ nóng-mát trong ngày.
+# Below this threshold every extracted number is just noise dressed up as a parameter.
+# 120 steps × 5 minutes = 10 hours, i.e. it must have seen at least one warm-cool
+# cycle in the day.
 MIN_SAMPLES = 120
 
 # ============================================================================
-#  VÙNG CÓ NGHĨA VẬT LÝ — chặn theo τ VÀ theo hai hệ số dẫn xuất
+#  THE PHYSICALLY MEANINGFUL REGION -- bounded by τ AND by the two derived gains
 # ----------------------------------------------------------------------------
-#  CHẶN THEO τ CHỨ KHÔNG THEO `a`, và đây là sửa một lỗi đã xảy ra thật.
+#  BOUNDED BY τ RATHER THAN BY `a`, and this fixes a bug that really happened.
 #
-#  Bản trước viết thẳng `0.5 < a < 0.9999`. Hai vấn đề, cái thứ hai mới nặng:
+#  An earlier version wrote `0.5 < a < 0.9999` directly. Two problems, the second one
+#  much worse:
 #
-#  1. Ý NGHĨA CỦA `a` PHỤ THUỘC DT_SEC. Ai đổi nhịp mô hình thì cùng một ngưỡng
-#     `a` lặng lẽ mang một τ khác hẳn, mà không dòng nào trong điều kiện nói ra
-#     điều đó. Chặn thẳng τ thì ý định nằm ngay trong biểu thức.
+#  1. THE MEANING OF `a` DEPENDS ON DT_SEC. Anyone changing the model interval makes
+#     the same `a` threshold quietly carry a completely different τ, with no line in
+#     the condition saying so. Bounding τ directly puts the intent right in the
+#     expression.
 #
-#  2. 0.9999 LỎNG TỚI MỨC VÔ DỤNG. Ở Δt = 5 phút:
-#         a < 0.9999  ->  τ tối đa 49.998 phút = 34,7 NGÀY
-#     Không phòng nào có hằng số thời gian 34 ngày, nhưng mọi giá trị tới đó đều
-#     được nhận là "có nghĩa vật lý".
+#  2. 0.9999 IS SO LOOSE AS TO BE USELESS. At Δt = 5 minutes:
+#         a < 0.9999  ->  a maximum τ of 49,998 minutes = 34.7 DAYS
+#     No room has a time constant of 34 days, yet every value up to that was accepted
+#     as "physically meaningful".
 #
-#  ĐÃ DÍNH ĐÚNG CA ĐÓ, và triệu chứng trông như mô hình đang chạy tốt:
-#         τ = 49.502 phút · ngoài trời ×303,33 · lạnh 283,45 °C/đv · 332 mẫu
-#         huy hiệu trên trang theo dõi: "đã khớp"
-#     Tính ngược ra thì a = 0,9998990 — lọt qua ngưỡng cũ đúng ở chữ số thứ tư.
-#     `b` = 0,0306 và `c` = −0,0286 đều BÌNH THƯỜNG; cả ba con số hiển thị nổ
-#     tung chỉ vì chúng đều chia cho (1−a) = 0,0001.
+#  WE HIT EXACTLY THAT CASE, and the symptom looked like a model working fine:
+#         τ = 49,502 minutes · outdoor ×303.33 · cooling 283.45 °C/unit · 332 samples
+#         the badge on the monitoring page: "fitted"
+#     Working backwards, a = 0.9998990 -- passing the old threshold at the fourth
+#     decimal place. `b` = 0.0306 and `c` = −0.0286 were both NORMAL; all three
+#     displayed numbers exploded purely because they are all divided by
+#     (1−a) = 0.0001.
 #
-#  `a → 1` nghĩa là mô hình kết luận "nhiệt độ trong nhà không bao giờ đổi" —
-#  T_in[k+1] = T_in[k]. Đó không phải một mô hình, đó là phép đo lặp lại chính
-#  nó. Nguyên nhân thường là dữ liệu KHÔNG CÓ KÍCH THÍCH: phòng phẳng lì suốt
-#  lịch sử, hoặc hai cảm biến trong/ngoài đang đo cùng một chỗ nên hai cột hồi
-#  quy trùng nhau và ma trận thiết kế suy biến.
+#  `a → 1` means the model has concluded "the indoor temperature never changes" --
+#  T_in[k+1] = T_in[k]. That is not a model, that is a measurement repeating itself.
+#  The usual cause is data with NO EXCITATION: a room that stayed flat throughout the
+#  history, or the indoor and outdoor sensors measuring the same place so the two
+#  regressor columns coincide and the design matrix becomes singular.
 TAU_MIN_MIN, TAU_MAX_MIN = 10.0, 300.0
 
-# Hai hệ số dẫn xuất cũng phải nằm trong vùng vật lý. Chặn τ đã đủ cho ca trên
-# (cả ba cùng chia (1−a)), nhưng hai ngưỡng này bắt được những kiểu hỏng mà τ
-# không thấy — ví dụ `b` sai dấu: τ đẹp mà "ngoài trời nóng lên thì phòng lạnh đi".
+# The two derived gains must also lie in a physical region. Bounding τ already covers
+# the case above (all three are divided by (1−a)), but these two thresholds catch
+# failure modes τ cannot see -- for example a sign error in `b`: a fine τ alongside
+# "when it gets hotter outside the room gets colder".
 #
-# Nới một chút về phía âm thay vì chặn ở 0: lúc mới khớp, hệ số của một tác động
-# yếu có thể lệch qua 0 vì nhiễu. Chặn cứng ở 0 sẽ khiến một phòng gần như không
-# chịu ảnh hưởng ngoài trời KHÔNG BAO GIỜ khớp được, mà không ai đoán ra vì sao.
-OUTDOOR_GAIN_LO, OUTDOOR_GAIN_HI = -0.2, 1.5     # ×, ở trạng thái dừng
-COOL_GAIN_LO, COOL_GAIN_HI = -0.5, 10.0          # °C cho mỗi đơn vị nhu cầu lạnh
+# Slightly loosened on the negative side rather than bounded at 0: early in the fit,
+# the coefficient of a weak influence can cross 0 because of noise. A hard bound at 0
+# would mean a room barely affected by the outdoors could NEVER fit, with nobody able
+# to work out why.
+OUTDOOR_GAIN_LO, OUTDOOR_GAIN_HI = -0.2, 1.5     # ×, at steady state
+COOL_GAIN_LO, COOL_GAIN_HI = -0.5, 10.0          # °C per unit of cooling demand
 
 
 def _a_from_tau(tau_min: float) -> float:
-    """`a` tương ứng với một hằng số thời gian, ở nhịp DT_SEC."""
+    """The `a` corresponding to a given time constant, at the DT_SEC interval."""
     return math.exp(-(DT_SEC / 60.0) / tau_min)
 
 
 class ThermalModel:
-    """RLS cho ARX bậc nhất. Khớp mẻ lúc khởi động, rồi cập nhật trực tuyến."""
+    """RLS for a first-order ARX. Batch fit at startup, then updated online."""
 
     def __init__(self, forget: float = FORGET) -> None:
         self._forget = forget
-        # Tiên nghiệm "nhiệt độ giữ nguyên": a=1, còn lại 0. Đây là giả thuyết
-        # vô hại nhất — nó không khẳng định điều gì về phòng, và mọi dữ liệu thật
-        # đều kéo nó ra khỏi đây.
+        # The "temperature stays as it is" prior: a=1, everything else 0. This is the
+        # most harmless hypothesis -- it asserts nothing about the room, and any real
+        # data pulls it away from here.
         self._theta = np.array([1.0, 0.0, 0.0, 0.0])
         self._p = np.eye(4)
         self._n = 0
         self._prev: Row | None = None
 
-    # -- trạng thái ------------------------------------------------------------
+    # -- state -----------------------------------------------------------------
 
     @property
     def samples(self) -> int:
@@ -135,98 +148,103 @@ class ThermalModel:
 
     @staticmethod
     def _reject(theta) -> str | None:
-        """Vì sao bộ tham số này không dùng được. ``None`` = dùng được.
+        """Why this parameter set is unusable. ``None`` = usable.
 
-        TRẢ VỀ LÝ DO CHỨ KHÔNG PHẢI True/False, có chủ đích: cùng một hàm vừa
-        làm cổng chặn (``ready``) vừa làm lời giải thích (``describe`` và log
-        khớp mẻ). Tách thành hai chỗ là đúng cái đã sinh ra lỗi cũ — điều kiện
-        ``0.5 < a < 0.9999`` từng được chép ở hai nơi và sửa một nơi là quên nơi
-        kia.
+        IT RETURNS A REASON RATHER THAN True/False, deliberately: one function serves
+        both as the gate (``ready``) and as the explanation (``describe`` and the
+        batch-fit log). Splitting it in two is exactly what caused the old bug -- the
+        condition ``0.5 < a < 0.9999`` was duplicated in two places and fixing one
+        meant forgetting the other.
         """
         a, b, c, _ = (float(v) for v in theta)
 
-        # Ba ca hỏng của `a` cần ba câu khác nhau: chúng dẫn tới ba chỗ phải đi
-        # tìm khác nhau, gộp thành "a ngoài khoảng" là ném đi manh mối.
+        # The three failure modes of `a` need three different sentences: they lead to
+        # three different places to go looking, and collapsing them into "a is out of
+        # range" throws the clue away.
         if a >= 1.0:
-            return f"a={a:.5f} ≥ 1 — mô hình tin phòng tự nóng lên vô hạn"
+            return f"a={a:.5f} ≥ 1 -- the model believes the room heats up without limit"
         if a <= 0.0:
-            return f"a={a:.5f} ≤ 0 — mô hình dao động đổi dấu mỗi bước"
+            return f"a={a:.5f} ≤ 0 -- the model oscillates, flipping sign every step"
 
         tau = -(DT_SEC / 60.0) / math.log(a)
         if not (TAU_MIN_MIN <= tau <= TAU_MAX_MIN):
-            return (f"τ={tau:.0f}' ngoài khoảng {TAU_MIN_MIN:.0f}'..{TAU_MAX_MIN:.0f}' "
-                    f"(a={a:.5f}) — dữ liệu có thể chưa đủ kích thích")
+            return (f"τ={tau:.0f}min is outside {TAU_MIN_MIN:.0f}min..{TAU_MAX_MIN:.0f}min "
+                    f"(a={a:.5f}) -- the data may not be sufficiently exciting")
 
         inv = 1.0 - a
         og, cg = b / inv, -c / inv
         if not (OUTDOOR_GAIN_LO <= og <= OUTDOOR_GAIN_HI):
-            return f"ngoài trời ăn vào ×{og:.2f}, ngoài khoảng {OUTDOOR_GAIN_LO}..{OUTDOOR_GAIN_HI}"
+            return f"outdoor influence ×{og:.2f}, outside {OUTDOOR_GAIN_LO}..{OUTDOOR_GAIN_HI}"
         if not (COOL_GAIN_LO <= cg <= COOL_GAIN_HI):
-            return f"công suất lạnh {cg:.2f}°C/đv, ngoài khoảng {COOL_GAIN_LO}..{COOL_GAIN_HI}"
+            return f"cooling power {cg:.2f}°C/unit, outside {COOL_GAIN_LO}..{COOL_GAIN_HI}"
         return None
 
     @property
     def ready(self) -> bool:
-        """Đã đủ dữ liệu VÀ tham số nằm trong vùng có nghĩa vật lý.
+        """Enough data AND parameters inside the physically meaningful region.
 
-        Vùng đó do ``_reject()`` định nghĩa — xem khối TAU_MIN_MIN ở đầu file
-        cho lý do chặn theo τ chứ không theo `a`.
+        That region is defined by ``_reject()`` -- see the TAU_MIN_MIN block at the top
+        of the file for why it bounds τ rather than `a`.
         """
         return self._n >= MIN_SAMPLES and self._reject(self._theta) is None
 
     @property
     def tau_min(self) -> float | None:
-        """Hằng số thời gian của phòng, phút."""
+        """The room's time constant, in minutes."""
         if not self.ready:
             return None
         return -(DT_SEC / 60.0) / math.log(self._theta[0])
 
     @property
     def outdoor_gain(self) -> float | None:
-        """Ở trạng thái dừng, ngoài trời tăng 1 °C thì trong nhà tăng bao nhiêu."""
+        """At steady state, how much the indoor temperature rises per 1 °C outdoors."""
         if not self.ready:
             return None
         return float(self._theta[1] / (1.0 - self._theta[0]))
 
     @property
     def cool_gain(self) -> float | None:
-        """°C hạ được cho mỗi đơn vị nhu cầu làm lạnh, ở trạng thái dừng.
+        """°C removed per unit of cooling demand, at steady state.
 
-        DƯƠNG nghĩa là làm lạnh có tác dụng (c âm). Số này tụt dần theo tuần là
-        tín hiệu máy yếu đi — thứ không cảm biến nào đo trực tiếp được.
+        POSITIVE means cooling is effective (c is negative). This number declining
+        week by week is a sign the unit is weakening -- something no sensor measures
+        directly.
         """
         if not self.ready:
             return None
         return float(-self._theta[2] / (1.0 - self._theta[0]))
 
     def describe(self) -> str:
-        """Một câu nói ĐÚNG chuyện đang xảy ra — trang theo dõi hiện thẳng câu này.
+        """One sentence stating what is ACTUALLY happening -- the monitoring page shows
+        this verbatim.
 
-        PHẢI TÁCH "thiếu mẫu" KHỎI "đủ mẫu nhưng tham số vô nghĩa". Bản trước gộp
-        cả hai vào một câu, nên ca đã gặp thật hiện ra là:
+        IT MUST SEPARATE "not enough samples" FROM "enough samples but meaningless
+        parameters". An earlier version merged the two into one sentence, so the case
+        we actually hit came out as:
 
-            "chưa đủ dữ liệu (332/120 mẫu)"
+            "not enough data (332/120 samples)"
 
-        — một câu tự mâu thuẫn, và nó gửi người đọc đi chờ thêm dữ liệu trong khi
-        vấn đề là dữ liệu KHÔNG CÓ KÍCH THÍCH, chờ bao lâu cũng không tự khỏi.
+        -- a self-contradictory sentence, and one that sends the reader off to wait
+        for more data when the problem is that the data has NO EXCITATION, which no
+        amount of waiting fixes.
         """
         if self._n < MIN_SAMPLES:
-            return f"chưa đủ dữ liệu ({self._n}/{MIN_SAMPLES} mẫu)"
+            return f"not enough data ({self._n}/{MIN_SAMPLES} samples)"
         why = self._reject(self._theta)
         if why is not None:
-            return f"đủ mẫu ({self._n}) nhưng tham số vô nghĩa — {why}"
-        return (f"τ={self.tau_min:.0f}' · ngoài trời×{self.outdoor_gain:.2f} · "
-                f"lạnh {self.cool_gain:.2f}°C/đv · {self._n} mẫu")
+            return f"enough samples ({self._n}) but the parameters are meaningless -- {why}"
+        return (f"τ={self.tau_min:.0f}min · outdoor×{self.outdoor_gain:.2f} · "
+                f"cooling {self.cool_gain:.2f}°C/unit · {self._n} samples")
 
-    # -- khớp ------------------------------------------------------------------
+    # -- fitting ---------------------------------------------------------------
 
     @staticmethod
     def _design(rows: list[Row]) -> tuple[np.ndarray, np.ndarray]:
-        """Dựng ma trận hồi quy, lấy thưa về nhịp DT_SEC.
+        """Build the regression matrix, decimated to the DT_SEC interval.
 
-        Duyệt tiến và chỉ nhận cặp cách nhau đúng một bước mô hình. Mẫu ở giữa
-        KHÔNG bị bỏ phí — chúng đã góp vào trung bình phút ở HistoryStore, và
-        chúng vẫn ở đó cho phát hiện bất thường.
+        Walks forward and only accepts pairs exactly one model step apart. The samples
+        in between are NOT wasted -- they already contributed to the per-minute average
+        in HistoryStore, and they are still there for anomaly detection.
         """
         phis, ys = [], []
         prev: Row | None = None
@@ -236,9 +254,9 @@ class ThermalModel:
                 continue
             dt = cur.ts - prev.ts
             if dt < DT_MIN_SEC:
-                continue                    # chưa đủ một bước, chờ tiếp
+                continue                    # not a full step yet, keep waiting
             if dt > DT_MAX_SEC or prev.t_out is None:
-                prev = cur                  # đứt quãng: bỏ cặp, bắt đầu lại từ đây
+                prev = cur                  # a gap: drop the pair and restart from here
                 continue
             phis.append([prev.t_in - T_REF, prev.t_out - T_REF, prev.cooling_demand, 1.0])
             ys.append(cur.t_in - T_REF)
@@ -246,61 +264,64 @@ class ThermalModel:
         return np.array(phis), np.array(ys)
 
     def load_history(self, rows: list[Row]) -> bool:
-        """Nạp toàn bộ lịch sử đã lưu. Gọi lúc khởi động.
+        """Load the whole stored history. Called at startup.
 
-        HAI ĐƯỜNG, VÀ ĐƯỜNG THỨ HAI MỚI LÀ ĐƯỜNG HAY DÙNG:
+        TWO PATHS, AND THE SECOND IS THE ONE MOST OFTEN TAKEN:
 
-          đủ ≥120 cặp  -> khớp bình phương tối thiểu một phát, xong ngay
-          chưa đủ      -> PHÁT LẠI từng mẫu qua observe(), học được gì hay nấy
+          ≥120 pairs available -> a single least-squares fit, done immediately
+          fewer                -> REPLAY each sample through observe(), learning
+                                  whatever can be learned
 
-        Bản trước chỉ có đường thứ nhất và trả False ở mọi trường hợp khác — tức
-        là VỨT SẠCH lịch sử. Hậu quả nặng hơn vẻ ngoài rất nhiều:
+        An earlier version only had the first path and returned False in every other
+        case -- i.e. it DISCARDED THE HISTORY ENTIRELY. The consequence is far worse
+        than it looks:
 
-            Chạy 9 tiếng, có 108 cặp trên đĩa, cúp điện một cái là `_n` về 0.
-            Dữ liệu vẫn nằm nguyên trong file, nhưng mô hình coi như chưa từng
-            thấy, và đồng hồ 10 tiếng chạy lại từ đầu.
+            Run for 9 hours with 108 pairs on disk, one power cut and `_n` is back to
+            0. The data is still sitting in the file, but the model treats it as never
+            seen, and the 10-hour clock restarts from scratch.
 
-        Nghĩa là lịch sử cục bộ chỉ có ích khi nó đã tự vượt 120 cặp — đúng cái
-        ngưỡng mà nó sinh ra để giúp đạt tới. Phát lại phá được vòng luẩn quẩn
-        đó: 13 cặp trên đĩa cho ra 13/120, không phải 0/120.
+        In other words the local history was only useful once it had already passed
+        120 pairs by itself -- the very threshold it exists to help reach. Replaying
+        breaks that circularity: 13 pairs on disk give 13/120, not 0/120.
 
-        Vì sao không luôn luôn phát lại cho gọn: khớp mẻ dùng TOÀN BỘ dữ liệu
-        cùng lúc nên không bị thứ tự chi phối, còn RLS có hệ số quên nên mẫu cũ
-        nhẹ dần. Khi đã đủ dữ liệu thì khớp mẻ cho tham số tốt hơn.
+        Why not always replay for simplicity: a batch fit uses ALL the data at once so
+        it is not affected by ordering, while RLS has a forgetting factor so older
+        samples fade. Once there is enough data, a batch fit gives better parameters.
         """
         phi, y = self._design(rows)
 
         if len(y) >= MIN_SAMPLES:
             theta, *_ = np.linalg.lstsq(phi, y, rcond=None)
-            # CÙNG MỘT PHÉP KIỂM với `ready`, gọi chung một hàm. Trước đây chỗ này
-            # chép lại điều kiện `0.5 < theta[0] < 0.9999` — hai bản của cùng một
-            # luật, và sửa một bên là quên bên kia.
+            # THE SAME CHECK as `ready`, calling the same function. This used to
+            # duplicate the condition `0.5 < theta[0] < 0.9999` -- two copies of one
+            # rule, and fixing one side meant forgetting the other.
             why = self._reject(theta)
             if why is None:
                 self._theta = theta
-                # P ≈ nghịch đảo ma trận thông tin: nói với RLS rằng "đã biết
-                # chừng này rồi", nên nó không nhảy dựng lên vì một mẫu nhiễu.
+                # P ≈ the inverse information matrix: it tells RLS "this much is
+                # already known", so it does not leap at a single noisy sample.
                 self._p = np.linalg.inv(phi.T @ phi + 1e-6 * np.eye(4))
                 self._n = len(y)
-                logger.info("Khớp mẻ từ %d cặp mẫu · %s", len(y), self.describe())
+                logger.info("Batch fit from %d sample pairs · %s", len(y), self.describe())
                 return True
-            logger.warning("Khớp mẻ từ %d cặp bị loại — %s. Chuyển sang phát lại.",
+            logger.warning("Batch fit from %d pairs rejected -- %s. Falling back to replay.",
                            len(y), why)
 
-        # Phát lại. observe() tự lọc nhịp và tự xử lý chỗ đứt quãng, nên không
-        # cần chuẩn bị gì thêm — chỉ cần bảo đảm bắt đầu từ trạng thái sạch.
+        # Replay. observe() filters the interval itself and handles gaps itself, so
+        # nothing more needs preparing -- only making sure we start from a clean state.
         self._prev = None
         used = sum(1 for row in rows if self.observe(row))
-        logger.info("Phát lại %d/%d mẫu lịch sử · %s", used, len(rows), self.describe())
+        logger.info("Replayed %d/%d history samples · %s", used, len(rows), self.describe())
         return self.ready
 
     def observe(self, row: Row) -> bool:
-        """Nạp một mẫu 60 giây. Trả True nếu đã dùng nó để cập nhật tham số.
+        """Feed in one 60-second sample. Returns True if it was used to update the
+        parameters.
 
-        TỰ LẤY THƯA: mẫu vào mỗi phút nhưng chỉ mỗi bước 5 phút mới sinh ra một
-        lần cập nhật. Cùng đúng quy tắc với ``_design`` — hai đường phải khớp
-        nhau, nếu không thì khớp mẻ và khớp trực tuyến sẽ ước lượng hai mô hình
-        khác nhau trên cùng một dữ liệu.
+        IT DECIMATES ITSELF: samples arrive every minute but only every 5-minute step
+        produces an update. Exactly the same rule as ``_design`` -- the two paths have
+        to match, otherwise the batch fit and the online fit would estimate two
+        different models from the same data.
         """
         prev = self._prev
         if prev is None:
@@ -309,16 +330,16 @@ class ThermalModel:
 
         dt = row.ts - prev.ts
         if dt < DT_MIN_SEC:
-            return False                    # chưa đủ một bước — GIỮ NGUYÊN prev
+            return False                    # not a full step yet -- KEEP prev as it is
         if dt > DT_MAX_SEC or prev.t_out is None:
-            self._prev = row                # đứt quãng: bắt đầu lại từ mẫu này
+            self._prev = row                # a gap: restart from this sample
             return False
         self._prev = row
 
         phi = np.array([prev.t_in - T_REF, prev.t_out - T_REF, prev.cooling_demand, 1.0])
         y = row.t_in - T_REF
 
-        # RLS có hệ số quên.
+        # RLS with a forgetting factor.
         p_phi = self._p @ phi
         denom = self._forget + float(phi @ p_phi)
         gain = p_phi / denom
@@ -327,7 +348,7 @@ class ThermalModel:
         self._n += 1
         return True
 
-    # -- dự báo ----------------------------------------------------------------
+    # -- prediction ------------------------------------------------------------
 
     def predict(
         self,
@@ -339,15 +360,17 @@ class ThermalModel:
         t_out_at: Callable[[float], float | None] | None = None,
         now_ts: float = 0.0,
     ) -> float | None:
-        """Nhiệt độ trong nhà sau ``minutes`` phút.
+        """The indoor temperature ``minutes`` minutes from now.
 
-        VÒNG KÍN, không phải vòng hở: mỗi bước tính lại ``u`` từ nhiệt độ vừa dự
-        báo. Giữ ``u`` cố định sẽ cho ra "phòng lạnh mãi không dừng", vì trong
-        thực tế nhu cầu tự teo đi khi phòng tiến về nhiệt độ đặt.
+        CLOSED LOOP, not open loop: each step recomputes ``u`` from the temperature it
+        has just predicted. Holding ``u`` fixed would produce "the room cools forever",
+        because in reality the demand shrinks by itself as the room approaches the
+        setpoint.
 
-        ``t_out_at`` là chỗ DỰ BÁO THỜI TIẾT cắm vào (phần B). Không có nó thì
-        giữ nguyên nhiệt độ ngoài trời hiện tại — đúng cho 15 phút, sai dần cho
-        những khoảng dài hơn, và đó chính là lý do phần B đáng làm.
+        ``t_out_at`` is where THE WEATHER FORECAST plugs in (part B). Without it, the
+        current outdoor temperature is held constant -- correct for 15 minutes,
+        increasingly wrong for longer horizons, and that is precisely why part B is
+        worth doing.
         """
         if not self.ready:
             return None
