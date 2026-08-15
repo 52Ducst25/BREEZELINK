@@ -69,7 +69,7 @@ lv_obj_t *gInSkel, *gOutSkel;   // che chỗ con số khi CHƯA có số đo
 lv_obj_t *gAcMode, *gAcSet, *gAcBadge, *gAcBadgeLbl, *gAcAge;
 
 // --- DIEU KHIEN --------------------------------------------------------------
-lv_obj_t *gSetBig, *gModeBtn[4], *gSendBtn, *gAutoBtn, *gLimitLbl;
+lv_obj_t *gSetBig, *gModeBtn[4], *gSendBtn, *gAutoBtn;
 lv_obj_t *gMinusBtn, *gPlusBtn;     // giữ lại để khoá được khi đang TỰ ĐỘNG
 lv_obj_t *gFanVal, *gFanBtn;        // hàng "QUẠT" ở đáy màn
 int   gPendSet  = 26;               // thay đổi được GOM LẠI, chỉ gửi khi bấm GUI
@@ -526,18 +526,17 @@ void refreshControl() {
   // khỏi máy chủ" — và nghĩa đó luôn dùng được. Đừng khoá một nút chỉ vì MỘT
   // trong hai việc nó làm đang bị chặn.
 
-  // Dòng dưới ô nhiệt độ nói trước là bấm vào sẽ không bắn được mã, để người
-  // dùng biết trước chứ không phải bấm rồi mới thấy thông báo lỗi.
+  // KHÔNG CÒN DÒNG CHÚ THÍCH DƯỚI Ô NHIỆT ĐỘ. Ô đó nay chỉ chở con số, căn giữa,
+  // ở mọi chế độ — xem buildControl().
   //
-  // THỨ TỰ ƯU TIÊN CÓ NGHĨA: "chưa học mã" đứng TRÊN "đang tự động". Cả hai đều
-  // làm nút mờ, nhưng chỉ một trong hai gỡ được bằng nút ngay bên dưới — bảo
-  // người ta bấm THỦ CÔNG trong khi bo chưa có mã nào là chỉ đường vào ngõ cụt.
-  bool anyCode = false;
-  for (uint8_t i = 0; i < 4; i++) anyCode = anyCode || gModeOk[i];
-  if (!anyCode)                 setText(gLimitLbl, "CHƯA HỌC MÃ — VÀO APP ĐỂ HỌC");
-  else if (locked)              setText(gLimitLbl, "TỰ ĐỘNG — BẤM THỦ CÔNG ĐỂ CHỈNH");
-  else if (!gModeOk[gPendMode]) setText(gLimitLbl, "CHẾ ĐỘ NÀY CHƯA HỌC MÃ");
-  else                          setText(gLimitLbl, "");
+  // BA CÂU NÓ TỪNG NÓI VẪN CÒN ĐƯỜNG ĐẾN NGƯỜI DÙNG, nên đây không phải là bỏ
+  // rơi thông tin:
+  //   "CHƯA HỌC MÃ"        -> bấm THỦ CÔNG, runPanelCommand() trả về toast
+  //                           "CHƯA HỌC MÃ — vào app để học". Nút THỦ CÔNG cố ý
+  //                           KHÔNG bao giờ bị làm mờ, nên đường này luôn mở.
+  //   "CHẾ ĐỘ NÀY CHƯA HỌC MÃ" -> đúng nút chế độ đó bị mờ, và cùng toast trên.
+  //   "ĐANG TỰ ĐỘNG"       -> nút TỰ ĐỘNG đang sáng, còn ± và 4 nút chế độ đều
+  //                           mờ. Trạng thái đọc được bằng mắt, không cần chữ.
 }
 
 /// Đặt hàng lệnh THỦ CÔNG với (chế độ, nhiệt độ) đang chờ.
@@ -709,13 +708,22 @@ void buildControl() {
   gMinusBtn = buttonImg(p, 8, 2, 68, 68, &img_minus);
   lv_obj_add_event_cb(gMinusBtn, onAdjust, LV_EVENT_CLICKED, (void *)(intptr_t)-1);
 
+  // Ô NÀY CHỈ CHỞ ĐÚNG MỘT THỨ: con số nhiệt độ, đặt giữa ô, ở MỌI chế độ.
+  //
+  // Trước đây nó còn mang thêm `gLimitLbl` — một dòng 12px ở y=52 nói "TỰ ĐỘNG —
+  // BẤM THỦ CÔNG ĐỂ CHỈNH" / "CHƯA HỌC MÃ...". Chính dòng đó ép con số phải nằm
+  // ở y=6 để chừa chỗ, tức là LỆCH LÊN trong một ô cao 68px, và ở chế độ thủ
+  // công (khi dòng chú thích rỗng) thì ô trông như bị hụt đáy.
+  //
+  // CĂN GIỮA BẰNG lv_obj_center() CHỨ KHÔNG TÍNH TAY MỘT SỐ y. Chiều cao dòng
+  // của một font LVGL không bằng cỡ danh nghĩa của nó (aircon_num_40 có phần
+  // nhô trên/dưới riêng), nên mọi con số y tự tính đều là phỏng đoán và sẽ lệch
+  // lại ngay lần đổi font kế tiếp. Để LVGL tự đo là đúng một lần và đúng mãi.
   lv_obj_t *box = card(p, 84, 2, 152, 68);
-  gSetBig = label(box, 0, 6, "26", fontHero(), accent());
+  gSetBig = label(box, 0, 0, "26", fontHero(), accent());
   lv_obj_set_width(gSetBig, 152);
   lv_obj_set_style_text_align(gSetBig, LV_TEXT_ALIGN_CENTER, 0);
-  gLimitLbl = label(box, 0, 52, "GIỚI HẠN 16 - 30", fontTiny(), textMuted());
-  lv_obj_set_width(gLimitLbl, 152);
-  lv_obj_set_style_text_align(gLimitLbl, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_center(gSetBig);
 
   gPlusBtn = buttonImg(p, 244, 2, 68, 68, &img_plus);
   lv_obj_add_event_cb(gPlusBtn, onAdjust, LV_EVENT_CLICKED, (void *)(intptr_t)1);
